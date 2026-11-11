@@ -38,7 +38,7 @@ export function planSpawn(
 }
 
 /** Executa um CLI até terminar. Não rejeita por código de saída != 0. */
-export function runCli(executable: string, args: string[], timeoutMs = 10_000): Promise<CliResult> {
+export function runCli(executable: string, args: string[], timeoutMs = 20_000): Promise<CliResult> {
   const plan = planSpawn(executable, args)
   return new Promise((resolve, reject) => {
     execFile(

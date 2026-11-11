@@ -19,15 +19,33 @@ export interface AgentInfo {
   role: string
   cli: CliId
   state: AgentState
+  /** true enquanto o backend consulta versão/login do CLI. */
+  checking: boolean
   cliVersion: string | null
   auth: AuthState
   message: string
   checkedAt: string | null
 }
 
+/** Pasta que o usuário autorizou os agentes a usar. */
+export interface ProjectInfo {
+  id: number
+  name: string
+  path: string
+}
+
+export interface Workspace {
+  projects: ProjectInfo[]
+  /** Projeto onde as próximas sessões de terminal serão abertas. */
+  activeProjectId: number | null
+}
+
 export type ServerMessage =
-  | { type: 'snapshot'; agents: AgentInfo[] }
+  | { type: 'snapshot'; agents: AgentInfo[]; workspace: Workspace }
   | { type: 'agent'; agent: AgentInfo }
+  | { type: 'workspace'; workspace: Workspace }
+  /** Erro de uma ação pedida por este cliente (ex.: pasta inválida). */
+  | { type: 'notice'; message: string }
   /** Resposta a term-open: `replay` é a saída acumulada da sessão até agora. */
   | { type: 'term-ready'; agentId: string; replay: string }
   | { type: 'term-data'; agentId: string; data: string }
@@ -41,3 +59,6 @@ export type ClientMessage =
   | { type: 'term-input'; agentId: string; data: string }
   | { type: 'term-resize'; agentId: string; cols: number; rows: number }
   | { type: 'term-close'; agentId: string }
+  | { type: 'project-add'; path: string }
+  | { type: 'project-select'; projectId: number }
+  | { type: 'project-remove'; projectId: number }

@@ -2,11 +2,13 @@ import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { AgentInfo, ClientMessage, ServerMessage } from '../../shared/protocol.ts'
 import type { AgentRegistry } from './agents/registry.ts'
+import type { ProjectStore } from './projects/store.ts'
 import type { TerminalManager } from './terminal/manager.ts'
 
 export interface AppServerOptions {
   registry: AgentRegistry
   terminals: TerminalManager
+  projects: ProjectStore
   allowedOrigins: string[]
 }
 
@@ -19,6 +21,7 @@ function hasLocalHost(req: IncomingMessage): boolean {
 }
 
 const isSize = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 2 && (n as number) <= 500
+const isId = (n: unknown): n is number => Number.isInteger(n) && (n as number) > 0
 
 /** Valida o formato de tudo que chega do navegador antes de usar. */
 export function parseClientMessage(raw: string): ClientMessage | null {
@@ -31,25 +34,35 @@ export function parseClientMessage(raw: string): ClientMessage | null {
   if (typeof data !== 'object' || data === null) return null
   const msg = data as Record<string, unknown>
   const { agentId } = msg
-  if (typeof agentId !== 'string') return null
 
   switch (msg.type) {
     case 'check-cli':
     case 'term-close':
-      return { type: msg.type, agentId }
+      return typeof agentId === 'string' ? { type: msg.type, agentId } : null
     case 'term-open':
     case 'term-resize':
-      return isSize(msg.cols) && isSize(msg.rows)
+      return typeof agentId === 'string' && isSize(msg.cols) && isSize(msg.rows)
         ? { type: msg.type, agentId, cols: msg.cols, rows: msg.rows }
         : null
     case 'term-input':
-      return typeof msg.data === 'string' ? { type: 'term-input', agentId, data: msg.data } : null
+      return typeof agentId === 'string' && typeof msg.data === 'string'
+        ? { type: 'term-input', agentId, data: msg.data }
+        : null
+    case 'project-add':
+      return typeof msg.path === 'string' && msg.path.length <= 1024
+        ? { type: 'project-add', path: msg.path }
+        : null
+    case 'project-select':
+    case 'project-remove':
+      return isId(msg.projectId) ? { type: msg.type, projectId: msg.projectId } : null
     default:
       return null
   }
 }
 
-export function createAppServer({ registry, terminals, allowedOrigins }: AppServerOptions): Server {
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+export function createAppServer({ registry, terminals, projects, allowedOrigins }: AppServerOptions): Server {
   const server = createServer((req, res) => {
     const origin = req.headers.origin
     if (!hasLocalHost(req) || (origin && !allowedOrigins.includes(origin))) {
@@ -63,12 +76,12 @@ export function createAppServer({ registry, terminals, allowedOrigins }: AppServ
     res.writeHead(404).end()
   })
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
-  const send = (socket: WebSocket, message: ServerMessage) => socket.send(JSON.stringify(message))
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
+  const send = (socket: WebSocket, message: ServerMessage) => {
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
+  }
   const broadcast = (message: ServerMessage) => {
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) send(client, message)
-    }
+    for (const client of wss.clients) send(client, message)
   }
 
   // Sites externos conseguem abrir WebSocket para localhost; por isso a origem
@@ -84,35 +97,52 @@ export function createAppServer({ registry, terminals, allowedOrigins }: AppServ
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws))
   })
 
+  /** Ações de projeto: aplica, avisa todos; se falhar, avisa só quem pediu. */
+  const changeWorkspace = (socket: WebSocket, action: () => void) => {
+    try {
+      action()
+      broadcast({ type: 'workspace', workspace: projects.workspace() })
+    } catch (error) {
+      send(socket, { type: 'notice', message: errorText(error) })
+    }
+  }
+
   const handle = (socket: WebSocket, message: ClientMessage) => {
-    const { agentId } = message
     switch (message.type) {
       case 'check-cli':
-        void registry.check(agentId)
+        void registry.check(message.agentId)
         break
       case 'term-open':
         try {
-          const replay = terminals.open(agentId, message.cols, message.rows)
-          send(socket, { type: 'term-ready', agentId, replay })
+          const replay = terminals.open(message.agentId, message.cols, message.rows)
+          send(socket, { type: 'term-ready', agentId: message.agentId, replay })
         } catch (error) {
-          const text = error instanceof Error ? error.message : String(error)
-          send(socket, { type: 'term-error', agentId, message: text })
+          send(socket, { type: 'term-error', agentId: message.agentId, message: errorText(error) })
         }
         break
       case 'term-input':
-        terminals.write(agentId, message.data)
+        terminals.write(message.agentId, message.data)
         break
       case 'term-resize':
-        terminals.resize(agentId, message.cols, message.rows)
+        terminals.resize(message.agentId, message.cols, message.rows)
         break
       case 'term-close':
-        terminals.close(agentId)
+        terminals.close(message.agentId)
+        break
+      case 'project-add':
+        changeWorkspace(socket, () => projects.add(message.path))
+        break
+      case 'project-select':
+        changeWorkspace(socket, () => projects.select(message.projectId))
+        break
+      case 'project-remove':
+        changeWorkspace(socket, () => projects.remove(message.projectId))
         break
     }
   }
 
   wss.on('connection', (socket: WebSocket) => {
-    send(socket, { type: 'snapshot', agents: registry.list() })
+    send(socket, { type: 'snapshot', agents: registry.list(), workspace: projects.workspace() })
     socket.on('message', (raw) => {
       const message = parseClientMessage(raw.toString())
       if (message) handle(socket, message)

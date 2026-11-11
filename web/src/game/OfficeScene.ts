@@ -24,11 +24,6 @@ export class OfficeScene extends Phaser.Scene {
       this.bridge.off('selected', this.syncSelection, this)
     })
 
-    // Clique no vazio desfaz a seleção.
-    this.input.on('pointerdown', (_pointer: Phaser.Input.Pointer, over: unknown[]) => {
-      if (over.length === 0) this.bridge.emit('select', null)
-    })
-
     this.syncAgents(this.bridge.agents)
   }
 

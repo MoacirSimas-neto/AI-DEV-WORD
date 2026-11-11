@@ -19,34 +19,39 @@ const AUTH_LABEL: Record<AuthState, string> = {
 interface Props {
   agent: AgentInfo
   online: boolean
+  hasProject: boolean
   send: Send
   subscribe: Subscribe
   onClose: () => void
 }
 
 /** Janela individual do agente: quem ele é, em que estado está e o seu terminal. */
-export function AgentWindow({ agent, online, send, subscribe, onClose }: Props) {
+export function AgentWindow({ agent, online, hasProject, send, subscribe, onClose }: Props) {
   const sessionActive = agent.state === 'working' || agent.state === 'waiting'
+  const cliReady = agent.state === 'idle'
 
   return (
     <aside className="window">
       <header className="window-head">
         <h2>{agent.name}</h2>
-        <span className={`badge badge-${agent.state}`}>{STATE_LABEL[agent.state]}</span>
+        <span className={`badge badge-${agent.checking ? 'checking' : agent.state}`}>
+          {agent.checking ? 'Verificando…' : STATE_LABEL[agent.state]}
+        </span>
         <button type="button" className="window-close" aria-label="Fechar janela" onClick={onClose}>
           ×
         </button>
       </header>
 
       <p className="window-meta">
-        {agent.role} · <code>{agent.cliVersion ?? agent.cli}</code> · {AUTH_LABEL[agent.auth]}
+        {agent.role} · <code>{agent.cliVersion ? `${agent.cli} ${agent.cliVersion.replace(/^\D*/, '')}` : agent.cli}</code>{' '}
+        · {AUTH_LABEL[agent.auth]}
       </p>
 
       <div className="window-status">
-        <p>{agent.message}</p>
+        <p>{cliReady && !hasProject ? 'Escolha um projeto acima para iniciar a sessão.' : agent.message}</p>
         <button
           type="button"
-          disabled={sessionActive || !online}
+          disabled={sessionActive || agent.checking || !online}
           onClick={() => send({ type: 'check-cli', agentId: agent.id })}
         >
           Verificar CLI
@@ -58,7 +63,7 @@ export function AgentWindow({ agent, online, send, subscribe, onClose }: Props) 
         agentId={agent.id}
         cliName={agent.cli}
         sessionActive={sessionActive}
-        canStart={online && agent.state === 'idle'}
+        canStart={online && cliReady && hasProject}
         online={online}
         send={send}
         subscribe={subscribe}

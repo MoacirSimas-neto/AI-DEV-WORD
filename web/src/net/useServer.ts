@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AgentInfo, ClientMessage, ServerMessage } from '../../../shared/protocol.ts'
+import type { AgentInfo, ClientMessage, ServerMessage, Workspace } from '../../../shared/protocol.ts'
 
 export type ConnectionStatus = 'connecting' | 'online' | 'offline'
 export type Send = (message: ClientMessage) => void
@@ -7,15 +7,17 @@ export type MessageListener = (message: ServerMessage) => void
 export type Subscribe = (listener: MessageListener) => () => void
 
 const RETRY_MS = 2000
+const EMPTY_WORKSPACE: Workspace = { projects: [], activeProjectId: null }
 
 /**
- * Mantém o WebSocket com o backend (reconecta sozinho) e o estado dos agentes.
+ * Mantém o WebSocket com o backend (reconecta sozinho) e espelha o estado dele.
  * `subscribe` entrega as mensagens cruas: o terminal usa isso para receber a
  * saída sem passar pelo estado do React (seria lento re-renderizar a cada byte).
  */
 export function useServer() {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [agents, setAgents] = useState<AgentInfo[]>([])
+  const [workspace, setWorkspace] = useState<Workspace>(EMPTY_WORKSPACE)
   const socketRef = useRef<WebSocket | null>(null)
   const listeners = useRef(new Set<MessageListener>())
 
@@ -31,8 +33,11 @@ export function useServer() {
         const message = JSON.parse(String(event.data)) as ServerMessage
         if (message.type === 'snapshot') {
           setAgents(message.agents)
+          setWorkspace(message.workspace)
         } else if (message.type === 'agent') {
           setAgents((prev) => prev.map((a) => (a.id === message.agent.id ? message.agent : a)))
+        } else if (message.type === 'workspace') {
+          setWorkspace(message.workspace)
         }
         for (const listener of listeners.current) listener(message)
       }
@@ -61,5 +66,5 @@ export function useServer() {
     return () => listeners.current.delete(listener)
   }, [])
 
-  return { status, agents, send, subscribe }
+  return { status, agents, workspace, send, subscribe }
 }

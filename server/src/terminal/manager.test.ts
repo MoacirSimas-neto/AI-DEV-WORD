@@ -35,15 +35,17 @@ async function setup() {
   await registry.check('dev')
   const pty = new FakePty()
   let spawned = 0
+  let cwd: string | null = '/projetos/demo'
   const terminals = new TerminalManager(
     registry,
     () => {
       spawned++
       return pty
     },
+    () => cwd,
     { quietMs: 20, echoMs: 0 },
   )
-  return { registry, terminals, pty, spawnCount: () => spawned }
+  return { registry, terminals, pty, spawnCount: () => spawned, setCwd: (value: string | null) => (cwd = value) }
 }
 
 test('saída do processo deixa o agente working e o silêncio o deixa waiting', async () => {
@@ -90,6 +92,30 @@ test('entrada vai para o processo e o encerramento devolve o agente a idle', asy
 test('não abre terminal para agente sem CLI', async () => {
   const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: false, version: null, auth: 'unknown' }))
   await registry.check('dev')
-  const terminals = new TerminalManager(registry, () => new FakePty())
+  const terminals = new TerminalManager(registry, () => new FakePty(), () => '/projetos/demo')
   assert.throws(() => terminals.open('dev', 80, 24), /não está disponível/)
+})
+
+test('não abre terminal sem um projeto ativo', async () => {
+  const { terminals, setCwd, spawnCount } = await setup()
+  setCwd(null)
+  assert.throws(() => terminals.open('dev', 80, 24), /Escolha um projeto/)
+  assert.equal(spawnCount(), 0)
+})
+
+test('o processo nasce na pasta do projeto ativo', async () => {
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: 'v1', auth: 'ok' }))
+  await registry.check('qa')
+  const calls: string[] = []
+  const terminals = new TerminalManager(
+    registry,
+    (cli, cwd) => {
+      calls.push(`${cli} em ${cwd}`)
+      return new FakePty()
+    },
+    () => '/projetos/loja',
+  )
+  terminals.open('qa', 80, 24)
+  assert.deepEqual(calls, ['gemini em /projetos/loja'])
+  assert.match(registry.get('qa')!.message, /\/projetos\/loja/)
 })

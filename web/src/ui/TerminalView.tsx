@@ -83,8 +83,8 @@ export function TerminalView({ agentId, cliName, sessionActive, canStart, online
   })
 
   return (
-    <section className="terminal">
-      <div className="terminal-bar">
+    <section className="term-panel">
+      <div className="term-bar">
         <span>Terminal · {cliName}</span>
         {sessionActive ? (
           <button type="button" onClick={() => send({ type: 'term-close', agentId })}>
@@ -96,7 +96,7 @@ export function TerminalView({ agentId, cliName, sessionActive, canStart, online
           </button>
         )}
       </div>
-      <div ref={host} className="terminal-host" />
+      <div ref={host} className="term-host" />
     </section>
   )
 }

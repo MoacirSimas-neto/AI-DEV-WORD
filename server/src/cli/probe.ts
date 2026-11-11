@@ -27,8 +27,19 @@ export function findCli(cli: CliId): string | null {
   return resolveCommand(CATALOG[cli].command)
 }
 
-/** Consulta o CLI real instalado: existe? qual versão? está logado? */
-export const probeCli: CliProbe = async (cli) => {
+const inFlight = new Map<CliId, Promise<ProbeResult>>()
+
+/** Vários agentes usam o mesmo CLI: consultas simultâneas compartilham uma execução. */
+export const probeCli: CliProbe = (cli) => {
+  let pending = inFlight.get(cli)
+  if (!pending) {
+    pending = runProbe(cli).finally(() => inFlight.delete(cli))
+    inFlight.set(cli, pending)
+  }
+  return pending
+}
+
+async function runProbe(cli: CliId): Promise<ProbeResult> {
   const spec = CATALOG[cli]
   const executable = findCli(cli)
   if (!executable) return { found: false, version: null, auth: 'unknown' }

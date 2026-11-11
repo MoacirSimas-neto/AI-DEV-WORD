@@ -74,6 +74,7 @@ code {
   color: var(--ok);
 }
 .status-connecting,
+.badge-checking,
 .badge-waiting,
 .badge-working {
   color: var(--warn);
@@ -158,6 +159,11 @@ code {
   font-size: 13px;
 }
 
+.window-status p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .window-status {
   display: flex;
   align-items: center;
@@ -169,13 +175,13 @@ code {
   font-size: 13px;
 }
 
-.terminal {
+.term-panel {
   border: 2px solid var(--border);
   border-radius: 4px;
   background: #1f1924;
 }
 
-.terminal-bar {
+.term-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -185,8 +191,8 @@ code {
   font-size: 13px;
 }
 
-.terminal-host {
-  height: 440px;
+.term-host {
+  height: clamp(280px, calc(100vh - 360px), 620px);
   padding: 6px;
 }
 
@@ -210,4 +216,65 @@ button:hover:not(:disabled) {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.projects {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.projects-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.projects label {
+  color: var(--accent);
+}
+
+.projects-empty {
+  color: var(--muted);
+}
+
+.projects-add {
+  display: flex;
+  flex: 1 1 320px;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.projects select,
+.projects input {
+  min-width: 0;
+  padding: 4px 8px;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  background: #1f1924;
+  color: var(--text);
+  font: inherit;
+}
+
+.projects select {
+  max-width: 340px;
+}
+
+.projects input {
+  flex: 1;
+}
+
+.projects select:focus-visible,
+.projects input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.projects-error {
+  margin-top: 6px;
+  color: var(--bad);
 }

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { PhaserGame } from './game/PhaserGame.tsx'
 import { type ConnectionStatus, useServer } from './net/useServer.ts'
 import { AgentWindow } from './ui/AgentWindow.tsx'
+import { ProjectBar } from './ui/ProjectBar.tsx'
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
   connecting: 'Conectando…',
@@ -10,9 +11,10 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
 }
 
 function App() {
-  const { status, agents, send, subscribe } = useServer()
+  const { status, agents, workspace, send, subscribe } = useServer()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = agents.find((a) => a.id === selectedId) ?? null
+  const online = status === 'online'
 
   return (
     <div className="app">
@@ -27,6 +29,8 @@ function App() {
         </p>
       )}
 
+      <ProjectBar workspace={workspace} online={online} send={send} subscribe={subscribe} />
+
       <main className={selected ? 'stage stage-split' : 'stage'}>
         <div>
           <PhaserGame agents={agents} selectedId={selectedId} onSelect={setSelectedId} />
@@ -35,7 +39,8 @@ function App() {
         {selected && (
           <AgentWindow
             agent={selected}
-            online={status === 'online'}
+            online={online}
+            hasProject={workspace.activeProjectId !== null}
             send={send}
             subscribe={subscribe}
             onClose={() => setSelectedId(null)}

@@ -11,7 +11,7 @@ export interface PtyLike {
   kill(): void
 }
 
-export type PtySpawner = (cli: CliId, cols: number, rows: number) => PtyLike
+export type PtySpawner = (cli: CliId, cwd: string, cols: number, rows: number) => PtyLike
 
 export interface TerminalOptions {
   /** Sem saída por este tempo, o agente passa de 'working' para 'waiting'. */
@@ -22,6 +22,7 @@ export interface TerminalOptions {
 
 interface Session {
   pty: PtyLike
+  cwd: string
   buffer: string
   lastInput: number
   quietTimer?: NodeJS.Timeout
@@ -38,13 +39,20 @@ export class TerminalManager extends EventEmitter {
   private readonly sessions = new Map<string, Session>()
   private readonly registry: AgentRegistry
   private readonly spawn: PtySpawner
+  private readonly activeProjectPath: () => string | null
   private readonly quietMs: number
   private readonly echoMs: number
 
-  constructor(registry: AgentRegistry, spawn: PtySpawner, options: TerminalOptions = {}) {
+  constructor(
+    registry: AgentRegistry,
+    spawn: PtySpawner,
+    activeProjectPath: () => string | null,
+    options: TerminalOptions = {},
+  ) {
     super()
     this.registry = registry
     this.spawn = spawn
+    this.activeProjectPath = activeProjectPath
     this.quietMs = options.quietMs ?? 1500
     this.echoMs = options.echoMs ?? 400
   }
@@ -60,10 +68,13 @@ export class TerminalManager extends EventEmitter {
     const agent = this.registry.get(agentId)
     if (!agent) throw new Error('Agente desconhecido.')
     if (agent.state === 'offline') throw new Error(`CLI "${agent.cli}" não está disponível.`)
+    // O CLI só nasce dentro de uma pasta que o usuário autorizou.
+    const cwd = this.activeProjectPath()
+    if (!cwd) throw new Error('Escolha um projeto antes de iniciar a sessão.')
 
-    const session: Session = { pty: this.spawn(agent.cli, cols, rows), buffer: '', lastInput: 0 }
+    const session: Session = { pty: this.spawn(agent.cli, cwd, cols, rows), cwd, buffer: '', lastInput: 0 }
     this.sessions.set(agentId, session)
-    this.registry.setRuntimeState(agentId, 'waiting', 'Sessão aberta no terminal.')
+    this.registry.setRuntimeState(agentId, 'waiting', `Sessão aberta em ${cwd}`)
 
     session.pty.onData((data) => {
       session.buffer = (session.buffer + data).slice(-MAX_BUFFER)
@@ -95,14 +106,14 @@ export class TerminalManager extends EventEmitter {
   }
 
   closeAll() {
-    for (const session of this.sessions.values()) session.pty.kill()
+    for (const session of [...this.sessions.values()]) session.pty.kill()
   }
 
   private markWorking(agentId: string, session: Session) {
-    this.registry.setRuntimeState(agentId, 'working', 'Processo ativo no terminal.')
+    this.registry.setRuntimeState(agentId, 'working', `Trabalhando em ${session.cwd}`)
     clearTimeout(session.quietTimer)
     session.quietTimer = setTimeout(() => {
-      this.registry.setRuntimeState(agentId, 'waiting', 'Terminal aguardando você.')
+      this.registry.setRuntimeState(agentId, 'waiting', `Aguardando você em ${session.cwd}`)
     }, this.quietMs)
   }
 }

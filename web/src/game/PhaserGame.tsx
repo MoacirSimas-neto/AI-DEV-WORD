@@ -9,7 +9,7 @@ interface Props {
   agents: AgentInfo[]
   selectedId: string | null
   /** Precisa ser estável (ex.: um setState), pois recria o jogo se mudar. */
-  onSelect: (id: string | null) => void
+  onSelect: (id: string) => void
 }
 
 /** Monta o jogo Phaser uma vez e repassa as props para a cena pela WorldBridge. */

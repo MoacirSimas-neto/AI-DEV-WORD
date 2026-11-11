@@ -6,6 +6,6 @@ export const HOST = '127.0.0.1'
 export const PORT = Number(process.env.AIDW_PORT ?? 4517)
 export const ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
 
-// Pasta onde os CLIs são iniciados. Provisório: a etapa de projetos troca isto
-// por uma lista de diretórios autorizados pelo usuário.
-export const WORKDIR = process.env.AIDW_WORKDIR ?? path.join(homedir(), 'ai-dev-world-workspace')
+// Dados do app (lista de projetos). Fica fora do repositório e não contém credenciais.
+export const DATA_DIR = process.env.AIDW_DATA_DIR ?? path.join(homedir(), '.ai-dev-world')
+export const DATABASE_FILE = path.join(DATA_DIR, 'data.sqlite')
