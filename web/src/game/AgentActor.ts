@@ -9,10 +9,22 @@ const BUBBLE_TEXT: Record<AgentState, string> = {
   idle: '',
   waiting: '?',
   working: '...',
+  planning: '💡',
+  approval: '✋',
+  reviewing: '🔍',
+  done: '✔',
   offline: 'zzz',
   error: '!',
 }
-const LED_COLOR: Partial<Record<AgentState, number>> = { waiting: 0xf0bd5e, working: 0x7fe08a }
+const LED_COLOR: Partial<Record<AgentState, number>> = {
+  waiting: 0xf0bd5e,
+  working: 0x7fe08a,
+  planning: 0x6fb4d8,
+  approval: 0xf0bd5e,
+  reviewing: 0x6fb4d8,
+  done: 0x5fae6e,
+  error: 0xd8644f,
+}
 const LED_OFF = 0x2a2e38
 
 /**
@@ -107,20 +119,22 @@ export class AgentActor {
 
     this.bubble.setText(BUBBLE_TEXT[state]).setVisible(state !== 'idle')
     // Sentado, a plaquinha da mesa já diz quem é.
-    this.label.setVisible(state !== 'working' && state !== 'waiting')
+    this.label.setVisible(state === 'idle' || state === 'offline' || state === 'error')
     if (state === 'offline') this.sprite.setTint(0x8a8fa0)
     else this.sprite.clearTint()
     this.setLed(state)
 
     const { seat, rest } = this.station
-    if (state === 'working') {
+    if (state === 'working' || state === 'planning' || state === 'reviewing') {
       this.walkTo(seat.x, seat.y, () => this.startTyping())
-    } else if (state === 'waiting') {
+    } else if (state === 'waiting' || state === 'approval' || state === 'done') {
       this.walkTo(seat.x, seat.y)
     } else if (state === 'idle') {
       this.wanderSoon()
     } else if (state === 'offline') {
       this.walkTo(rest.x, rest.y)
+    } else if (state === 'error') {
+      this.walkTo(seat.x, seat.y)
     }
   }
 
@@ -140,7 +154,7 @@ export class AgentActor {
     const { led } = this.station
     this.ledTween?.stop()
     led.setAlpha(1).setFillStyle((state && LED_COLOR[state]) ?? LED_OFF)
-    if (state === 'working') {
+    if (state === 'working' || state === 'planning' || state === 'reviewing') {
       this.ledTween = this.scene.tweens.add({ targets: led, alpha: 0.25, duration: 320, yoyo: true, repeat: -1 })
     }
   }

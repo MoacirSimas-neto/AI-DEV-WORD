@@ -672,3 +672,254 @@ input:focus-visible {
 .git-result-bad {
   background: #f0c2b4;
 }
+
+/* ---------- gerenciador de tarefas e missões ---------- */
+
+.task-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--parchment-2);
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.task-form h3 {
+  font: 600 16px/1 var(--pixel);
+  margin: 0;
+}
+
+.task-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-form-row input {
+  flex: 1 1 180px;
+}
+
+.task-form textarea {
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  background: #fffaf0;
+  color: var(--ink);
+  font: 14px/1.4 var(--body);
+  resize: vertical;
+  box-shadow: 0 -2px 0 var(--ink), 0 2px 0 var(--ink), -2px 0 0 var(--ink), 2px 0 0 var(--ink);
+}
+
+.task-form-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.task-list {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0 4px 4px 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.task-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #fffaf0;
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.task-priority-high {
+  border-left: 4px solid var(--clay);
+}
+.task-priority-medium {
+  border-left: 4px solid var(--honey);
+}
+.task-priority-low {
+  border-left: 4px solid var(--moss);
+}
+
+.task-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-status-pill {
+  padding: 1px 6px;
+  font: 600 11px var(--mono);
+  text-transform: uppercase;
+}
+
+.status-todo { background: var(--parchment-2); color: var(--ink); }
+.status-doing { background: var(--honey); color: var(--ink); }
+.status-review { background: var(--sky); color: var(--ink); }
+.status-done { background: var(--moss); color: #fff; }
+
+.task-priority-tag {
+  margin-left: auto;
+  font: 11px var(--mono);
+  color: var(--ink-soft);
+}
+
+.task-desc {
+  font-size: 13px;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+}
+
+.task-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.task-assignee {
+  font: 12px var(--mono);
+  color: var(--ink-soft);
+}
+
+.task-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------- card de missão (modo equipe) ---------- */
+
+.mission-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #fff8e7;
+  border-left: 4px solid var(--honey-dark);
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.mission-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mission-head h3 {
+  font: 600 16px/1 var(--pixel);
+  margin: 0;
+}
+
+.mission-phase {
+  padding: 2px 8px;
+  font: 700 12px var(--mono);
+  background: var(--honey);
+  color: var(--ink);
+}
+
+.phase-awaiting_approval {
+  background: var(--clay);
+  color: #fff;
+}
+
+.mission-plan-text,
+.mission-live-output {
+  max-height: 180px;
+  margin: 4px 0;
+  padding: 8px;
+  overflow: auto;
+  background: var(--night);
+  color: var(--parchment);
+  font: 12px/1.4 var(--mono);
+  box-shadow: 0 0 0 2px var(--ink);
+  white-space: pre-wrap;
+}
+
+.mission-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.mission-step-desc {
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+/* ---------- histórico de atividades ---------- */
+
+.history-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.history-filter select {
+  font-size: 13px;
+}
+
+.history-filter span {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.history-list {
+  display: grid;
+  gap: 6px;
+  max-height: 420px;
+  margin: 0;
+  padding: 0 4px 4px 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 10px;
+  background: #fffaf0;
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.history-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-kind-badge {
+  padding: 1px 6px;
+  background: var(--parchment-2);
+  font: 700 11px var(--mono);
+  color: var(--ink);
+}
+
+.history-commit .history-kind-badge,
+.history-push .history-kind-badge {
+  background: #cfe3b8;
+}
+
+.history-error .history-kind-badge {
+  background: #f0c2b4;
+  color: #9c3524;
+}
+
+.history-time {
+  margin-left: auto;
+  font: 11px var(--mono);
+  color: var(--ink-soft);
+}
+
+.history-msg {
+  font-size: 13px;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

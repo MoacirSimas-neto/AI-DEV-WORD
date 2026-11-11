@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AgentInfo, ClientMessage, ServerMessage, Workspace } from '../../../shared/protocol.ts'
+import type {
+  ActivityEntry,
+  AgentInfo,
+  ClientMessage,
+  MissionInfo,
+  ServerMessage,
+  TaskInfo,
+  Workspace,
+} from '../../../shared/protocol.ts'
 
 export type ConnectionStatus = 'connecting' | 'online' | 'offline'
 export type Send = (message: ClientMessage) => void
@@ -18,6 +26,9 @@ export function useServer() {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [workspace, setWorkspace] = useState<Workspace>(EMPTY_WORKSPACE)
+  const [tasks, setTasks] = useState<TaskInfo[]>([])
+  const [missions, setMissions] = useState<MissionInfo[]>([])
+  const [history, setHistory] = useState<ActivityEntry[]>([])
   const socketRef = useRef<WebSocket | null>(null)
   const listeners = useRef(new Set<MessageListener>())
 
@@ -34,10 +45,19 @@ export function useServer() {
         if (message.type === 'snapshot') {
           setAgents(message.agents)
           setWorkspace(message.workspace)
+          setTasks(message.tasks)
+          setMissions(message.missions)
+          setHistory(message.history)
         } else if (message.type === 'agent') {
           setAgents((prev) => prev.map((a) => (a.id === message.agent.id ? message.agent : a)))
         } else if (message.type === 'workspace') {
           setWorkspace(message.workspace)
+        } else if (message.type === 'tasks') {
+          setTasks(message.tasks)
+        } else if (message.type === 'missions') {
+          setMissions(message.missions)
+        } else if (message.type === 'history') {
+          setHistory(message.entries)
         }
         for (const listener of listeners.current) listener(message)
       }
@@ -66,5 +86,5 @@ export function useServer() {
     return () => listeners.current.delete(listener)
   }, [])
 
-  return { status, agents, workspace, send, subscribe }
+  return { status, agents, workspace, tasks, missions, history, send, subscribe }
 }

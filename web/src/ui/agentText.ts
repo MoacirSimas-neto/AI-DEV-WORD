@@ -2,9 +2,13 @@ import type { AgentInfo, AgentState } from '../../../shared/protocol.ts'
 
 const STATE_LABEL: Record<AgentState, string> = {
   offline: 'Indisponível',
-  idle: 'Ocioso',
+  idle: 'Disponível',
   waiting: 'Aguardando você',
   working: 'Trabalhando',
+  planning: 'Planejando',
+  approval: 'Aguardando aprovação',
+  reviewing: 'Revisando',
+  done: 'Concluído',
   error: 'Erro',
 }
 

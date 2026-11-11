@@ -21,7 +21,8 @@ const SCHEMA = `
  * dentro do projeto ativo; nenhum outro caminho chega aos CLIs.
  */
 export class ProjectStore {
-  private readonly db: DatabaseSync
+  /** Conexão compartilhada com as tarefas e o histórico (mesmo arquivo). */
+  readonly db: DatabaseSync
 
   /** Use ':memory:' nos testes. */
   constructor(file: string) {
@@ -44,6 +45,10 @@ export class ProjectStore {
   active(): ProjectInfo | null {
     const { projects, activeProjectId } = this.workspace()
     return projects.find((p) => p.id === activeProjectId) ?? null
+  }
+
+  get(projectId: number): ProjectInfo | null {
+    return this.workspace().projects.find((p) => p.id === projectId) ?? null
   }
 
   /** Registra uma pasta existente e a torna o projeto ativo. */

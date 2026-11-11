@@ -7,13 +7,26 @@ interface Props {
   online: boolean
   /** Arquivos alterados no projeto ativo; null se ele não for um repositório Git. */
   changes: number | null
+  taskCount: number
   onOpenGit: () => void
+  onOpenTasks: () => void
+  onOpenHistory: () => void
   send: Send
   subscribe: Subscribe
 }
 
 /** Escolha da pasta em que os agentes trabalham. Só pastas listadas aqui chegam aos CLIs. */
-export function ProjectBar({ workspace, online, changes, onOpenGit, send, subscribe }: Props) {
+export function ProjectBar({
+  workspace,
+  online,
+  changes,
+  taskCount,
+  onOpenGit,
+  onOpenTasks,
+  onOpenHistory,
+  send,
+  subscribe,
+}: Props) {
   const { projects, activeProjectId } = workspace
   const active = projects.find((p) => p.id === activeProjectId)
   const [path, setPath] = useState('')
@@ -69,6 +82,12 @@ export function ProjectBar({ workspace, online, changes, onOpenGit, send, subscr
             </button>
             <button type="button" disabled={!active} onClick={onOpenGit}>
               {changes ? `Alterações (${changes})` : 'Alterações'}
+            </button>
+            <button type="button" disabled={!active} onClick={onOpenTasks}>
+              {taskCount ? `Tarefas (${taskCount})` : 'Tarefas'}
+            </button>
+            <button type="button" onClick={onOpenHistory}>
+              Histórico
             </button>
           </>
         )}

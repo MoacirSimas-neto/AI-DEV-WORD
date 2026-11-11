@@ -4,7 +4,9 @@ import { useGitStatus } from './net/useGitStatus.ts'
 import { type ConnectionStatus, useServer } from './net/useServer.ts'
 import { AgentWindow } from './ui/AgentWindow.tsx'
 import { GitPanel } from './ui/GitPanel.tsx'
+import { HistoryPanel } from './ui/HistoryPanel.tsx'
 import { ProjectBar } from './ui/ProjectBar.tsx'
+import { TaskPanel } from './ui/TaskPanel.tsx'
 import { TeamRoster } from './ui/TeamRoster.tsx'
 
 const STATUS: Record<ConnectionStatus, { label: string; tone: string }> = {
@@ -13,19 +15,23 @@ const STATUS: Record<ConnectionStatus, { label: string; tone: string }> = {
   offline: { label: 'Backend desconectado', tone: 'error' },
 }
 
-/** O que ocupa a coluna da direita: a janela de um agente, o painel Git, ou nada. */
-type Panel = { agentId: string } | 'git' | null
+/** O que ocupa a coluna da direita: a janela de um agente, o painel Git, Tarefas, Histórico ou nada. */
+type Panel = { agentId: string } | 'git' | 'tasks' | 'history' | null
 
 function App() {
-  const { status, agents, workspace, send, subscribe } = useServer()
+  const { status, agents, workspace, tasks, missions, history, send, subscribe } = useServer()
   const [panel, setPanel] = useState<Panel>(null)
   const online = status === 'online'
   const gitStatus = useGitStatus(send, subscribe, online, workspace.activeProjectId)
 
-  const selectedId = panel && panel !== 'git' ? panel.agentId : null
+  const selectedId = panel && typeof panel === 'object' ? panel.agentId : null
   const selected = agents.find((a) => a.id === selectedId) ?? null
   const selectAgent = useCallback((agentId: string) => setPanel({ agentId }), [])
   const close = () => setPanel(null)
+
+  const projectTasks = workspace.activeProjectId
+    ? tasks.filter((t) => t.projectId === workspace.activeProjectId)
+    : []
 
   return (
     <div className="app">
@@ -47,12 +53,15 @@ function App() {
         workspace={workspace}
         online={online}
         changes={gitStatus?.isRepo ? gitStatus.files.length : null}
+        taskCount={projectTasks.length}
         onOpenGit={() => setPanel('git')}
+        onOpenTasks={() => setPanel('tasks')}
+        onOpenHistory={() => setPanel('history')}
         send={send}
         subscribe={subscribe}
       />
 
-      <main className={selected || panel === 'git' ? 'stage stage-split' : 'stage'}>
+      <main className={selected || panel !== null ? 'stage stage-split' : 'stage'}>
         <div className="stage-world">
           <PhaserGame agents={agents} selectedId={selectedId} onSelect={selectAgent} />
           <TeamRoster agents={agents} selectedId={selectedId} onSelect={selectAgent} />
@@ -68,6 +77,19 @@ function App() {
           />
         )}
         {panel === 'git' && <GitPanel status={gitStatus} send={send} subscribe={subscribe} onClose={close} />}
+        {panel === 'tasks' && (
+          <TaskPanel
+            tasks={tasks}
+            missions={missions}
+            agents={agents}
+            activeProjectId={workspace.activeProjectId}
+            online={online}
+            send={send}
+            subscribe={subscribe}
+            onClose={close}
+          />
+        )}
+        {panel === 'history' && <HistoryPanel history={history} onClose={close} />}
       </main>
     </div>
   )

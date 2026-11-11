@@ -21,8 +21,8 @@ interface Props {
 
 /** Janela individual do agente: quem ele é, em que estado está e o seu terminal. */
 export function AgentWindow({ agent, online, hasProject, send, subscribe, onClose }: Props) {
-  const sessionActive = agent.state === 'working' || agent.state === 'waiting'
-  const cliReady = agent.state === 'idle'
+  const sessionActive = agent.session
+  const cliReady = agent.state !== 'offline'
   const state = stateOf(agent)
   const version = agent.cliVersion?.replace(/^\D*/, '')
 

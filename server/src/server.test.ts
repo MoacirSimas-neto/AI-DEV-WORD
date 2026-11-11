@@ -10,15 +10,33 @@ import { WebSocket } from 'ws'
 import type { ClientMessage, ServerMessage } from '../../shared/protocol.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { GitService } from './git/service.ts'
+import { HistoryStore } from './history/store.ts'
 import { ProjectStore } from './projects/store.ts'
 import { createAppServer, parseClientMessage } from './server.ts'
+import { TaskStore } from './tasks/store.ts'
+import { TeamRunner } from './team/runner.ts'
 import { TerminalManager } from './terminal/manager.ts'
 
 const ORIGIN = 'http://localhost:5173'
 const projectDir = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-srv-')))
 
 const projects = new ProjectStore(':memory:')
+const history = new HistoryStore(projects.db)
+const tasks = new TaskStore(projects.db, history)
 const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: 'fake 1.0', auth: 'ok' }))
+const git = new GitService()
+const team = new TeamRunner({
+  tasks,
+  history,
+  projects,
+  registry,
+  git,
+  launch: () => ({
+    done: Promise.resolve({ code: 0, stdout: 'ok', stderr: '', timedOut: false }),
+    kill: () => {},
+  }),
+})
+
 // "Processo" falso que responde com eco, para testar o caminho do terminal.
 const terminals = new TerminalManager(
   registry,
@@ -34,7 +52,16 @@ const terminals = new TerminalManager(
   },
   () => projects.active()?.path ?? null,
 )
-const server = createAppServer({ registry, terminals, projects, git: new GitService(), allowedOrigins: [ORIGIN] })
+const server = createAppServer({
+  registry,
+  terminals,
+  projects,
+  git,
+  tasks,
+  history,
+  team,
+  allowedOrigins: [ORIGIN],
+})
 let port = 0
 
 before(async () => {

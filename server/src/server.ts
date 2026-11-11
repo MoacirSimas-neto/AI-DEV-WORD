@@ -1,9 +1,12 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
-import type { AgentInfo, ClientMessage, ServerMessage } from '../../shared/protocol.ts'
+import type { AgentInfo, ClientMessage, ServerMessage, TaskInput, TaskPriority, TaskStatus } from '../../shared/protocol.ts'
 import type { AgentRegistry } from './agents/registry.ts'
 import type { GitService } from './git/service.ts'
+import type { HistoryStore } from './history/store.ts'
 import type { ProjectStore } from './projects/store.ts'
+import type { TaskStore } from './tasks/store.ts'
+import type { TeamRunner } from './team/runner.ts'
 import type { TerminalManager } from './terminal/manager.ts'
 
 export interface AppServerOptions {
@@ -11,6 +14,9 @@ export interface AppServerOptions {
   terminals: TerminalManager
   projects: ProjectStore
   git: GitService
+  tasks: TaskStore
+  history: HistoryStore
+  team: TeamRunner
   allowedOrigins: string[]
 }
 
@@ -26,6 +32,26 @@ const isSize = (n: unknown): n is number => Number.isInteger(n) && (n as number)
 const isId = (n: unknown): n is number => Number.isInteger(n) && (n as number) > 0
 const isPathList = (v: unknown): v is string[] =>
   Array.isArray(v) && v.length > 0 && v.length <= 500 && v.every((p) => typeof p === 'string' && p.length <= 1024)
+
+const VALID_PRIORITIES = new Set<TaskPriority>(['low', 'medium', 'high'])
+const VALID_STATUSES = new Set<TaskStatus>(['todo', 'doing', 'review', 'done'])
+
+function parseTaskInput(data: unknown): TaskInput | null {
+  if (typeof data !== 'object' || data === null) return null
+  const t = data as Record<string, unknown>
+  if (typeof t.title !== 'string' || t.title.length === 0 || t.title.length > 200) return null
+  if (typeof t.description !== 'string' || t.description.length > 5000) return null
+  if (!VALID_PRIORITIES.has(t.priority as TaskPriority)) return null
+  if (!VALID_STATUSES.has(t.status as TaskStatus)) return null
+  if (t.agentId !== null && typeof t.agentId !== 'string') return null
+  return {
+    title: t.title,
+    description: t.description,
+    priority: t.priority as TaskPriority,
+    status: t.status as TaskStatus,
+    agentId: t.agentId,
+  }
+}
 
 /** Valida o formato de tudo que chega do navegador antes de usar. */
 export function parseClientMessage(raw: string): ClientMessage | null {
@@ -75,6 +101,21 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         : null
     case 'git-push':
       return typeof msg.token === 'string' ? { type: 'git-push', token: msg.token } : null
+    case 'task-create': {
+      const task = parseTaskInput(msg.task)
+      return isId(msg.projectId) && task ? { type: 'task-create', projectId: msg.projectId, task } : null
+    }
+    case 'task-update': {
+      const task = parseTaskInput(msg.task)
+      return isId(msg.taskId) && task ? { type: 'task-update', taskId: msg.taskId, task } : null
+    }
+    case 'task-delete':
+      return isId(msg.taskId) ? { type: 'task-delete', taskId: msg.taskId } : null
+    case 'mission-start':
+      return isId(msg.taskId) ? { type: 'mission-start', taskId: msg.taskId } : null
+    case 'mission-approve':
+    case 'mission-cancel':
+      return isId(msg.missionId) ? { type: msg.type, missionId: msg.missionId } : null
     default:
       return null
   }
@@ -82,7 +123,16 @@ export function parseClientMessage(raw: string): ClientMessage | null {
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-export function createAppServer({ registry, terminals, projects, git, allowedOrigins }: AppServerOptions): Server {
+export function createAppServer({
+  registry,
+  terminals,
+  projects,
+  git,
+  tasks,
+  history,
+  team,
+  allowedOrigins,
+}: AppServerOptions): Server {
   const server = createServer((req, res) => {
     const origin = req.headers.origin
     if (!hasLocalHost(req) || (origin && !allowedOrigins.includes(origin))) {
@@ -194,6 +244,12 @@ export function createAppServer({ registry, terminals, projects, git, allowedOri
         inProject(socket, async (cwd) => {
           const summary = await git.commit(cwd, message.message)
           send(socket, { type: 'git-result', ok: true, message: `Commit criado: ${summary}` })
+          const activeProj = projects.active()
+          history.add({
+            kind: 'commit',
+            message: `Commit criado: ${summary}`,
+            projectId: activeProj?.id ?? null,
+          })
           await broadcastGitStatus(cwd)
         })
         break
@@ -204,14 +260,65 @@ export function createAppServer({ registry, terminals, projects, git, allowedOri
         inProject(socket, async (cwd) => {
           const output = await git.push(cwd, message.token)
           send(socket, { type: 'git-result', ok: true, message: `Push concluído. ${output}` })
+          const activeProj = projects.active()
+          history.add({
+            kind: 'push',
+            message: `Push realizado: ${output}`,
+            projectId: activeProj?.id ?? null,
+          })
           await broadcastGitStatus(cwd)
         })
+        break
+      case 'task-create':
+        try {
+          tasks.create(message.projectId, message.task)
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'task-update':
+        try {
+          tasks.update(message.taskId, message.task)
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'task-delete':
+        try {
+          tasks.delete(message.taskId)
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'mission-start':
+        team.start(message.taskId).catch((error) => {
+          send(socket, { type: 'notice', message: errorText(error) })
+        })
+        break
+      case 'mission-approve':
+        team.approve(message.missionId).catch((error) => {
+          send(socket, { type: 'notice', message: errorText(error) })
+        })
+        break
+      case 'mission-cancel':
+        try {
+          team.cancel(message.missionId)
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
         break
     }
   }
 
   wss.on('connection', (socket: WebSocket) => {
-    send(socket, { type: 'snapshot', agents: registry.list(), workspace: projects.workspace() })
+    send(socket, {
+      type: 'snapshot',
+      agents: registry.list(),
+      workspace: projects.workspace(),
+      tasks: tasks.list(),
+      missions: tasks.listMissions(),
+      history: history.list(),
+    })
     socket.on('message', (raw) => {
       const message = parseClientMessage(raw.toString())
       if (message) handle(socket, message)
@@ -221,13 +328,27 @@ export function createAppServer({ registry, terminals, projects, git, allowedOri
   const onAgent = (agent: AgentInfo) => broadcast({ type: 'agent', agent })
   const onData = (agentId: string, data: string) => broadcast({ type: 'term-data', agentId, data })
   const onExit = (agentId: string, code: number) => broadcast({ type: 'term-exit', agentId, code })
+  const onTasks = () => broadcast({ type: 'tasks', tasks: tasks.list() })
+  const onMissions = () => broadcast({ type: 'missions', missions: tasks.listMissions() })
+  const onHistory = () => broadcast({ type: 'history', entries: history.list() })
+  const onMissionOutput = (missionId: number, data: string) => broadcast({ type: 'mission-output', missionId, data })
+
   registry.on('change', onAgent)
   terminals.on('data', onData)
   terminals.on('exit', onExit)
+  tasks.on('tasks', onTasks)
+  tasks.on('missions', onMissions)
+  history.on('added', onHistory)
+  team.on('output', onMissionOutput)
+
   server.on('close', () => {
     registry.off('change', onAgent)
     terminals.off('data', onData)
     terminals.off('exit', onExit)
+    tasks.off('tasks', onTasks)
+    tasks.off('missions', onMissions)
+    history.off('added', onHistory)
+    team.off('output', onMissionOutput)
     for (const client of wss.clients) client.terminate()
   })
 
