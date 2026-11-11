@@ -6,6 +6,7 @@ import { startCli } from './cli/run.ts'
 import { ALLOWED_ORIGINS, DATA_DIR, DATABASE_FILE, HOST, PORT } from './config.ts'
 import { GitService } from './git/service.ts'
 import { HistoryStore } from './history/store.ts'
+import { MemoryStore } from './memory/store.ts'
 import { ProjectStore } from './projects/store.ts'
 import { createAppServer } from './server.ts'
 import { TaskStore } from './tasks/store.ts'
@@ -18,6 +19,7 @@ const projects = new ProjectStore(DATABASE_FILE)
 const history = new HistoryStore(projects.db)
 const tasks = new TaskStore(projects.db, history)
 const agentConfigs = new AgentConfigStore(projects.db)
+const memory = new MemoryStore(projects.db, history)
 const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
 
 // Sincroniza agentes personalizados e o CLI de cada agente conforme a configuração persistida
@@ -84,6 +86,7 @@ const server = createAppServer({
   history,
   team,
   agentConfigs,
+  memory,
   allowedOrigins: ALLOWED_ORIGINS,
 })
 

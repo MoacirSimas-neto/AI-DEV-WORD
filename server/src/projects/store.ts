@@ -66,11 +66,19 @@ export class ProjectStore {
       throw new Error(`Pasta não encontrada: ${input}`)
     }
 
-    this.db
-      .prepare('INSERT OR IGNORE INTO projects (name, path, created_at) VALUES (?, ?, ?)')
-      .run(path.basename(folder) || folder, folder, new Date().toISOString())
-    const row = this.db.prepare('SELECT id FROM projects WHERE path = ?').get(folder)
-    this.select(Number(row!.id))
+    let id = Number(this.db.prepare('SELECT id FROM projects WHERE path = ?').get(folder)?.id ?? 0)
+    if (!id) {
+      // O id nunca é reutilizado: tarefas e memórias de um projeto removido não
+      // podem reaparecer num projeto novo que herdasse o mesmo número.
+      const seq = this.db.prepare("SELECT value FROM settings WHERE key = 'project_seq'").get()
+      const max = this.db.prepare('SELECT COALESCE(MAX(id), 0) AS max FROM projects').get()
+      id = Math.max(Number(seq?.value ?? 0), Number(max!.max)) + 1
+      this.db
+        .prepare('INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)')
+        .run(id, path.basename(folder) || folder, folder, new Date().toISOString())
+      this.db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('project_seq', ?)").run(String(id))
+    }
+    this.select(id)
   }
 
   select(projectId: number) {

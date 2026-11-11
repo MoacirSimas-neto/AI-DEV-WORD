@@ -16,6 +16,7 @@ const KIND_LABEL: Record<ActivityKind, string> = {
   commit: 'Git Commit',
   push: 'Git Push',
   error: 'Erro',
+  memory: 'Memória',
 }
 
 export function HistoryPanel({ history, onClose }: Props) {

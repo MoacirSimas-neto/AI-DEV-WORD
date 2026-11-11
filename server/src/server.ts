@@ -9,6 +9,8 @@ import type {
   AgentProfileId,
   CliId,
   ClientMessage,
+  MemoryFilter,
+  MemoryInput,
   CustomAgentInput,
   CustomAgentPatch,
   ProviderId,
@@ -23,6 +25,7 @@ import type { AgentRegistry } from './agents/registry.ts'
 import { defaultSpecializations } from './agents/specializations.ts'
 import type { GitService } from './git/service.ts'
 import type { HistoryStore } from './history/store.ts'
+import { HUMAN, type MemoryStore } from './memory/store.ts'
 import type { ProjectStore } from './projects/store.ts'
 import type { TaskStore } from './tasks/store.ts'
 import type { TeamRunner } from './team/runner.ts'
@@ -37,6 +40,7 @@ export interface AppServerOptions {
   history: HistoryStore
   team: TeamRunner
   agentConfigs: AgentConfigStore
+  memory: MemoryStore
   allowedOrigins: string[]
 }
 
@@ -189,6 +193,33 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case 'mission-approve':
     case 'mission-cancel':
       return isId(msg.missionId) ? { type: msg.type, missionId: msg.missionId } : null
+    case 'memory-list': {
+      if (!isId(msg.projectId)) return null
+      const filter: Record<string, string> = {}
+      if (typeof msg.filter === 'object' && msg.filter !== null) {
+        // Só textos curtos passam; o MemoryStore valida os valores.
+        for (const key of ['scope', 'agentId', 'category', 'status', 'from', 'to', 'q']) {
+          const value = (msg.filter as Record<string, unknown>)[key]
+          if (typeof value === 'string' && value.length <= 200) filter[key] = value
+        }
+      }
+      return { type: 'memory-list', projectId: msg.projectId, filter: filter as MemoryFilter }
+    }
+    case 'memory-create': {
+      const e = msg.entry as Record<string, unknown> | null
+      if (!isId(msg.projectId) || typeof e !== 'object' || e === null) return null
+      if (typeof e.scope !== 'string' || typeof e.category !== 'string' || typeof e.content !== 'string') return null
+      if (e.content.length > 5000 || (e.agentId !== null && typeof e.agentId !== 'string')) return null
+      return { type: 'memory-create', projectId: msg.projectId, entry: e as unknown as MemoryInput }
+    }
+    case 'memory-approve':
+    case 'memory-reject':
+    case 'memory-versions':
+      return isId(msg.id) ? { type: msg.type, id: msg.id } : null
+    case 'memory-supersede':
+      return isId(msg.id) && typeof msg.content === 'string' && msg.content.length <= 5000
+        ? { type: 'memory-supersede', id: msg.id, content: msg.content }
+        : null
     case 'agent-config-set': {
       if (typeof msg.config !== 'object' || msg.config === null) return null
       const c = msg.config as Record<string, unknown>
@@ -253,6 +284,7 @@ export function createAppServer({
   history,
   team,
   agentConfigs,
+  memory,
   allowedOrigins,
 }: AppServerOptions): Server {
   for (const cfg of agentConfigs.list()) {
@@ -608,6 +640,30 @@ export function createAppServer({
           send(socket, { type: 'notice', message: errorText(error) })
         }
         break
+      case 'memory-list':
+        send(socket, { type: 'memory-entries', projectId: message.projectId, entries: memory.list(message.projectId, message.filter) })
+        break
+      case 'memory-versions':
+        try {
+          send(socket, { type: 'memory-versions', id: message.id, versions: memory.versions(message.id) })
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'memory-create':
+      case 'memory-approve':
+      case 'memory-reject':
+      case 'memory-supersede':
+        // Estas mensagens só vêm da interface: são a ação humana que torna uma memória válida.
+        try {
+          if (message.type === 'memory-create') memory.createApproved({ projectId: message.projectId, ...message.entry })
+          else if (message.type === 'memory-approve') memory.approve(message.id, HUMAN)
+          else if (message.type === 'memory-reject') memory.reject(message.id, HUMAN)
+          else memory.supersede(message.id, message.content, HUMAN)
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
       case 'agents-list':
         send(socket, {
           type: 'agent-configs',
@@ -657,6 +713,7 @@ export function createAppServer({
       allConfigs: agentConfigs.list({ includeInactive: true }),
     })
   }
+  const onMemory = (projectId: number) => broadcast({ type: 'memory-changed', projectId })
   const onMissionOutput = (missionId: number, data: string) => broadcast({ type: 'mission-output', missionId, data })
   const onGitChange = async (event: { agentId?: string; cwd: string; files: string[]; summary: string }) => {
     broadcast({ type: 'git-activity', summary: event.summary, files: event.files, agentId: event.agentId })
@@ -673,6 +730,7 @@ export function createAppServer({
   tasks.on('missions', onMissions)
   history.on('added', onHistory)
   agentConfigs.on('change', onConfigs)
+  memory.on('change', onMemory)
   team.on('output', onMissionOutput)
   team.on('git-change', onGitChange)
 
@@ -685,6 +743,7 @@ export function createAppServer({
     tasks.off('missions', onMissions)
     history.off('added', onHistory)
     agentConfigs.off('change', onConfigs)
+    memory.off('change', onMemory)
     team.off('output', onMissionOutput)
     team.off('git-change', onGitChange)
     for (const client of wss.clients) client.terminate()

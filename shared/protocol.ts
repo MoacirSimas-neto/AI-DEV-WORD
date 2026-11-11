@@ -264,7 +264,52 @@ export interface MissionInfo {
   updatedAt: string
 }
 
-export type ActivityKind = 'task' | 'status' | 'mission' | 'agent' | 'review' | 'files' | 'commit' | 'push' | 'error'
+export type ActivityKind = 'task' | 'status' | 'mission' | 'agent' | 'review' | 'files' | 'commit' | 'push' | 'error' | 'memory'
+
+/** agent = só o agente dono recebe; team = toda a equipe do projeto recebe. */
+export type MemoryScope = 'agent' | 'team'
+export type MemoryCategory = 'decision' | 'requirement' | 'architecture' | 'problem' | 'solution' | 'qa_result' | 'learning'
+/** Só 'approved' entra nos prompts. 'superseded' = trocada por uma versão mais nova. */
+export type MemoryStatus = 'proposed' | 'approved' | 'rejected' | 'superseded'
+
+/** Um fato lembrado de um projeto. Nunca é editado nem apagado: substituir cria outro registro. */
+export interface MemoryEntry {
+  id: number
+  projectId: number
+  scope: MemoryScope
+  /** Dono (escopo agent) ou agente que originou o registro (escopo team). */
+  agentId: string | null
+  category: MemoryCategory
+  content: string
+  status: MemoryStatus
+  sourceMissionId: number | null
+  /** 'user' ou o id do agente que propôs. */
+  author: string
+  approvedBy: string | null
+  /** Versão anterior que este registro substituiu. */
+  supersedesId: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MemoryFilter {
+  scope?: MemoryScope
+  agentId?: string
+  category?: MemoryCategory
+  status?: MemoryStatus
+  /** Datas AAAA-MM-DD (inclusive). */
+  from?: string
+  to?: string
+  /** Busca textual simples no conteúdo. */
+  q?: string
+}
+
+export interface MemoryInput {
+  scope: MemoryScope
+  agentId: string | null
+  category: MemoryCategory
+  content: string
+}
 
 /** Uma linha do histórico. O texto passa por remoção de segredos antes de ser gravado. */
 export interface ActivityEntry {
@@ -326,6 +371,12 @@ export type ServerMessage =
       error?: string
     }
   | { type: 'dialog-folder-selected'; path: string | null }
+  /** Resposta a memory-list. */
+  | { type: 'memory-entries'; projectId: number; entries: MemoryEntry[] }
+  /** Resposta a memory-versions: da versão mais antiga para a atual. */
+  | { type: 'memory-versions'; id: number; versions: MemoryEntry[] }
+  /** A memória de um projeto mudou: quem estiver exibindo deve pedir a lista de novo. */
+  | { type: 'memory-changed'; projectId: number }
 
 export type ClientMessage =
   | { type: 'check-cli'; agentId: string }
@@ -356,6 +407,13 @@ export type ClientMessage =
   | { type: 'mission-approve'; missionId: number }
   /** Rejeita o plano ou interrompe a missão. */
   | { type: 'mission-cancel'; missionId: number }
+  /** Memória: toda aprovação, rejeição e substituição é uma ação humana vinda daqui. */
+  | { type: 'memory-list'; projectId: number; filter?: MemoryFilter }
+  | { type: 'memory-create'; projectId: number; entry: MemoryInput }
+  | { type: 'memory-approve'; id: number }
+  | { type: 'memory-reject'; id: number }
+  | { type: 'memory-supersede'; id: number; content: string }
+  | { type: 'memory-versions'; id: number }
   /** Central de Agentes: configuração individual, perfis, restauração e agentes personalizados */
   | {
       type: 'agent-config-set'
