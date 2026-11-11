@@ -1,5 +1,12 @@
 import { EventEmitter } from 'node:events'
-import type { AgentConfig, AgentInfo, CliId } from '../../../shared/protocol.ts'
+import type {
+  AgentConfig,
+  AgentInfo,
+  AvatarPreset,
+  CliId,
+  RoleCategory,
+  SpecializationId,
+} from '../../../shared/protocol.ts'
 import type { CliProbe } from '../cli/probe.ts'
 
 export interface AgentDefinition {
@@ -7,14 +14,54 @@ export interface AgentDefinition {
   name: string
   role: string
   cli: CliId
+  roleCategory?: RoleCategory
+  specializationId?: SpecializationId
+  avatarPreset?: AvatarPreset
+  isBuiltin?: boolean
 }
 
 // Os ids também identificam a mesa e a aparência no frontend (officeLayout.ts).
 export const DEFAULT_AGENTS: AgentDefinition[] = [
-  { id: 'architect', name: 'Arquiteto', role: 'Planeja a solução', cli: 'gemini' },
-  { id: 'dev', name: 'Dev', role: 'Implementa o código', cli: 'codex' },
-  { id: 'qa', name: 'QA', role: 'Revisa e testa', cli: 'gemini' },
-  { id: 'tutor', name: 'Tutor', role: 'Explica e ensina', cli: 'gemini' },
+  {
+    id: 'architect',
+    name: 'Arquiteto',
+    role: 'Planeja a solução',
+    cli: 'gemini',
+    roleCategory: 'planning',
+    specializationId: 'tech-lead',
+    avatarPreset: 'architect',
+    isBuiltin: true,
+  },
+  {
+    id: 'dev',
+    name: 'Dev',
+    role: 'Implementa o código',
+    cli: 'codex',
+    roleCategory: 'developing',
+    specializationId: 'developer',
+    avatarPreset: 'dev',
+    isBuiltin: true,
+  },
+  {
+    id: 'qa',
+    name: 'QA',
+    role: 'Revisa e testa',
+    cli: 'gemini',
+    roleCategory: 'reviewing',
+    specializationId: 'qa-tester',
+    avatarPreset: 'qa',
+    isBuiltin: true,
+  },
+  {
+    id: 'tutor',
+    name: 'Tutor',
+    role: 'Explica e ensina',
+    cli: 'gemini',
+    roleCategory: 'teaching',
+    specializationId: 'tutor',
+    avatarPreset: 'tutor',
+    isBuiltin: true,
+  },
 ]
 
 const BUILTIN_IDS = new Set(DEFAULT_AGENTS.map((d) => d.id))
@@ -69,6 +116,10 @@ export class AgentRegistry extends EventEmitter {
         name: def.name,
         role: def.role,
         cli: def.cli,
+        ...(def.roleCategory !== undefined ? { roleCategory: def.roleCategory } : {}),
+        ...(def.specializationId !== undefined ? { specializationId: def.specializationId } : {}),
+        ...(def.avatarPreset !== undefined ? { avatarPreset: def.avatarPreset } : {}),
+        ...(def.isBuiltin !== undefined ? { isBuiltin: def.isBuiltin } : {}),
         ...(cliChanged ? { cliVersion: null, auth: 'unknown', message: 'Configuração atualizada.' } : {}),
       }
       const updated = this.update(def.id, patch)
@@ -115,6 +166,10 @@ export class AgentRegistry extends EventEmitter {
         name: cfg.name || cfg.agentId,
         role: cfg.role || 'Agente personalizado',
         cli,
+        roleCategory: cfg.roleCategory,
+        specializationId: cfg.specializationId,
+        avatarPreset: cfg.avatarPreset,
+        isBuiltin: cfg.isBuiltin,
       })
     }
     for (const id of [...this.agents.keys()]) {

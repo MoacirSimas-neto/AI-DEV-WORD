@@ -37,16 +37,21 @@ const LED_OFF = 0x222630
  */
 export class AgentActor {
   readonly id: string
+  private agent: AgentInfo
+  private station: Station
   private readonly scene: Phaser.Scene
-  private readonly station: Station
   private readonly root: Phaser.GameObjects.Container
   private readonly sprite: Phaser.GameObjects.Sprite
   private readonly ring: Phaser.GameObjects.Ellipse
   private readonly bubble: Phaser.GameObjects.Text
   private readonly label: Phaser.GameObjects.Text
+  private readonly hoverTip: Phaser.GameObjects.Text
   private readonly overlay: Phaser.GameObjects.Container
   private readonly blinkTimer: Phaser.Time.TimerEvent
   private state: AgentState | null = null
+  private currentPreset: string
+  private selected = false
+  private hovered = false
   private walkTween?: Phaser.Tweens.Tween
   private typingTween?: Phaser.Tweens.Tween
   private ledTween?: Phaser.Tweens.Tween
@@ -54,13 +59,12 @@ export class AgentActor {
 
   constructor(scene: Phaser.Scene, agent: AgentInfo, station: Station, onSelect: (id: string) => void) {
     this.scene = scene
+    this.agent = agent
     this.station = station
     this.id = agent.id
+    this.currentPreset = agent.avatarPreset ?? agent.id
 
-    const look = lookFor(agent.id)
-    for (const frame of ['stand', 'step', 'stepAlt', 'blink', 'work1', 'work2'] as Frame[]) {
-      makePixelTexture(scene, this.key(frame), characterRows(look, frame), paletteFor(look))
-    }
+    this.rebuildTextures()
     if (!scene.anims.exists(this.key('walk'))) {
       scene.anims.create({
         key: this.key('walk'),
@@ -88,6 +92,17 @@ export class AgentActor {
     this.sprite = scene.add.sprite(0, 0, this.key('stand')).setOrigin(0.5, 1).setScale(U)
     this.sprite.setInteractive({ useHandCursor: true })
     this.sprite.on('pointerdown', () => onSelect(agent.id))
+    this.sprite.on('pointerover', () => {
+      this.hovered = true
+      this.ring.setVisible(true)
+      this.updateHoverTip()
+      this.hoverTip.setVisible(true)
+    })
+    this.sprite.on('pointerout', () => {
+      this.hovered = false
+      this.ring.setVisible(this.selected)
+      this.hoverTip.setVisible(false)
+    })
 
     this.label = scene.add
       .text(0, 3, agent.name, { fontFamily: FONT, fontSize: '13px', color: '#f8fafc' })
@@ -102,10 +117,22 @@ export class AgentActor {
         padding: { x: 5, y: 2 },
       })
       .setOrigin(0.5, 1)
+    this.hoverTip = scene.add
+      .text(0, -86, '', {
+        fontFamily: FONT,
+        fontSize: '11px',
+        color: '#f8fafc',
+        backgroundColor: '#0f172aee',
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5, 1)
+      .setVisible(false)
 
     this.root = scene.add.container(station.rest.x, station.rest.y, [this.ring, shadow, this.sprite])
     this.root.setDepth(this.root.y)
-    this.overlay = scene.add.container(this.root.x, this.root.y, [this.label, this.bubble]).setDepth(10_000)
+    this.overlay = scene.add.container(this.root.x, this.root.y, [this.label, this.bubble, this.hoverTip]).setDepth(10_500)
+
+    this.syncPlate()
 
     this.blinkTimer = scene.time.addEvent({
       delay: Phaser.Math.Between(2600, 4800),
@@ -122,8 +149,48 @@ export class AgentActor {
     this.setState(agent.state)
   }
 
+  updateAgent(agent: AgentInfo, station: Station) {
+    this.agent = agent
+    if (this.station !== station) {
+      this.setLed(null)
+      this.station = station
+    }
+    this.label.setText(agent.name)
+    this.syncPlate()
+    const nextPreset = agent.avatarPreset ?? agent.id
+    if (nextPreset !== this.currentPreset) {
+      this.currentPreset = nextPreset
+      this.rebuildTextures()
+      if (!this.sprite.anims.isPlaying) {
+        this.sprite.setTexture(this.key('stand'))
+      }
+    }
+    if (this.hovered) this.updateHoverTip()
+    this.setState(agent.state)
+  }
+
   setSelected(selected: boolean) {
-    this.ring.setVisible(selected)
+    this.selected = selected
+    this.ring.setVisible(selected || this.hovered)
+  }
+
+  private rebuildTextures() {
+    const look = lookFor(this.agent.id, this.agent.avatarPreset)
+    for (const frame of ['stand', 'step', 'stepAlt', 'blink', 'work1', 'work2'] as Frame[]) {
+      makePixelTexture(this.scene, this.key(frame), characterRows(look, frame), paletteFor(look))
+    }
+  }
+
+  private syncPlate() {
+    if (this.station.plateText) {
+      this.station.plateText.setText(this.agent.name.slice(0, 10)).setVisible(true)
+    }
+  }
+
+  private updateHoverTip() {
+    const spec = this.agent.specializationId ?? this.agent.role
+    const stText = BUBBLE_STYLE[this.agent.state].text || 'DISPONÍVEL'
+    this.hoverTip.setText(`${this.agent.name} · ${spec} · ${stText}`)
   }
 
   setState(state: AgentState) {
@@ -165,6 +232,7 @@ export class AgentActor {
     this.stopActivity()
     this.blinkTimer.remove()
     this.setLed(null)
+    this.station.plateText?.setText('Livre')
     this.root.destroy()
     this.overlay.destroy()
   }

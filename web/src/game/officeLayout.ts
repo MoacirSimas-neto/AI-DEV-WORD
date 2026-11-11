@@ -1,4 +1,5 @@
 import type Phaser from 'phaser'
+import type { AgentInfo } from '../../../shared/protocol.ts'
 import type { WorldAction } from './WorldBridge.ts'
 
 /**
@@ -9,6 +10,7 @@ import type { WorldAction } from './WorldBridge.ts'
 export const U = 3
 export const WORLD = { width: 240 * U, height: 132 * U }
 export const FONT = '"Pixelify Sans Variable", monospace'
+export const MAX_VISIBLE_SPECIALISTS = 6
 
 export interface Station {
   /** Onde o agente fica ao usar o terminal (atrás da mesa). */
@@ -21,6 +23,8 @@ export interface Station {
   corridorY: number
   /** Luz do monitor: o personagem a acende conforme o estado real do agente. */
   led: Phaser.GameObjects.Rectangle
+  /** Texto da plaquinha da estação (atualizável para estações de especialistas). */
+  plateText?: Phaser.GameObjects.Text
 }
 
 export interface OfficeCallbacks {
@@ -29,12 +33,139 @@ export interface OfficeCallbacks {
 }
 
 // ids = agentes definidos no backend (server/src/agents/registry.ts)
-const DESKS = [
-  { id: 'architect', plate: 'Arquiteto', x: 10, restX: 34, accent: 0x3b82f6, tooltip: 'Estação de Arquitetura · Abrir Arquiteto' },
-  { id: 'dev', plate: 'Dev', x: 64, restX: 88, accent: 0x10b981, tooltip: 'Estação de Desenvolvimento · Abrir Dev' },
-  { id: 'qa', plate: 'QA', x: 118, restX: 142, accent: 0xf59e0b, tooltip: 'Bancada de QA & Testes · Abrir QA' },
-  { id: 'tutor', plate: 'Tutor', x: 172, restX: 194, accent: 0xa855f7, tooltip: 'Estúdio do Tutor · Abrir Tutor' },
+export const DESKS = [
+  { id: 'architect', plate: 'Arquiteto', x: 10, restX: 22, accent: 0x3b82f6, tooltip: 'Estação de Arquitetura · Abrir Arquiteto' },
+  { id: 'dev', plate: 'Dev', x: 64, restX: 76, accent: 0x10b981, tooltip: 'Estação de Desenvolvimento · Abrir Dev' },
+  { id: 'qa', plate: 'QA', x: 118, restX: 130, accent: 0xf59e0b, tooltip: 'Bancada de QA & Testes · Abrir QA' },
+  { id: 'tutor', plate: 'Tutor', x: 172, restX: 184, accent: 0xa855f7, tooltip: 'Estúdio do Tutor · Abrir Tutor' },
 ]
+
+export const SPECIALIST_SLOTS = [
+  {
+    key: 'slot-0',
+    podX: 22,
+    podY: 94,
+    seat: { x: 32 * U, y: 106 * U },
+    rest: { x: 26 * U, y: 121 * U },
+    wander: { x: 22 * U, y: 78 * U, width: 22 * U, height: 11 * U },
+    accent: 0x38bdf8,
+    defaultPlate: 'Espec. 1',
+  },
+  {
+    key: 'slot-1',
+    podX: 48,
+    podY: 94,
+    seat: { x: 58 * U, y: 106 * U },
+    rest: { x: 52 * U, y: 121 * U },
+    wander: { x: 46 * U, y: 78 * U, width: 22 * U, height: 11 * U },
+    accent: 0x34d399,
+    defaultPlate: 'Espec. 2',
+  },
+  {
+    key: 'slot-2',
+    podX: 170,
+    podY: 94,
+    seat: { x: 180 * U, y: 106 * U },
+    rest: { x: 174 * U, y: 121 * U },
+    wander: { x: 168 * U, y: 78 * U, width: 22 * U, height: 11 * U },
+    accent: 0xa855f7,
+    defaultPlate: 'Espec. 3',
+  },
+  {
+    key: 'slot-3',
+    podX: 196,
+    podY: 94,
+    seat: { x: 206 * U, y: 106 * U },
+    rest: { x: 200 * U, y: 121 * U },
+    wander: { x: 192 * U, y: 78 * U, width: 20 * U, height: 11 * U },
+    accent: 0xf59e0b,
+    defaultPlate: 'Espec. 4',
+  },
+  {
+    key: 'slot-4',
+    podX: null,
+    podY: null,
+    seat: { x: 86 * U, y: 108 * U },
+    rest: { x: 80 * U, y: 122 * U },
+    wander: { x: 74 * U, y: 80 * U, width: 24 * U, height: 11 * U },
+    accent: 0x22d3ee,
+    defaultPlate: 'Espec. 5',
+  },
+  {
+    key: 'slot-5',
+    podX: null,
+    podY: null,
+    seat: { x: 154 * U, y: 108 * U },
+    rest: { x: 160 * U, y: 122 * U },
+    wander: { x: 142 * U, y: 80 * U, width: 24 * U, height: 11 * U },
+    accent: 0xf43f5e,
+    defaultPlate: 'Espec. 6',
+  },
+]
+
+const BUILTIN_STATION_IDS = new Set(DESKS.map((d) => d.id))
+
+export interface AgentPlacement {
+  agent: AgentInfo
+  stationKey: string
+  seat: { x: number; y: number }
+  rest: { x: number; y: number }
+}
+
+export interface OfficePlacementResult {
+  visible: AgentPlacement[]
+  totalSpecialists: number
+  page: number
+  totalPages: number
+}
+
+/**
+ * Calcula de forma determinística e sem sobreposição quais agentes aparecem no
+ * escritório e qual estação cada um ocupa (suporta paginação acima de 6 especialistas).
+ */
+export function computeOfficePlacement(agents: AgentInfo[], requestedPage = 0): OfficePlacementResult {
+  const seen = new Set<string>()
+  const builtin: AgentInfo[] = []
+  const specialists: AgentInfo[] = []
+
+  for (const agent of agents) {
+    if (!agent?.id || seen.has(agent.id)) continue
+    seen.add(agent.id)
+    if (BUILTIN_STATION_IDS.has(agent.id)) {
+      builtin.push(agent)
+    } else {
+      specialists.push(agent)
+    }
+  }
+
+  const totalSpecialists = specialists.length
+  const totalPages = Math.max(1, Math.ceil(totalSpecialists / MAX_VISIBLE_SPECIALISTS))
+  const page = Math.min(Math.max(0, requestedPage), totalPages - 1)
+  const sliceStart = page * MAX_VISIBLE_SPECIALISTS
+  const visibleSpecialists = specialists.slice(sliceStart, sliceStart + MAX_VISIBLE_SPECIALISTS)
+
+  const visible: AgentPlacement[] = []
+  for (const agent of builtin) {
+    const desk = DESKS.find((d) => d.id === agent.id)!
+    visible.push({
+      agent,
+      stationKey: desk.id,
+      seat: { x: (desk.x + 28) * U, y: 59 * U },
+      rest: { x: desk.restX * U, y: 73 * U },
+    })
+  }
+  visibleSpecialists.forEach((agent, idx) => {
+    const slot = SPECIALIST_SLOTS[idx]
+    visible.push({
+      agent,
+      stationKey: slot.key,
+      seat: slot.seat,
+      rest: slot.rest,
+    })
+  })
+
+  return { visible, totalSpecialists, page, totalPages }
+}
 
 const C = {
   wallTop: 0x162231,
@@ -167,11 +298,23 @@ export function drawOffice(scene: Phaser.Scene, callbacks?: OfficeCallbacks): Re
     stations[desk.id] = {
       seat: { x: (desk.x + 28) * U, y: 59 * U },
       wander: { x: (desk.x + 6) * U, y: 78 * U, width: 28 * U, height: 14 * U },
-      rest: { x: desk.restX * U, y: 122 * U },
+      rest: { x: desk.restX * U, y: 73 * U },
       corridorY: 76 * U,
       led: drawDesk(scene, p, desk.x, desk.plate, desk.id, desk.accent),
     }
     bindHotspot(desk.x, 41, 42, 25, desk.tooltip, () => callbacks?.onSelectAgent?.(desk.id))
+  }
+
+  for (const slot of SPECIALIST_SLOTS) {
+    const podVisuals = drawSpecialistStation(scene, p, slot)
+    stations[slot.key] = {
+      seat: slot.seat,
+      wander: slot.wander,
+      rest: slot.rest,
+      corridorY: 76 * U,
+      led: podVisuals.led,
+      plateText: podVisuals.plateText,
+    }
   }
 
   // Hotspots dos objetos funcionais do escritório
@@ -383,6 +526,65 @@ function drawDesk(
     .rectangle((x + 16) * U, 48 * U, U * 1.5, U * 1.5, C.metalDark)
     .setOrigin(0)
     .setDepth(66 * U + 2)
+}
+
+function drawSpecialistStation(
+  scene: Phaser.Scene,
+  base: Paint,
+  slot: (typeof SPECIALIST_SLOTS)[number],
+): { led: Phaser.GameObjects.Rectangle; plateText: Phaser.GameObjects.Text } {
+  if (slot.podX !== null && slot.podY !== null) {
+    const x = slot.podX
+    const y = slot.podY
+    // Tapete individual da estação de especialista
+    base(x - 1, y - 1, 22, 18, C.corridorCarpet, 0.7)
+    base(x, y, 20, 1, slot.accent, 0.65)
+
+    const p = prop(scene, y + 14)
+    p(x + 1, y + 13, 18, 2, 0x000000, 0.2)
+    p(x + 1, y + 6, 18, 7, C.woodMid)
+    p(x + 1, y + 5, 18, 2, C.woodLight)
+    p(x + 2, y + 7, 16, 1, slot.accent)
+    // Terminal compacto
+    p(x + 3, y, 9, 6, C.metalDark)
+    p(x + 4, y + 1, 7, 4, 0x0f172a)
+    p(x + 6, y + 6, 3, 1, C.metalDark)
+
+    const plateText = scene.add
+      .text((x + 10) * U, (y + 10.5) * U, slot.defaultPlate, {
+        fontFamily: FONT,
+        fontSize: '9px',
+        color: '#f8fafc',
+      })
+      .setOrigin(0.5)
+      .setDepth((y + 14) * U + 1)
+
+    const led = scene.add
+      .rectangle((x + 14) * U, (y + 3) * U, U * 1.5, U * 1.5, C.metalDark)
+      .setOrigin(0)
+      .setDepth((y + 14) * U + 2)
+
+    return { led, plateText }
+  }
+
+  // Estações táticas junto à Mesa de Comando (slot-4 e slot-5)
+  const gx = Math.round(slot.seat.x / U)
+  const gy = Math.round(slot.seat.y / U)
+  base(gx - 5, gy - 2, 10, 4, C.corridorBorder, 0.35)
+  const led = scene.add
+    .rectangle((gx - 1) * U, (gy - 6) * U, U * 1.5, U * 1.5, C.metalDark)
+    .setOrigin(0)
+    .setDepth(116 * U)
+  const plateText = scene.add
+    .text(gx * U, (gy + 4) * U, slot.defaultPlate, {
+      fontFamily: FONT,
+      fontSize: '9px',
+      color: '#cbd5e1',
+    })
+    .setOrigin(0.5)
+    .setDepth(116 * U)
+
+  return { led, plateText }
 }
 
 function drawServerRack(scene: Phaser.Scene, _callbacks?: OfficeCallbacks) {

@@ -8,7 +8,16 @@ export type ReasoningEffort = 'low' | 'medium' | 'high' | 'extra-high' | 'defaul
 export type SpecializationId = 'tech-lead' | 'developer' | 'qa-tester' | 'tutor'
 export type RoleCategory = 'planning' | 'developing' | 'reviewing' | 'teaching'
 export type KnowledgeDocKind = 'agent' | 'principios' | 'dossie' | 'referencias'
-export type AvatarPreset = 'architect' | 'dev' | 'qa' | 'tutor'
+export type AvatarPreset =
+  | 'architect'
+  | 'dev'
+  | 'qa'
+  | 'tutor'
+  | 'designer'
+  | 'data'
+  | 'security'
+  | 'docs'
+  | 'specialist'
 
 export interface SpecializationInfo {
   id: SpecializationId
@@ -116,6 +125,10 @@ export interface AgentInfo {
   name: string
   role: string
   cli: CliId
+  roleCategory?: RoleCategory
+  specializationId?: SpecializationId
+  avatarPreset?: AvatarPreset
+  isBuiltin?: boolean
   state: AgentState
   /** true enquanto o backend consulta versão/login do CLI. */
   checking: boolean

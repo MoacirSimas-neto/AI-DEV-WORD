@@ -119,3 +119,53 @@ test('o processo nasce na pasta do projeto ativo', async () => {
   assert.deepEqual(calls, ['gemini em /projetos/loja'])
   assert.match(registry.get('qa')!.message, /\/projetos\/loja/)
 })
+
+test('abre sessão PTY para agente personalizado sem colidir com sessão de agente padrão', async () => {
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: 'v1', auth: 'ok' }))
+  registry.registerAgent({
+    id: 'sec-specialist',
+    name: 'Guardião Sec',
+    role: 'Auditor AppSec',
+    cli: 'gemini',
+    roleCategory: 'reviewing',
+    specializationId: 'qa-tester',
+    avatarPreset: 'security',
+    isBuiltin: false,
+  })
+  await registry.check('dev')
+  await registry.check('sec-specialist')
+
+  const ptys = new Map<string, FakePty>()
+  const spawnedFor: string[] = []
+  const terminals = new TerminalManager(
+    registry,
+    (cli, cwd) => {
+      const pty = new FakePty()
+      const key = `${cli}:${spawnedFor.length}`
+      ptys.set(key, pty)
+      spawnedFor.push(`${cli}@${cwd}`)
+      return pty
+    },
+    () => '/projetos/app',
+    { quietMs: 20, echoMs: 0 },
+  )
+
+  terminals.open('dev', 80, 24)
+  terminals.open('sec-specialist', 100, 30)
+
+  assert.equal(registry.get('dev')?.session, true)
+  assert.equal(registry.get('sec-specialist')?.session, true)
+  assert.equal(spawnedFor.length, 2)
+
+  terminals.write('sec-specialist', 'scan --all\r')
+  const customPty = ptys.get('gemini:1')!
+  const devPty = ptys.get('codex:0')!
+  assert.deepEqual(customPty.written, ['scan --all\r'])
+  assert.deepEqual(devPty.written, [])
+
+  terminals.close('sec-specialist')
+  assert.equal(registry.get('sec-specialist')?.session, false)
+  assert.equal(registry.get('dev')?.session, true)
+
+  terminals.closeAll()
+})

@@ -1,7 +1,7 @@
 import Phaser from 'phaser'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AgentInfo } from '../../../shared/protocol.ts'
-import { FONT, WORLD } from './officeLayout.ts'
+import { computeOfficePlacement, FONT, MAX_VISIBLE_SPECIALISTS, WORLD } from './officeLayout.ts'
 import { OfficeScene } from './OfficeScene.ts'
 import { type WorldAction, WorldBridge } from './WorldBridge.ts'
 
@@ -18,6 +18,9 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const bridgeRef = useRef<WorldBridge | null>(null)
   const onActionRef = useRef(onAction)
+  const [specialistPage, setSpecialistPage] = useState(0)
+
+  const placement = computeOfficePlacement(agents, specialistPage)
 
   useEffect(() => {
     onActionRef.current = onAction
@@ -58,6 +61,37 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction }: Props) {
 
   useEffect(() => bridgeRef.current?.setAgents(agents), [agents])
   useEffect(() => bridgeRef.current?.setSelected(selectedId), [selectedId])
+  useEffect(() => bridgeRef.current?.setSpecialistPage(placement.page), [placement.page])
 
-  return <div ref={host} className="world" />
+  return (
+    <div className="world-wrapper">
+      {placement.totalSpecialists > MAX_VISIBLE_SPECIALISTS && (
+        <div className="world-pagination-bar">
+          <span>
+            Ala de Especialistas: página {placement.page + 1} de {placement.totalPages} ({placement.totalSpecialists}{' '}
+            personalizados ativos)
+          </span>
+          <div className="world-pagination-actions">
+            <button
+              type="button"
+              className="btn-quiet btn-xs"
+              disabled={placement.page === 0}
+              onClick={() => setSpecialistPage((p) => Math.max(0, p - 1))}
+            >
+              ◀ Ala Anterior
+            </button>
+            <button
+              type="button"
+              className="btn-quiet btn-xs"
+              disabled={placement.page >= placement.totalPages - 1}
+              onClick={() => setSpecialistPage((p) => Math.min(placement.totalPages - 1, p + 1))}
+            >
+              Próxima Ala ▶
+            </button>
+          </div>
+        </div>
+      )}
+      <div ref={host} className="world" />
+    </div>
+  )
 }

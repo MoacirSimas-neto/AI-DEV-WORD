@@ -1,11 +1,22 @@
 import { type FormEvent, useEffect, useState } from 'react'
-import type { AgentInfo, MissionInfo, TaskInfo, TaskInput, TaskPriority, TaskStatus } from '../../../shared/protocol.ts'
+import type {
+  AgentConfig,
+  AgentInfo,
+  MissionInfo,
+  MissionTeamSelection,
+  TaskInfo,
+  TaskInput,
+  TaskPriority,
+  TaskStatus,
+} from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
+import { AgentPortrait } from './AgentPortrait.tsx'
 
 interface Props {
   tasks: TaskInfo[]
   missions: MissionInfo[]
   agents: AgentInfo[]
+  configs: AgentConfig[]
   activeProjectId: number | null
   online: boolean
   send: Send
@@ -25,6 +36,7 @@ export function TaskPanel({
   tasks,
   missions,
   agents,
+  configs,
   activeProjectId,
   online,
   send,
@@ -38,6 +50,13 @@ export function TaskPanel({
   const [status, setStatus] = useState<TaskStatus>('todo')
   const [agentId, setAgentId] = useState<string>('')
   const [liveOutput, setLiveOutput] = useState<{ missionId: number; text: string } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  // Seleção de equipe para Modo Equipe
+  const [useDefaultTeam, setUseDefaultTeam] = useState<boolean>(true)
+  const [plannerId, setPlannerId] = useState<string>('architect')
+  const [devId, setDevId] = useState<string>('dev')
+  const [qaId, setQaId] = useState<string>('qa')
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -46,6 +65,8 @@ export function TaskPanel({
           const current = prev?.missionId === msg.missionId ? prev.text : ''
           return { missionId: msg.missionId, text: (current + msg.data).slice(-4000) }
         })
+      } else if (msg.type === 'notice') {
+        setNotice(msg.message)
       }
     })
   }, [subscribe])
@@ -56,6 +77,70 @@ export function TaskPanel({
       m.projectId === activeProjectId &&
       ['planning', 'awaiting_approval', 'developing', 'reviewing'].includes(m.phase),
   )
+
+  const planners = agents.filter(
+    (a) => (configs.find((c) => c.agentId === a.id)?.roleCategory ?? a.roleCategory ?? 'planning') === 'planning',
+  )
+  const developers = agents.filter(
+    (a) => (configs.find((c) => c.agentId === a.id)?.roleCategory ?? a.roleCategory ?? 'developing') === 'developing',
+  )
+  const reviewers = agents.filter(
+    (a) => (configs.find((c) => c.agentId === a.id)?.roleCategory ?? a.roleCategory ?? 'reviewing') === 'reviewing',
+  )
+
+  const effectivePlannerId = useDefaultTeam ? 'architect' : plannerId
+  const effectiveDevId = useDefaultTeam ? 'dev' : devId
+  const effectiveQaId = useDefaultTeam ? 'qa' : qaId
+
+  const teamSlots = [
+    {
+      stageLabel: 'Planejamento',
+      selectedId: effectivePlannerId,
+      options: planners,
+      onSelect: setPlannerId,
+    },
+    {
+      stageLabel: 'Desenvolvimento',
+      selectedId: effectiveDevId,
+      options: developers,
+      onSelect: setDevId,
+    },
+    {
+      stageLabel: 'Revisão QA',
+      selectedId: effectiveQaId,
+      options: reviewers,
+      onSelect: setQaId,
+    },
+  ]
+
+  const offlineTeamAgents = [effectivePlannerId, effectiveDevId, effectiveQaId]
+    .map((id) => agents.find((a) => a.id === id))
+    .filter((a): a is AgentInfo => !a || a.state === 'offline')
+
+  const missingRoleSelection =
+    !agents.some((a) => a.id === effectivePlannerId) ||
+    !agents.some((a) => a.id === effectiveDevId) ||
+    !agents.some((a) => a.id === effectiveQaId)
+
+  const teamReady = !missingRoleSelection && offlineTeamAgents.length === 0
+
+  const verifyTeamClis = () => {
+    for (const id of new Set([effectivePlannerId, effectiveDevId, effectiveQaId])) {
+      send({ type: 'check-cli', agentId: id })
+    }
+  }
+
+  const startMissionForTask = (taskId: number) => {
+    setNotice(null)
+    const team: MissionTeamSelection | undefined = useDefaultTeam
+      ? undefined
+      : {
+          plannerId: effectivePlannerId,
+          devId: effectiveDevId,
+          qaId: effectiveQaId,
+        }
+    send({ type: 'mission-start', taskId, team })
+  }
 
   const resetForm = () => {
     setEditingId(null)
@@ -98,24 +183,66 @@ export function TaskPanel({
       <header className="window-head">
         <div className="window-id">
           <h2>Gerenciador de Tarefas</h2>
-          <p>{activeProjectId ? 'Tarefas do projeto ativo' : 'Escolha um projeto acima'}</p>
+          <p>{activeProjectId ? 'Tarefas e composição de equipe do projeto ativo' : 'Escolha um projeto acima'}</p>
         </div>
         <button type="button" className="btn-quiet window-close" aria-label="Fechar painel" onClick={onClose}>
           ×
         </button>
       </header>
 
+      {notice && (
+        <div className="git-notice-banner" role="alert">
+          <span>⚠ {notice}</span>
+          <button type="button" className="btn-quiet notice-dismiss" onClick={() => setNotice(null)}>
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Missao Ativa / Modo Equipe */}
       {activeMission && (
         <section className="mission-card">
           <div className="mission-head">
             <h3>Missão em Andamento #{activeMission.id}</h3>
-            <span className={`mission-phase phase-${activeMission.phase}`}>{phaseLabel(activeMission.phase)}</span>
+            <span className={`mission-phase phase-${activeMission.phase}`}>
+              {phaseLabel(activeMission)}
+            </span>
+          </div>
+
+          <div className="mission-team-summary">
+            <span className="mission-team-chip">
+              📋 Planejamento:{' '}
+              <strong>
+                {activeMission.teamSnapshot?.[activeMission.plannerId ?? 'architect']?.name ??
+                  (activeMission.plannerId ?? 'architect')}
+              </strong>
+            </span>
+            <span className="mission-team-chip">
+              💻 Dev:{' '}
+              <strong>
+                {activeMission.teamSnapshot?.[activeMission.devId ?? 'dev']?.name ??
+                  (activeMission.devId ?? 'dev')}
+              </strong>
+            </span>
+            <span className="mission-team-chip">
+              🔍 QA:{' '}
+              <strong>
+                {activeMission.teamSnapshot?.[activeMission.qaId ?? 'qa']?.name ??
+                  (activeMission.qaId ?? 'qa')}
+              </strong>
+            </span>
           </div>
 
           {activeMission.phase === 'awaiting_approval' && (
             <div className="mission-approval">
-              <p><strong>Plano do Arquiteto (Gemini):</strong></p>
+              <p>
+                <strong>
+                  Plano elaborado por{' '}
+                  {activeMission.teamSnapshot?.[activeMission.plannerId ?? 'architect']?.name ??
+                    (activeMission.plannerId ?? 'architect')}
+                  :
+                </strong>
+              </p>
               <pre className="mission-plan-text">{activeMission.plan}</pre>
               <div className="mission-actions">
                 <button
@@ -139,7 +266,7 @@ export function TaskPanel({
 
           {activeMission.phase !== 'awaiting_approval' && (
             <div className="mission-running">
-              <p className="mission-step-desc">{stepDescription(activeMission.phase)}</p>
+              <p className="mission-step-desc">{stepDescription(activeMission)}</p>
               {liveOutput?.missionId === activeMission.id && (
                 <pre className="mission-live-output">{liveOutput.text}</pre>
               )}
@@ -150,6 +277,100 @@ export function TaskPanel({
                 onClick={() => send({ type: 'mission-cancel', missionId: activeMission.id })}
               >
                 Cancelar missão
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Seletor de Equipe Responsável para Modo Equipe */}
+      {activeProjectId && !activeMission && (
+        <section className="team-selector-box" aria-label="Equipe responsável pela missão">
+          <div className="team-selector-head">
+            <div>
+              <h3>Equipe responsável (Modo Equipe)</h3>
+              <p>Defina quais agentes executarão Planejamento, Desenvolvimento e Revisão QA</p>
+            </div>
+            <label className="team-default-toggle">
+              <input
+                type="checkbox"
+                checked={useDefaultTeam}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  setUseDefaultTeam(checked)
+                  if (checked) {
+                    setPlannerId('architect')
+                    setDevId('dev')
+                    setQaId('qa')
+                  }
+                }}
+              />
+              <span>Usar equipe padrão (Arquiteto · Dev · QA)</span>
+            </label>
+          </div>
+
+          <div className="team-selector-grid">
+            {teamSlots.map((slot) => {
+              const ag = agents.find((a) => a.id === slot.selectedId)
+              const cfg = configs.find((c) => c.agentId === slot.selectedId)
+              const isOffline = !ag || ag.state === 'offline'
+              return (
+                <div key={slot.stageLabel} className={`team-slot-card ${isOffline ? 'slot-offline' : ''}`}>
+                  <div className="team-slot-stage">{slot.stageLabel}</div>
+                  {!useDefaultTeam && (
+                    <select
+                      aria-label={`Selecionar agente de ${slot.stageLabel}`}
+                      value={slot.selectedId}
+                      onChange={(e) => slot.onSelect(e.target.value)}
+                    >
+                      {slot.options.map((opt) => {
+                        const optCfg = configs.find((c) => c.agentId === opt.id)
+                        return (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.name} · {optCfg?.specializationId ?? opt.specializationId ?? opt.role} (
+                            {opt.state === 'offline' ? 'CLI offline' : 'Disponível'})
+                          </option>
+                        )
+                      })}
+                    </select>
+                  )}
+                  {ag ? (
+                    <div className="team-slot-agent">
+                      <AgentPortrait
+                        agentId={ag.id}
+                        preset={cfg?.avatarPreset ?? ag.avatarPreset}
+                        dimmed={isOffline}
+                      />
+                      <div className="team-slot-meta">
+                        <strong>{ag.name}</strong>
+                        <span className="team-slot-spec">
+                          Especialização: {cfg?.specializationId ?? ag.specializationId ?? 'padrão'}
+                        </span>
+                        <span className="team-slot-model">
+                          {cfg ? `${cfg.provider} · ${cfg.model}` : ag.cli}
+                        </span>
+                        <span className={`lamp lamp-${isOffline ? 'offline' : 'idle'}`}>
+                          {isOffline ? `CLI indisponível (${ag.cli})` : `CLI pronto (${ag.cli})`}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="git-empty">Agente não encontrado.</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {!teamReady && (
+            <div className="team-selector-warning" role="alert">
+              <span>
+                ⚠ {offlineTeamAgents.length > 0
+                  ? `CLI indisponível para: ${offlineTeamAgents.map((a) => a.name).join(', ')}. Verifique a instalação/autenticação antes de iniciar a missão.`
+                  : 'Selecione agentes ativos válidos para as 3 etapas.'}
+              </span>
+              <button type="button" className="btn-quiet" disabled={!online} onClick={verifyTeamClis}>
+                Verificar CLIs da equipe
               </button>
             </div>
           )}
@@ -232,9 +453,13 @@ export function TaskPanel({
                     {canStartMission && (
                       <button
                         type="button"
-                        disabled={!online}
-                        title="Iniciar Arquiteto (Gemini) -> Dev (Codex) -> QA (Gemini)"
-                        onClick={() => send({ type: 'mission-start', taskId: t.id })}
+                        disabled={!online || !teamReady}
+                        title={
+                          teamReady
+                            ? `Iniciar missão com ${effectivePlannerId} → ${effectiveDevId} → ${effectiveQaId}`
+                            : 'Verifique a disponibilidade do CLI da equipe selecionada antes de iniciar'
+                        }
+                        onClick={() => startMissionForTask(t.id)}
                       >
                         Modo Equipe
                       </button>
@@ -260,29 +485,41 @@ export function TaskPanel({
   )
 }
 
-function phaseLabel(phase: string) {
-  switch (phase) {
+function phaseLabel(mission: MissionInfo) {
+  const pId = mission.plannerId ?? 'architect'
+  const dId = mission.devId ?? 'dev'
+  const qId = mission.qaId ?? 'qa'
+  const plannerName = mission.teamSnapshot?.[pId]?.name ?? pId
+  const devName = mission.teamSnapshot?.[dId]?.name ?? dId
+  const qaName = mission.teamSnapshot?.[qId]?.name ?? qId
+  switch (mission.phase) {
     case 'planning':
-      return 'Planejando (Arquiteto)'
+      return `Planejando (${plannerName})`
     case 'awaiting_approval':
       return 'Aguardando aprovação'
     case 'developing':
-      return 'Implementando (Dev)'
+      return `Implementando (${devName})`
     case 'reviewing':
-      return 'Revisando (QA)'
+      return `Revisando (${qaName})`
     default:
-      return phase
+      return mission.phase
   }
 }
 
-function stepDescription(phase: string) {
-  switch (phase) {
+function stepDescription(mission: MissionInfo) {
+  const pId = mission.plannerId ?? 'architect'
+  const dId = mission.devId ?? 'dev'
+  const qId = mission.qaId ?? 'qa'
+  const planner = mission.teamSnapshot?.[pId]
+  const dev = mission.teamSnapshot?.[dId]
+  const qa = mission.teamSnapshot?.[qId]
+  switch (mission.phase) {
     case 'planning':
-      return 'O Arquiteto (Gemini) está inspecionando o projeto e elaborando o plano...'
+      return `${planner?.name ?? pId} (${planner?.provider ?? 'CLI'}) está inspecionando o projeto e elaborando o plano...`
     case 'developing':
-      return 'O Desenvolvedor (Codex) está implementando as alterações no código...'
+      return `${dev?.name ?? dId} (${dev?.provider ?? 'CLI'}) está implementando as alterações no código...`
     case 'reviewing':
-      return 'O QA (Gemini) está revisando a qualidade, bugs e segurança do código...'
+      return `${qa?.name ?? qId} (${qa?.provider ?? 'CLI'}) está revisando a qualidade, bugs e segurança do código...`
     default:
       return ''
   }

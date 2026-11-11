@@ -23,7 +23,19 @@ const STATUS: Record<ConnectionStatus, { label: string; tone: string }> = {
 export type NavTab = 'home' | 'office' | 'tasks' | 'history' | 'agents'
 
 function App() {
-  const { status, agents, workspace, tasks, missions, history, configs, send, subscribe } = useServer()
+  const {
+    status,
+    agents,
+    workspace,
+    tasks,
+    missions,
+    history,
+    configs,
+    allConfigs,
+    specializations,
+    send,
+    subscribe,
+  } = useServer()
   const [activeTab, setActiveTab] = useState<NavTab>('home')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
 
@@ -327,6 +339,7 @@ function App() {
                 tasks={tasks}
                 missions={missions}
                 agents={agents}
+                configs={configs}
                 activeProjectId={workspace.activeProjectId}
                 online={online}
                 send={send}
@@ -353,8 +366,11 @@ function App() {
               <AgentCenter
                 agents={agents}
                 configs={configs}
+                allConfigs={allConfigs}
+                specializations={specializations}
                 online={online}
                 send={send}
+                subscribe={subscribe}
                 onClose={() => setActiveTab('office')}
               />
             </ErrorBoundary>

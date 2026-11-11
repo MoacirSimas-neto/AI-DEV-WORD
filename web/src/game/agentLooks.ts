@@ -1,5 +1,7 @@
-// Aparência pixel art original dos 4 agentes. Compartilhado entre o mundo Phaser
-// e os retratos em canvas da interface React (Home, Central de Agentes, Roster).
+// Aparência pixel art dos agentes e presets visuais. Compartilhado entre o mundo Phaser,
+// a pré-visualização animada e os retratos em canvas da interface React.
+
+import type { AvatarPreset } from '../../../shared/protocol.ts'
 
 export type Palette = Record<string, string>
 
@@ -16,6 +18,18 @@ export interface AgentLook {
   headset: boolean
   visor: boolean
 }
+
+export const AVATAR_PRESET_OPTIONS: { id: AvatarPreset; label: string; subtitle: string }[] = [
+  { id: 'architect', label: 'Arquiteto', subtitle: 'Traje azul-petróleo e óculos técnicos' },
+  { id: 'dev', label: 'Desenvolvedor', subtitle: 'Jaqueta verde-menta com headset' },
+  { id: 'qa', label: 'QA / Investigador', subtitle: 'Casaco âmbar com visor analítico' },
+  { id: 'tutor', label: 'Tutor / Mentor', subtitle: 'Traje clássico com óculos de leitura' },
+  { id: 'designer', label: 'Designer UI/UX', subtitle: 'Estilo criativo coral/magenta com óculos' },
+  { id: 'data', label: 'Engenheiro de Dados', subtitle: 'Traje cobalto com visor de telemetria' },
+  { id: 'security', label: 'Especialista em Segurança', subtitle: 'Traje tático grafite com headset e visor rubi' },
+  { id: 'docs', label: 'Documentador Técnico', subtitle: 'Colete editorial verde-sálvia com óculos' },
+  { id: 'specialist', label: 'Especialista Genérico', subtitle: 'Uniforme tecnológico ciano com headset' },
+]
 
 const LOOKS: Record<string, AgentLook> = {
   architect: {
@@ -70,10 +84,76 @@ const LOOKS: Record<string, AgentLook> = {
     headset: false,
     visor: false,
   },
+  designer: {
+    hair: '#4a2545',
+    hairLight: '#7c3f73',
+    skin: '#f3c6a8',
+    cheek: '#e89888',
+    shirt: '#b83b6a',
+    shirtDark: '#822649',
+    accent: '#38bdf8', // detalhe ciano criativo
+    pants: '#282538',
+    glasses: true,
+    headset: false,
+    visor: false,
+  },
+  data: {
+    hair: '#1e293b',
+    hairLight: '#475569',
+    skin: '#d9a47c',
+    cheek: '#c48362',
+    shirt: '#2563eb',
+    shirtDark: '#1d4ed8',
+    accent: '#34d399', // visor verde telemetria
+    pants: '#1e293b',
+    glasses: false,
+    headset: false,
+    visor: true,
+  },
+  security: {
+    hair: '#1f242d',
+    hairLight: '#3f4756',
+    skin: '#eab68c',
+    cheek: '#d4906a',
+    shirt: '#27272a',
+    shirtDark: '#18181b',
+    accent: '#f43f5e', // rubi tático
+    pants: '#18181b',
+    glasses: false,
+    headset: true,
+    visor: true,
+  },
+  docs: {
+    hair: '#785032',
+    hairLight: '#a1704c',
+    skin: '#f4cdb0',
+    cheek: '#e5a387',
+    shirt: '#3f6a58',
+    shirtDark: '#2b4a3d',
+    accent: '#fbbf24', // âmbar editorial
+    pants: '#334155',
+    glasses: true,
+    headset: false,
+    visor: false,
+  },
+  specialist: {
+    hair: '#334155',
+    hairLight: '#64748b',
+    skin: '#f1c29a',
+    cheek: '#e09a7e',
+    shirt: '#0284c7',
+    shirtDark: '#0369a1',
+    accent: '#22d3ee', // ciano elétrico
+    pants: '#1e293b',
+    glasses: false,
+    headset: true,
+    visor: false,
+  },
 }
 
-export function lookFor(agentId: string): AgentLook {
-  return LOOKS[agentId] ?? LOOKS.dev
+export function lookFor(agentId: string, preset?: AvatarPreset): AgentLook {
+  if (preset && LOOKS[preset]) return LOOKS[preset]
+  return LOOKS[agentId] ?? LOOKS.specialist
 }
 
 export function paletteFor(look: AgentLook): Palette {

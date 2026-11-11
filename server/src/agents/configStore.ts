@@ -51,7 +51,17 @@ const EXTRA_COLUMNS: [string, string][] = [
 const VALID_PROVIDERS = new Set<ProviderId>(['antigravity', 'codex', 'gemini'])
 const VALID_EFFORTS = new Set<ReasoningEffort>(['default', 'low', 'medium', 'high', 'extra-high'])
 const VALID_CATEGORIES = new Set<RoleCategory>(['planning', 'developing', 'reviewing', 'teaching'])
-const VALID_AVATARS = new Set<AvatarPreset>(['architect', 'dev', 'qa', 'tutor'])
+const VALID_AVATARS = new Set<AvatarPreset>([
+  'architect',
+  'dev',
+  'qa',
+  'tutor',
+  'designer',
+  'data',
+  'security',
+  'docs',
+  'specialist',
+])
 const ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,39}$/
 const MAX_INSTRUCTIONS_LEN = 4000
 

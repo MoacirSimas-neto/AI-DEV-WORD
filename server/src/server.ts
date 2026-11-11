@@ -255,6 +255,20 @@ export function createAppServer({
   agentConfigs,
   allowedOrigins,
 }: AppServerOptions): Server {
+  for (const cfg of agentConfigs.list()) {
+    if (!cfg.isBuiltin) {
+      registry.registerAgent({
+        id: cfg.agentId,
+        name: cfg.name || cfg.agentId,
+        role: cfg.role || 'Agente personalizado',
+        cli: providerToCli(cfg.provider),
+        roleCategory: cfg.roleCategory,
+        specializationId: cfg.specializationId,
+        avatarPreset: cfg.avatarPreset,
+        isBuiltin: false,
+      })
+    }
+  }
   const server = createServer((req, res) => {
     const origin = req.headers.origin
     if (!hasLocalHost(req) || (origin && !allowedOrigins.includes(origin))) {
@@ -546,6 +560,9 @@ export function createAppServer({
       case 'agent-create':
         try {
           const created = agentConfigs.createAgent(message.agent)
+          if (created.active !== false) {
+            void registry.check(created.agentId)
+          }
           history.add({
             kind: 'agent',
             message: `Agente personalizado criado: ${created.name} (${created.agentId}) · ${created.provider}/${created.model}`,
@@ -574,6 +591,13 @@ export function createAppServer({
       case 'agent-set-active':
         try {
           const updated = agentConfigs.setAgentActive(message.agentId, message.active)
+          if (!updated.active) {
+            terminals.close(message.agentId)
+            registry.setRuntimeState(message.agentId, 'idle', 'Sessão encerrada.')
+            registry.unregisterAgent(message.agentId)
+          } else {
+            void registry.check(updated.agentId)
+          }
           history.add({
             kind: 'agent',
             message: `Agente ${updated.name} (${updated.agentId}) ${updated.active ? 'ativado' : 'desativado'}.`,

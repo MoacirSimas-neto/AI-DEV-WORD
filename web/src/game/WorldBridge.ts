@@ -11,6 +11,7 @@ export type WorldAction = 'tasks' | 'history' | 'mission' | 'agents'
 export class WorldBridge extends Phaser.Events.EventEmitter {
   agents: AgentInfo[] = []
   selectedId: string | null = null
+  specialistPage = 0
 
   setAgents(agents: AgentInfo[]) {
     this.agents = agents
@@ -20,6 +21,11 @@ export class WorldBridge extends Phaser.Events.EventEmitter {
   setSelected(id: string | null) {
     this.selectedId = id
     this.emit('selected', id)
+  }
+
+  setSpecialistPage(page: number) {
+    this.specialistPage = page
+    this.emit('page', page)
   }
 
   triggerAction(action: WorldAction) {

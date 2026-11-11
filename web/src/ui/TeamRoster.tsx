@@ -22,7 +22,7 @@ export function TeamRoster({ agents, selectedId, onSelect }: Props) {
             aria-pressed={agent.id === selectedId}
             onClick={() => onSelect(agent.id)}
           >
-            <AgentPortrait agentId={agent.id} dimmed={agent.state === 'offline'} />
+            <AgentPortrait agentId={agent.id} preset={agent.avatarPreset} dimmed={agent.state === 'offline'} />
             <span className="roster-text">
               <strong>{agent.name}</strong>
               <span className="roster-role">{agent.role}</span>

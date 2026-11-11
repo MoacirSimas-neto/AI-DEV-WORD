@@ -8,6 +8,7 @@ import path from 'node:path'
 import { after, before, test } from 'node:test'
 import { WebSocket } from 'ws'
 import type { ClientMessage, ServerMessage } from '../../shared/protocol.ts'
+import { computeOfficePlacement } from '../../web/src/game/officeLayout.ts'
 import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { GitService } from './git/service.ts'
@@ -317,5 +318,71 @@ test('criar, atualizar, ativar e desativar agentes personalizados e consultar es
   const specsMsg = await client.waitFor('specializations')
   assert.equal(specsMsg.specializations.length, 4)
 
+  // Abre sessão PTY para o agente personalizado e verifica encerramento ao desativar
+  client.send({ type: 'term-open', agentId: 'ws-dev-custom', cols: 90, rows: 28 })
+  await client.waitFor('term-ready')
+  assert.equal(registry.get('ws-dev-custom')?.session, true)
+
+  client.send({
+    type: 'agent-set-active',
+    agentId: 'ws-dev-custom',
+    active: false,
+  })
+  await client.waitFor('agent-configs')
+  assert.equal(registry.get('ws-dev-custom'), undefined)
+
   client.socket.close()
+})
+
+test('posicionamento dinâmico no escritório 2D: inclusão, remoção e paginação sem sobreposição', () => {
+  const baseAgents = registry.list()
+  const initial = computeOfficePlacement(baseAgents, 0)
+  assert.equal(initial.visible.length, 4)
+  assert.equal(initial.totalSpecialists, 0)
+  assert.equal(initial.totalPages, 1)
+
+  // Adiciona 8 agentes personalizados ativos para testar paginação (máx 6 por página + 4 fixos = 10)
+  const customAgents = Array.from({ length: 8 }, (_, idx) => ({
+    id: `custom-agent-${idx + 1}`,
+    name: `Especialista ${idx + 1}`,
+    role: `Função ${idx + 1}`,
+    cli: 'gemini' as const,
+    roleCategory: 'developing' as const,
+    specializationId: 'developer' as const,
+    avatarPreset: 'specialist' as const,
+    isBuiltin: false,
+    state: 'idle' as const,
+    checking: false,
+    cliVersion: '1.0',
+    auth: 'ok' as const,
+    session: false,
+    message: 'Pronto',
+    checkedAt: new Date().toISOString(),
+  }))
+
+  const allWith8 = [...baseAgents.slice(0, 4), ...customAgents]
+  const page0 = computeOfficePlacement(allWith8, 0)
+  assert.equal(page0.totalSpecialists, 8)
+  assert.equal(page0.totalPages, 2)
+  assert.equal(page0.page, 0)
+  assert.equal(page0.visible.length, 10) // 4 padrão + 6 página 1
+
+  // Garante que nenhuma estação se sobrepõe (10 coordenadas distintas)
+  const coords0 = new Set(page0.visible.map((p) => `${p.seat.x},${p.seat.y}`))
+  assert.equal(coords0.size, 10)
+
+  // Página 2 mostra os 4 agentes padrão + os 2 especialistas restantes (total 6)
+  const page1 = computeOfficePlacement(allWith8, 1)
+  assert.equal(page1.page, 1)
+  assert.equal(page1.visible.length, 6)
+  assert.ok(page1.visible.some((p) => p.agent.id === 'custom-agent-7'))
+  assert.ok(page1.visible.some((p) => p.agent.id === 'custom-agent-8'))
+
+  // Remover um agente desativado da lista de ativos atualiza imediatamente o escritório
+  const afterDeactivation = baseAgents.slice(0, 4).concat(customAgents.slice(0, 1))
+  const afterPlacement = computeOfficePlacement(afterDeactivation, 0)
+  assert.equal(afterPlacement.totalSpecialists, 1)
+  assert.equal(afterPlacement.visible.length, 5)
+  assert.ok(afterPlacement.visible.some((p) => p.agent.id === 'custom-agent-1'))
+  assert.ok(!afterPlacement.visible.some((p) => p.agent.id === 'custom-agent-2'))
 })

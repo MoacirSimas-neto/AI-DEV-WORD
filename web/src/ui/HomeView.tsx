@@ -170,6 +170,19 @@ export function HomeView({
               <div className="cc-mission-meta">
                 <span className="mission-id-badge">Missão #{featuredMission.id}</span>
                 {featuredProject && <span className="cc-project-tag">📁 {featuredProject.name}</span>}
+                {featuredMission.teamSnapshot && (
+                  <span className="cc-project-tag" title="Equipe participante da missão">
+                    👥{' '}
+                    {[
+                      featuredMission.teamSnapshot[featuredMission.plannerId ?? 'architect']?.name ??
+                        (featuredMission.plannerId ?? 'architect'),
+                      featuredMission.teamSnapshot[featuredMission.devId ?? 'dev']?.name ??
+                        (featuredMission.devId ?? 'dev'),
+                      featuredMission.teamSnapshot[featuredMission.qaId ?? 'qa']?.name ??
+                        (featuredMission.qaId ?? 'qa'),
+                    ].join(' → ')}
+                  </span>
+                )}
               </div>
               <h4 className="cc-mission-title">
                 {featuredTask ? featuredTask.title : `Tarefa #${featuredMission.taskId}`}
@@ -195,7 +208,9 @@ export function HomeView({
                 {missionProgress.stages.map((st, i) => (
                   <div key={st.id} className={`cc-stage-pill stage-status-${st.status}`}>
                     <span className="cc-stage-idx">{i + 1}</span>
-                    <span>{st.label}</span>
+                    <span>
+                      {st.label} <small>({st.agentRole})</small>
+                    </span>
                   </div>
                 ))}
               </div>
@@ -247,7 +262,11 @@ export function HomeView({
               return (
                 <div key={agent.id} className="cc-agent-card">
                   <div className="cc-agent-top">
-                    <AgentPortrait agentId={agent.id} dimmed={agent.state === 'offline'} />
+                    <AgentPortrait
+                      agentId={agent.id}
+                      preset={cfg?.avatarPreset ?? agent.avatarPreset}
+                      dimmed={agent.state === 'offline'}
+                    />
                     <div className="cc-agent-id">
                       <strong>{agent.name}</strong>
                       <span className="cc-agent-role">{agent.role}</span>
@@ -261,6 +280,7 @@ export function HomeView({
                     <span className="cc-spec-pill">
                       CLI: {agent.cliVersion ? agent.cliVersion : agent.cli}
                     </span>
+                    {!agent.isBuiltin && <span className="cc-spec-pill">Personalizado</span>}
                   </div>
                   <p className="cc-agent-msg">{agent.message}</p>
                   <div className="cc-agent-actions">

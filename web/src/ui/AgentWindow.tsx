@@ -30,10 +30,19 @@ export function AgentWindow({ agent, config, online, hasProject, send, subscribe
   return (
     <aside className="window">
       <header className="window-head">
-        <AgentPortrait agentId={agent.id} dimmed={agent.state === 'offline'} />
+        <AgentPortrait
+          agentId={agent.id}
+          preset={config?.avatarPreset ?? agent.avatarPreset}
+          dimmed={agent.state === 'offline'}
+        />
         <div className="window-id">
           <h2>{agent.name}</h2>
-          <p>{agent.role}</p>
+          <p>
+            {agent.role}
+            {(config?.specializationId ?? agent.specializationId)
+              ? ` · Especialização: ${config?.specializationId ?? agent.specializationId}`
+              : ''}
+          </p>
         </div>
         <button type="button" className="btn-quiet window-close" aria-label="Fechar janela" onClick={onClose}>
           ×

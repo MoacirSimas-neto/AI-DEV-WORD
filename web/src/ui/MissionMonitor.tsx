@@ -158,11 +158,36 @@ export function MissionMonitor({
               <p className="mission-task-desc">{linkedTask.description}</p>
             )}
 
+            {/* Equipe da missão (snapshot imutável) */}
+            <div className="mission-team-summary">
+              <span className="mission-team-chip" title="Responsável pelo Planejamento">
+                📋 Plan:{' '}
+                <strong>
+                  {currentMission.teamSnapshot?.[currentMission.plannerId ?? 'architect']?.name ??
+                    (currentMission.plannerId ?? 'architect')}
+                </strong>
+              </span>
+              <span className="mission-team-chip" title="Responsável pelo Desenvolvimento">
+                💻 Dev:{' '}
+                <strong>
+                  {currentMission.teamSnapshot?.[currentMission.devId ?? 'dev']?.name ??
+                    (currentMission.devId ?? 'dev')}
+                </strong>
+              </span>
+              <span className="mission-team-chip" title="Responsável pela Revisão QA">
+                🔍 QA:{' '}
+                <strong>
+                  {currentMission.teamSnapshot?.[currentMission.qaId ?? 'qa']?.name ??
+                    (currentMission.qaId ?? 'qa')}
+                </strong>
+              </span>
+            </div>
+
             {/* Agente responsável na etapa atual */}
             {displayAgentName && (
               <div className="mission-agent-meta">
                 <span>
-                  Agente: <strong>{displayAgentName}</strong> {displayAgentRole ? `(${displayAgentRole})` : ''}
+                  Etapa atual: <strong>{displayAgentName}</strong> {displayAgentRole ? `(${displayAgentRole})` : ''}
                 </span>
                 {displayProvider && displayModel && (
                   <span className="mission-model-badge" title="Modelo configurado para a missão">
@@ -274,7 +299,12 @@ export function MissionMonitor({
           {/* Resultado da Revisão de QA */}
           {currentMission.review && (
             <section className="mission-review-box">
-              <h4>Relatório do QA</h4>
+              <div className="mission-live-head">
+                <h4>Relatório do QA</h4>
+                {currentMission.verdictDetail && (
+                  <span className="mission-status-pill">{currentMission.verdictDetail}</span>
+                )}
+              </div>
               <pre className="mission-plan-text">{currentMission.review}</pre>
             </section>
           )}
