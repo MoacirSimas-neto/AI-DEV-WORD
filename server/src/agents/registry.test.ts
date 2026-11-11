@@ -68,3 +68,10 @@ test('sessão iniciada durante a verificação não tem o estado sobrescrito', a
   assert.equal(agent?.message, 'Trabalhando')
   assert.equal(agent?.cliVersion, 'codex-cli 1.2.3')
 })
+
+test('CLI instalado que não consegue executar não aparece como pronto', async () => {
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'missing' }))
+  const agent = await registry.check('tutor')
+  assert.equal(agent?.state, 'error')
+  assert.match(agent?.message ?? '', /não consegue executar/)
+})

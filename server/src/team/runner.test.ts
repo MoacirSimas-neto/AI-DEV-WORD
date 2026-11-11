@@ -12,7 +12,7 @@ import { GitService } from '../git/service.ts'
 import { HistoryStore } from '../history/store.ts'
 import { ProjectStore } from '../projects/store.ts'
 import { TaskStore } from '../tasks/store.ts'
-import { TeamRunner, getStepCliAndArgs } from './runner.ts'
+import { MAX_ATTEMPTS, TeamRunner, getStepCliAndArgs } from './runner.ts'
 
 test('TeamRunner fluxo completo: planejar -> aprovar -> desenvolver -> revisar', async () => {
   const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-test-')))
@@ -584,9 +584,9 @@ test('TeamRunner persiste verdictDetail e verdict corretamente para todas as 7 c
     registry,
     git: new GitService(),
     configs,
-    launch: (_cli, _args, _options) => {
+    launch: (_cli, args, options) => {
       stepCounter++
-      const isQa = stepCounter % 3 === 0
+      const isQa = (options.input ?? args.at(-1) ?? '').includes('Você é o QA Engineer')
       return {
         done: Promise.resolve({
           code: 0,
@@ -615,12 +615,16 @@ test('TeamRunner persiste verdictDetail e verdict corretamente para todas as 7 c
     }
     await runner.approve(m.id)
     for (let i = 0; i < 50; i++) {
-      if (tasks.getMission(m.id)!.phase === 'done') break
+      if (['done', 'failed'].includes(tasks.getMission(m.id)!.phase)) break
       await new Promise((r) => setTimeout(r, 10))
     }
     const done = tasks.getMission(m.id)!
     assert.equal(done.verdictDetail, c.expectedDetail)
     assert.equal(done.verdict, c.expectedBinary)
+    // Só o que o QA aprovou é concluído; REPROVADO esgota as tentativas de retrabalho.
+    assert.equal(done.phase, c.expectedBinary === 'approved' ? 'done' : 'failed')
+    assert.equal(done.attempts!.length, c.expectedDetail === 'REPROVADO' ? MAX_ATTEMPTS : 1)
+    assert.equal(tasks.get(t.id)!.status, c.expectedBinary === 'approved' ? 'review' : 'todo')
   }
 })
 
@@ -744,4 +748,68 @@ test('TeamRunner avisa o Antigravity headless que não há comandos e explica a 
   const failed = tasks.getMission(mission.id)!
   assert.equal(failed.phase, 'failed')
   assert.match(failed.error ?? '', /negou uma ferramenta de comando/)
+})
+
+test('TeamRunner devolve ao Dev o parecer completo do QA reprovado e conclui só após a aprovação', async () => {
+  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-rework-')))
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp })
+  writeFileSync(path.join(tmp, 'init.txt'), 'init')
+  execFileSync('git', ['add', '.'], { cwd: tmp })
+  execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp })
+
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+  for (const a of registry.list()) await registry.check(a.id)
+
+  const PARECER = 'Defeito por análise estática: soma() subtrai em vez de somar (linha 2).\nVEREDITO: REPROVADO'
+  const devPrompts: string[] = []
+  const qaPrompts: string[] = []
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    git: new GitService(),
+    launch: (cli, _args, options) => {
+      const prompt = options.input ?? ''
+      let stdout = 'Plano'
+      if (cli === 'codex') {
+        devPrompts.push(prompt)
+        writeFileSync(path.join(tmp, 'soma.js'), `// versão ${devPrompts.length}`)
+        stdout = `Relatório do Dev ${devPrompts.length}`
+      } else if (prompt.includes('Você é o QA Engineer')) {
+        qaPrompts.push(prompt)
+        stdout = qaPrompts.length === 1 ? PARECER : 'Corrigido.\nVEREDITO: APROVADO'
+      }
+      return { done: Promise.resolve({ code: 0, stdout, stderr: '', timedOut: false }), kill: () => {} }
+    },
+  })
+
+  const task = tasks.create(projects.active()!.id, { title: 'Somar', description: 'soma(a, b)', priority: 'low', status: 'todo', agentId: null })
+  const mission = await runner.start(task.id)
+  for (let i = 0; i < 50 && tasks.getMission(mission.id)!.phase !== 'awaiting_approval'; i++) await new Promise((r) => setTimeout(r, 20))
+  await runner.approve(mission.id)
+  for (let i = 0; i < 100 && tasks.getMission(mission.id)!.phase !== 'done'; i++) await new Promise((r) => setTimeout(r, 20))
+
+  const done = tasks.getMission(mission.id)!
+  assert.equal(done.phase, 'done')
+  assert.equal(done.verdict, 'approved')
+  // O Dev trabalhou duas vezes; só a segunda recebeu o parecer, e por inteiro.
+  assert.equal(devPrompts.length, 2)
+  assert.ok(!devPrompts[0].includes('RETRABALHO'))
+  assert.ok(devPrompts[1].includes('RETRABALHO — tentativa 2 de 3'))
+  assert.ok(devPrompts[1].includes(PARECER))
+  // O QA reavaliou a nova implementação sabendo o que tinha reprovado.
+  assert.equal(qaPrompts.length, 2)
+  assert.ok(qaPrompts[1].includes('Relatório do Dev 2'))
+  assert.ok(qaPrompts[1].includes(PARECER))
+  // Histórico das tentativas preservado.
+  assert.deepEqual(done.attempts!.map((a) => [a.attempt, a.devReport, a.verdictDetail]), [
+    [1, 'Relatório do Dev 1', 'REPROVADO'],
+    [2, 'Relatório do Dev 2', 'APROVADO'],
+  ])
+  assert.ok(history.list().some((h) => h.message.includes('devolvida a')))
 })

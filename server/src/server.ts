@@ -480,6 +480,7 @@ export function createAppServer({
         break
       case 'task-create':
         try {
+          if (!projects.get(message.projectId)) throw new Error('Projeto desconhecido: escolha um projeto antes de criar a tarefa.')
           tasks.create(message.projectId, message.task)
         } catch (error) {
           send(socket, { type: 'notice', message: errorText(error) })

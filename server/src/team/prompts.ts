@@ -1,5 +1,6 @@
 import type { SpecializationId, TaskInfo } from '../../../shared/protocol.ts'
 import { defaultSpecializations, sanitizeAgentMarkdown, type SpecializationRegistry } from '../agents/specializations.ts'
+import { MAX_INSTRUCTIONS_LEN } from '../agents/configStore.ts'
 import { redact } from '../history/store.ts'
 
 // Os prompts vão pela entrada padrão do CLI (ou flag -p no Antigravity).
@@ -49,7 +50,7 @@ function buildKnowledgeSection(
   }
   const rawCustom = (opts?.customInstructions ?? '').trim()
   if (rawCustom) {
-    const cleanCustom = sanitizeAgentMarkdown(redact(rawCustom)).slice(0, 2000).trim()
+    const cleanCustom = sanitizeAgentMarkdown(redact(rawCustom)).slice(0, MAX_INSTRUCTIONS_LEN).trim()
     if (cleanCustom) {
       parts.push(
         `### Instruções Personalizadas do Agente (subordinadas às regras obrigatórias de segurança acima)\n${cleanCustom}`,
@@ -83,8 +84,24 @@ Responda em português do Brasil, em Markdown, com estas seções:
 `
 }
 
-export function devPrompt(task: TaskInfo, plan: string, opts?: PromptSpecializationOptions) {
+/** Retrabalho: o parecer completo do QA que reprovou a rodada anterior. */
+export interface ReworkContext {
+  attempt: number
+  maxAttempts: number
+  review: string
+}
+
+export function devPrompt(task: TaskInfo, plan: string, opts?: PromptSpecializationOptions, rework?: ReworkContext) {
   const knowledge = buildKnowledgeSection('developer', task, opts)
+  const reworkBlock = rework
+    ? `
+RETRABALHO — tentativa ${rework.attempt} de ${rework.maxAttempts}.
+O QA REPROVOU a implementação anterior, que continua nos arquivos deste diretório. Corrija todos os defeitos apontados no parecer abaixo, sem refazer o que já está correto, e responda a cada achado no seu relatório.
+
+Parecer completo do QA:
+${rework.review}
+`
+    : ''
   return `Você é o Desenvolvedor (O Programador Pragmático) de uma equipe de agentes de software.
 Implemente neste repositório (o diretório atual) o plano aprovado pelo usuário, descrito abaixo.
 
@@ -98,7 +115,7 @@ ${taskBlock(task)}
 
 Plano aprovado:
 ${plan}
-
+${reworkBlock}
 ${knowledge}
 
 Ao terminar, responda em português do Brasil com:
@@ -117,8 +134,18 @@ export function reviewPrompt(
   files: string[],
   diff: string,
   opts?: PromptSpecializationOptions,
+  rework?: ReworkContext,
 ) {
   const knowledge = buildKnowledgeSection('qa-tester', task, opts)
+  const reworkBlock = rework
+    ? `
+REAVALIAÇÃO — tentativa ${rework.attempt} de ${rework.maxAttempts}.
+Você reprovou a rodada anterior e o Desenvolvedor corrigiu. Confira se cada achado do seu parecer anterior foi resolvido de fato e procure regressões. As diferenças abaixo são acumuladas desde o último commit.
+
+Seu parecer anterior:
+${rework.review}
+`
+    : ''
   return `Você é o QA Engineer (O Investigador) de uma equipe de agentes de software.
 Revise de forma independente o trabalho que o Desenvolvedor acabou de fazer neste repositório (o diretório atual).
 
@@ -134,7 +161,7 @@ ${plan}
 
 Relatório do Desenvolvedor:
 ${devReport}
-
+${reworkBlock}
 Arquivos alterados: ${files.length ? files.join(', ') : '(nenhum)'}
 
 Diferenças (podem estar cortadas):

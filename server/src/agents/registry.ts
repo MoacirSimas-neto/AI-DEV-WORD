@@ -210,13 +210,14 @@ export class AgentRegistry extends EventEmitter {
       }
       const message =
         result.auth === 'missing'
-          ? 'CLI instalado, mas sem login. Faça o login oficial do CLI no seu terminal.'
+          ? 'CLI instalado, mas não consegue executar (sem login ou conta sem acesso). Teste o CLI no seu terminal.'
           : 'Pronto para trabalhar.'
       return this.update(agentId, {
         ...done,
         cliVersion: result.version,
         auth: result.auth,
-        ...(busy ? {} : { state: 'idle', message }),
+        // Sem login o agente não está pronto: não pode aparecer como disponível.
+        ...(busy ? {} : { state: result.auth === 'missing' ? 'error' : 'idle', message }),
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

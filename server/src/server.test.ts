@@ -153,6 +153,19 @@ test('terminal é recusado sem projeto e funciona depois de adicionar um', async
   client.socket.close()
 })
 
+test('tarefa não pode ser criada em projeto inexistente', async () => {
+  const client = await connect()
+  await client.waitFor('snapshot')
+  client.send({
+    type: 'task-create',
+    projectId: 9999,
+    task: { title: 'Órfã', description: '', priority: 'low', status: 'todo', agentId: null },
+  })
+  assert.match((await client.waitFor('notice')).message, /Projeto desconhecido/)
+  assert.equal(tasks.list().length, 0)
+  client.socket.close()
+})
+
 test('git: estado, diff e preparação pelo WebSocket; push sem prévia é recusado', async () => {
   const client = await connect()
   await client.waitFor('snapshot') // o projeto ativo já é projectDir (teste anterior)

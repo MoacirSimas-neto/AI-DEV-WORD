@@ -211,6 +211,7 @@ export interface TaskInfo extends TaskInput {
 
 /**
  * Modo equipe: planning -> awaiting_approval -> developing -> reviewing -> done.
+ * QA reprovou: volta a developing (retrabalho) até o limite de tentativas; sem aprovação termina em failed.
  * failed e cancelled também encerram a missão.
  */
 export type MissionPhase =
@@ -221,6 +222,15 @@ export type MissionPhase =
   | 'done'
   | 'failed'
   | 'cancelled'
+
+/** Uma rodada Dev -> QA da missão. A lista preserva o histórico do retrabalho. */
+export interface MissionAttempt {
+  attempt: number
+  devReport: string
+  files: string[]
+  review: string
+  verdictDetail: string | null
+}
 
 export interface MissionInfo {
   id: number
@@ -243,6 +253,8 @@ export interface MissionInfo {
   verdict: 'approved' | 'changes' | null
   /** Classificação detalhada do QA (ex.: 'APROVADO COM RESSALVAS'). */
   verdictDetail?: string | null
+  /** Rodadas Dev -> QA já encerradas, da mais antiga para a mais recente. */
+  attempts?: MissionAttempt[]
   /** Snapshot sem credenciais dos agentes participantes no momento da missão. */
   teamSnapshot?: Record<string, AgentSnapshotEntry>
   /** Arquivos com alterações depois que o Dev terminou. */

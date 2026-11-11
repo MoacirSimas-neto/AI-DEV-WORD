@@ -5,6 +5,7 @@ import type {
   AgentSnapshotEntry,
   CliId,
   GitFile,
+  MissionAttempt,
   MissionInfo,
   MissionTeamSelection,
   ProviderId,
@@ -19,7 +20,7 @@ import type { GitService } from '../git/service.ts'
 import { cleanOutput, type HistoryStore, redact } from '../history/store.ts'
 import type { ProjectStore } from '../projects/store.ts'
 import { OPEN_PHASES, type TaskStore } from '../tasks/store.ts'
-import { devPrompt, parseDetailedVerdict, parseVerdict, planPrompt, reviewPrompt } from './prompts.ts'
+import { devPrompt, parseDetailedVerdict, parseVerdict, planPrompt, type ReworkContext, reviewPrompt } from './prompts.ts'
 
 /** Inicia um CLI oficial sem terminal. Em produção é o startCli; nos testes, um falso. */
 export type AgentLauncher = (cli: CliId, args: string[], options: StartOptions) => RunningCli
@@ -37,6 +38,10 @@ const VALID_PROVIDERS = new Set<ProviderId>(['antigravity', 'codex', 'gemini'])
 const DEFAULT_STEP_TIMEOUT_MS = 20 * 60_000
 const MAX_TEXT = 100_000
 const MAX_DIFF = 60_000
+/** Rodadas Dev -> QA por missão: impede retrabalho infinito. */
+export const MAX_ATTEMPTS = 3
+// O Windows limita a linha de comando a ~32 mil caracteres (o agy recebe o prompt como argumento).
+const MAX_ARG_PROMPT = 26_000
 const LIMIT_PATTERN = /rate.?limit|quota|usage limit|too many requests|\b429\b|resource.?exhausted/i
 // O Antigravity headless não consegue pedir permissão de comando: a tentativa é
 // negada e o turno inteiro sai vazio (código 0). O aviso evita a tentativa.
@@ -84,7 +89,8 @@ export function getStepCliAndArgs(
   let passPromptAsArg = false
 
   if (cli === 'gemini') {
-    args = ['--approval-mode', role === 'developing' ? 'auto_edit' : 'default']
+    // --skip-trust: a pasta do projeto já foi autorizada pelo usuário e o modo headless não consegue perguntar.
+    args = ['--skip-trust', '--approval-mode', role === 'developing' ? 'auto_edit' : 'default']
     if (model && model !== 'auto' && model !== 'default') {
       args.push('-m', model)
     }
@@ -290,92 +296,126 @@ export class TeamRunner extends EventEmitter {
     const [, devId, qaId] = this.missionTeam(current)
     const devCfg = this.resolveMissionAgentConfig(current, devId, 'developer')
     const devConfig = getStepCliAndArgs('developing', devCfg)
-    const devPromptText = devPrompt(task, plan, {
-      agentName: devCfg?.name,
-      specializationId: devCfg?.specializationId ?? 'developer',
-      customInstructions: devCfg?.customInstructions,
-      registry: this.specializations,
-    })
-    const report = await this.step(
-      missionId,
-      devId,
-      devConfig.cli,
-      devConfig.args,
-      cwd,
-      devPromptText,
-      devConfig.model,
-      devConfig.effort,
-      devConfig.passPromptAsArg,
-    )
-    if (report === null) return
-
-    let changed: GitFile[]
-    try {
-      changed = (await this.git.status(cwd)).files
-    } catch (error) {
-      if (!run.cancelled) this.fail(missionId, devId, `Não foi possível ler o Git depois do Dev: ${errorText(error)}`)
-      return
-    }
-    if (run.cancelled) return
-    const files = changed.map((f) => f.path)
-    const mission = this.tasks.updateMission(missionId, { phase: 'reviewing', devReport: report, files })
-    const devLabel = devCfg?.name || devId
-    this.log(
-      mission,
-      'files',
-      files.length ? `Arquivos alterados por ${devLabel}: ${files.join(', ')}` : `O ${devLabel} não alterou nenhum arquivo.`,
-      devId,
-    )
-    const cliActor = devConfig.cli === 'codex' ? 'Codex' : devLabel
-    this.emit('git-change', {
-      agentId: devId,
-      cwd,
-      files,
-      summary:
-        files.length > 0
-          ? `${cliActor} concluiu a implementação — novas alterações detectadas (${files.length} arquivo(s)).`
-          : `${cliActor} concluiu a implementação — nenhuma alteração detectada.`,
-    })
-    this.registry.setMissionState(devId, 'done', 'Implementação entregue ao QA')
-    this.registry.setMissionState(qaId, 'reviewing', `Revisando a missão #${missionId}`)
-
-    const diff = await this.collectDiff(cwd, changed)
     const qaCfg = this.resolveMissionAgentConfig(current, qaId, 'qa-tester')
     const qaConfig = getStepCliAndArgs('reviewing', qaCfg)
-    const qaPromptText = reviewPrompt(task, plan, report, files, diff, {
-      agentName: qaCfg?.name,
-      specializationId: qaCfg?.specializationId ?? 'qa-tester',
-      customInstructions: qaCfg?.customInstructions,
-      registry: this.specializations,
-    })
-    const review = await this.step(
-      missionId,
-      qaId,
-      qaConfig.cli,
-      qaConfig.args,
-      cwd,
-      qaPromptText,
-      qaConfig.model,
-      qaConfig.effort,
-      qaConfig.passPromptAsArg,
-    )
-    if (review === null) return
+    const devLabel = devCfg?.name || devId
+    const attempts: MissionAttempt[] = []
+    let rework: ReworkContext | undefined
 
-    const verdictDetail = parseDetailedVerdict(review)
-    const verdict = parseVerdict(review)
-    const done = this.tasks.updateMission(missionId, { phase: 'done', review, verdict, verdictDetail })
-    this.running = null
-    this.tasks.setStatus(task.id, 'review')
-    const detailSuffix = verdictDetail ? ` (${verdictDetail})` : ''
-    const label =
-      verdict === 'approved'
-        ? `aprovado${detailSuffix}`
-        : verdict === 'changes'
-          ? `reprovado, pede mudanças${detailSuffix}`
-          : 'sem veredito claro'
-    this.log(done, 'review', `Revisão do QA na missão #${missionId}: ${label}.`, qaId)
-    this.log(done, 'mission', `Missão #${missionId} concluída. Revise as alterações e faça o commit no painel Alterações.`)
-    this.registry.setMissionState(qaId, 'done', `Revisão: ${verdictDetail ?? label}`)
+    // Rodadas Dev -> QA: o QA devolve ao Dev o que reprovar, até MAX_ATTEMPTS.
+    for (let attempt = 1; ; attempt++) {
+      const devPromptText = devPrompt(
+        task,
+        plan,
+        {
+          agentName: devCfg?.name,
+          specializationId: devCfg?.specializationId ?? 'developer',
+          customInstructions: devCfg?.customInstructions,
+          registry: this.specializations,
+        },
+        rework,
+      )
+      const report = await this.step(
+        missionId,
+        devId,
+        devConfig.cli,
+        devConfig.args,
+        cwd,
+        devPromptText,
+        devConfig.model,
+        devConfig.effort,
+        devConfig.passPromptAsArg,
+      )
+      if (report === null) return
+
+      let changed: GitFile[]
+      try {
+        changed = (await this.git.status(cwd)).files
+      } catch (error) {
+        if (!run.cancelled) this.fail(missionId, devId, `Não foi possível ler o Git depois do Dev: ${errorText(error)}`)
+        return
+      }
+      if (run.cancelled) return
+      const files = changed.map((f) => f.path)
+      const mission = this.tasks.updateMission(missionId, { phase: 'reviewing', devReport: report, files })
+      this.log(
+        mission,
+        'files',
+        files.length ? `Arquivos alterados por ${devLabel}: ${files.join(', ')}` : `O ${devLabel} não alterou nenhum arquivo.`,
+        devId,
+      )
+      const cliActor = devConfig.cli === 'codex' ? 'Codex' : devLabel
+      this.emit('git-change', {
+        agentId: devId,
+        cwd,
+        files,
+        summary:
+          files.length > 0
+            ? `${cliActor} concluiu a implementação — novas alterações detectadas (${files.length} arquivo(s)).`
+            : `${cliActor} concluiu a implementação — nenhuma alteração detectada.`,
+      })
+      this.registry.setMissionState(devId, 'done', 'Implementação entregue ao QA')
+      this.registry.setMissionState(qaId, 'reviewing', `Revisando a missão #${missionId} (tentativa ${attempt}/${MAX_ATTEMPTS})`)
+
+      const qaOpts = {
+        agentName: qaCfg?.name,
+        specializationId: qaCfg?.specializationId ?? ('qa-tester' as const),
+        customInstructions: qaCfg?.customInstructions,
+        registry: this.specializations,
+      }
+      let diff = await this.collectDiff(cwd, changed)
+      // shortcut: na linha de comando o parecer anterior vai só com o começo (onde ficam os achados); sem limite quando o agy aceitar prompt por stdin.
+      const qaRework = rework && qaConfig.passPromptAsArg ? { ...rework, review: rework.review.slice(0, 8000) } : rework
+      if (qaConfig.passPromptAsArg) {
+        // O prompt vai na linha de comando: o diff cede espaço (o QA ainda lê os arquivos).
+        const room = MAX_ARG_PROMPT - reviewPrompt(task, plan, report, files, '', qaOpts, qaRework).length
+        if (diff.length > room) diff = `${diff.slice(0, Math.max(0, room))}
+… diferenças cortadas: leia os arquivos …`
+      }
+      const review = await this.step(
+        missionId,
+        qaId,
+        qaConfig.cli,
+        qaConfig.args,
+        cwd,
+        reviewPrompt(task, plan, report, files, diff, qaOpts, qaRework),
+        qaConfig.model,
+        qaConfig.effort,
+        qaConfig.passPromptAsArg,
+      )
+      if (review === null) return
+
+      const verdictDetail = parseDetailedVerdict(review)
+      const verdict = parseVerdict(review)
+      attempts.push({ attempt, devReport: report, files, review, verdictDetail })
+      const reviewed = this.tasks.updateMission(missionId, { review, verdict, verdictDetail, attempts })
+      const label = verdictDetail ?? 'sem veredito claro'
+      this.log(reviewed, 'review', `Revisão do QA na missão #${missionId} (tentativa ${attempt}/${MAX_ATTEMPTS}): ${label}.`, qaId)
+
+      if (verdict === 'approved') {
+        const done = this.tasks.updateMission(missionId, { phase: 'done' })
+        this.running = null
+        this.tasks.setStatus(task.id, 'review')
+        this.log(done, 'mission', `Missão #${missionId} concluída. Revise as alterações e faça o commit no painel Alterações.`)
+        this.registry.setMissionState(qaId, 'done', `Revisão: ${label}`)
+        return
+      }
+      // Só REPROVADO é defeito que o Dev consegue corrigir; o resto precisa do usuário.
+      if (verdictDetail !== 'REPROVADO') {
+        this.fail(missionId, qaId, `O QA não aprovou a implementação (${label}) e o caso não é de retrabalho do Dev. Leia o parecer do QA na missão e decida como seguir.`)
+        return
+      }
+      if (attempt >= MAX_ATTEMPTS) {
+        this.fail(missionId, qaId, `O QA reprovou a implementação nas ${MAX_ATTEMPTS} tentativas. A missão não foi concluída: leia o último parecer do QA e ajuste a tarefa, o plano ou o código.`)
+        return
+      }
+
+      rework = { attempt: attempt + 1, maxAttempts: MAX_ATTEMPTS, review }
+      const back = this.tasks.updateMission(missionId, { phase: 'developing' })
+      this.log(back, 'mission', `QA reprovou: missão #${missionId} devolvida a ${devLabel} com o parecer (tentativa ${attempt + 1}/${MAX_ATTEMPTS}).`, qaId)
+      this.registry.setMissionState(qaId, 'done', 'Reprovado: devolvido ao Dev')
+      this.registry.setMissionState(devId, 'working', `Corrigindo a missão #${missionId} (tentativa ${attempt + 1}/${MAX_ATTEMPTS})`)
+    }
   }
 
   /** Roda um CLI com o prompt e devolve a resposta, ou null se falhou ou foi cancelado. */
@@ -400,6 +440,9 @@ export class TeamRunner extends EventEmitter {
     this.log(mission, 'agent', `${name} (${cli}${modelInfo}${effortInfo}) começou a trabalhar na missão #${missionId}.`, agentId)
     try {
       const fullPrompt = cli === 'agy' ? prompt + AGY_HEADLESS_NOTICE : prompt
+      if (passPromptAsArg && fullPrompt.length > 30_000) {
+        throw new Error(`${name}: o prompt desta etapa (${fullPrompt.length} caracteres) não cabe na linha de comando do ${cli}. Use outro provedor para este agente ou reduza a tarefa/plano.`)
+      }
       const stepArgs = passPromptAsArg ? [...args, fullPrompt] : args
       const stepInput = passPromptAsArg ? undefined : fullPrompt
       run.proc = this.launch(cli, stepArgs, {
@@ -527,6 +570,9 @@ export class TeamRunner extends EventEmitter {
       const regAgent = this.registry.get(slot.agentId)
       if (!regAgent || regAgent.state === 'offline') {
         throw new Error(`${regAgent?.name ?? cfg?.name ?? slot.agentId}: CLI indisponível. Use "Verificar CLI" na janela do agente.`)
+      }
+      if (regAgent.auth === 'missing') {
+        throw new Error(`${regAgent.name}: o CLI "${regAgent.cli}" está instalado mas não consegue executar (sem login ou conta sem acesso).`)
       }
 
       const fallbackProvider: ProviderId =

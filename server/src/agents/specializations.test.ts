@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { TaskInfo } from '../../../shared/protocol.ts'
 import { devPrompt, parseDetailedVerdict, parseVerdict, planPrompt, reviewPrompt } from '../team/prompts.ts'
-import { defaultSpecializations, sanitizeAgentMarkdown } from './specializations.ts'
+import { defaultSpecializations, sanitizeAgentMarkdown, selectRelevantSections } from './specializations.ts'
 
 test('SpecializationRegistry lista as 4 especializações e confirma documentos migrados em knowledge/', () => {
   const list = defaultSpecializations.list()
@@ -113,4 +113,23 @@ test('prompts de missão integram especializações preservando regras de segura
   assert.equal(parseVerdict('Faltou rodar.\nVEREDITO: NÃO VERIFICADO'), 'changes')
   assert.equal(parseVerdict('Sem dados.\nVEREDITO: INCONCLUSIVO'), 'changes')
   assert.equal(parseDetailedVerdict('Parecer final\nVEREDITO: APROVADO COM RESSALVAS'), 'APROVADO COM RESSALVAS')
+})
+
+test('conhecimento: sem referências a arquivos inexistentes, seções relevantes à tarefa e instruções sem corte a 2000', () => {
+  // A definição do papel não manda mais ler knowledge/*.md (não existe na pasta do projeto da missão).
+  for (const id of ['architect', 'dev', 'qa']) {
+    const block = defaultSpecializations.resolveForTask(id, { taskContext: 'Qualquer tarefa', maxChars: 5500 }).promptBlock
+    assert.ok(!block.includes('knowledge/'), id)
+    assert.ok(block.length <= 5600, id)
+  }
+
+  // A seção que trata do tema da tarefa entra mesmo estando no fim do documento.
+  const doc = ['## 1. Nomes', 'Use nomes claros.', '## 2. Desempenho', 'Meça antes de otimizar.', '## 3. Concorrência', 'Evite estado compartilhado.'].join('\n')
+  const picked = selectRelevantSections(doc, 'Corrigir condição de corrida por concorrência', '', 60)
+  assert.ok(picked.includes('## 3. Concorrência'))
+  assert.ok(!picked.includes('## 1. Nomes'))
+
+  const longInstructions = 'regra '.repeat(600).trim() // 3599 caracteres
+  const prompt = devPrompt({ id: 1, projectId: 1, title: 'T', description: '', priority: 'low', status: 'todo', agentId: null, createdAt: '', updatedAt: '' }, 'plano', { customInstructions: longInstructions })
+  assert.ok(prompt.includes(longInstructions))
 })

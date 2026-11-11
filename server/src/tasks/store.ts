@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
 import type {
   AgentSnapshotEntry,
+  MissionAttempt,
   MissionInfo,
   MissionPhase,
   TaskInfo,
@@ -37,6 +38,7 @@ const SCHEMA = `
     verdict_detail TEXT,
     team_snapshot TEXT NOT NULL DEFAULT '{}',
     files TEXT NOT NULL DEFAULT '[]',
+    attempts TEXT NOT NULL DEFAULT '[]',
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -52,6 +54,7 @@ const EXTRA_MISSION_COLUMNS: [string, string][] = [
   ['qa_id', "TEXT NOT NULL DEFAULT 'qa'"],
   ['verdict_detail', 'TEXT'],
   ['team_snapshot', "TEXT NOT NULL DEFAULT '{}'"],
+  ['attempts', "TEXT NOT NULL DEFAULT '[]'"],
 ]
 
 export const OPEN_PHASES: MissionPhase[] = ['planning', 'awaiting_approval', 'developing', 'reviewing']
@@ -70,7 +73,7 @@ const TASK_COLUMNS = `id, project_id AS projectId, title, description, priority,
 const MISSION_COLUMNS = `id, task_id AS taskId, project_id AS projectId, phase,
   planner_id AS plannerId, dev_id AS devId, qa_id AS qaId,
   plan, dev_report AS devReport, review, verdict, verdict_detail AS verdictDetail,
-  team_snapshot AS teamSnapshot, files, error, created_at AS createdAt, updated_at AS updatedAt`
+  team_snapshot AS teamSnapshot, files, attempts, error, created_at AS createdAt, updated_at AS updatedAt`
 
 type MissionPatch = Partial<
   Pick<
@@ -86,6 +89,7 @@ type MissionPatch = Partial<
     | 'verdictDetail'
     | 'teamSnapshot'
     | 'files'
+    | 'attempts'
     | 'error'
   >
 >
@@ -102,6 +106,7 @@ const MISSION_FIELDS: Record<keyof MissionPatch, string> = {
   verdictDetail: 'verdict_detail',
   teamSnapshot: 'team_snapshot',
   files: 'files',
+  attempts: 'attempts',
   error: 'error',
 }
 
@@ -129,6 +134,7 @@ const toMission = (row: Record<string, unknown>): MissionInfo => ({
   verdictDetail: (row.verdictDetail as string | null) ?? null,
   teamSnapshot: parseJsonSafe<Record<string, AgentSnapshotEntry>>(row.teamSnapshot, {}),
   files: parseJsonSafe<string[]>(row.files, []),
+  attempts: parseJsonSafe<MissionAttempt[]>(row.attempts, []),
   error: (row.error as string | null) ?? null,
   createdAt: String(row.createdAt ?? ''),
   updatedAt: String(row.updatedAt ?? ''),
@@ -284,6 +290,7 @@ export class TaskStore extends EventEmitter {
     const keys = Object.keys(patch) as (keyof MissionPatch)[]
     const values = keys.map((k) => {
       if (k === 'files') return JSON.stringify(patch.files)
+      if (k === 'attempts') return JSON.stringify(patch.attempts)
       if (k === 'teamSnapshot') return JSON.stringify(patch.teamSnapshot)
       return patch[k] as string | null
     })

@@ -301,6 +301,9 @@ export function MissionMonitor({
             <section className="mission-review-box">
               <div className="mission-live-head">
                 <h4>Relatório do QA</h4>
+                {(currentMission.attempts?.length ?? 0) > 1 && (
+                  <span className="mission-status-pill">{currentMission.attempts!.length}ª tentativa</span>
+                )}
                 {currentMission.verdictDetail && (
                   <span className="mission-status-pill">{currentMission.verdictDetail}</span>
                 )}

@@ -78,8 +78,11 @@ export function sanitizeAgentMarkdown(raw: string): string {
   // Remove bloco YAML inicial (--- ... ---)
   const withoutFrontmatter = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n*/, '')
   // Filtra linhas que mencionem ferramentas exclusivas de runtime interno
-  const lines = withoutFrontmatter.split(/\r?\n/).filter((line) => {
-    return !/\b(invoke_subagent|view_file|grep_search|replace_file_content)\b/i.test(line)
+  // A seção "Base de conhecimento" manda ler knowledge/*.md, que não existe na pasta
+  // do projeto da missão: os trechos relevantes já vão embutidos no prompt.
+  const withoutLibrary = withoutFrontmatter.replace(/^## Base de conhecimento\r?\n[\s\S]*?(?=^## |(?![\s\S]))/m, '')
+  const lines = withoutLibrary.split(/\r?\n/).filter((line) => {
+    return !/\b(invoke_subagent|view_file|grep_search|replace_file_content)\b|knowledge\//i.test(line)
   })
   return lines.join('\n').trim()
 }
@@ -94,6 +97,54 @@ export function extractMarkdownExcerpt(markdown: string, maxChars: number): stri
     return `${sliced.slice(0, lastHeading).trim()}\n\n[...conteúdo condensado para caber no orçamento de prompt...]`
   }
   return `${sliced.trim()}\n\n[...conteúdo condensado para caber no orçamento de prompt...]`
+}
+
+// O que cada função mais precisa: desempata seções quando a tarefa não cita o tema.
+const ROLE_FOCUS: Record<SpecializationId, string> = {
+  'tech-lead': 'arquitetura alternativas decisao riscos planejamento requisitos delegacao',
+  developer: 'implementar codigo verificar testes erros seguranca requisitos entrega',
+  'qa-tester': 'testes evidencias defeitos investigacao classificacao riscos cobertura regressao',
+  tutor: '',
+}
+const MAX_SECTION_CHARS = 1200
+
+/** Radicais (6 letras, sem acento) das palavras com 5+ letras: "testes" e "testar" casam. */
+function stems(text: string): Set<string> {
+  const plain = text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  return new Set((plain.match(/[a-z]{5,}/g) ?? []).map((w) => w.slice(0, 6)))
+}
+
+/**
+ * Escolhe as seções (## e ###) mais relevantes para a tarefa até o orçamento,
+ * devolvendo-as na ordem original. Peso 3 no título, 2 para termos da tarefa
+ * no corpo e 1 para o foco da função.
+ */
+export function selectRelevantSections(markdown: string, taskText: string, roleFocus: string, maxChars: number): string {
+  const task = stems(taskText)
+  const role = stems(roleFocus)
+  const ranked = markdown
+    .split(/^(?=#{2,3} )/m)
+    .map((s) => s.trim())
+    .filter((s) => /^#{2,3} /.test(s))
+    .map((text, index) => {
+      const heading = stems(text.split('\n', 1)[0])
+      const body = stems(text)
+      let score = 0
+      for (const s of task) score += (heading.has(s) ? 3 : 0) + (body.has(s) ? 2 : 0)
+      for (const s of role) score += (heading.has(s) ? 3 : 0) + (body.has(s) ? 1 : 0)
+      return { text: extractMarkdownExcerpt(text, MAX_SECTION_CHARS), index, score }
+    })
+  const picked: typeof ranked = []
+  let used = 0
+  for (const section of [...ranked].sort((a, b) => b.score - a.score || a.index - b.index)) {
+    if (used + section.text.length > maxChars) continue
+    picked.push(section)
+    used += section.text.length + 2
+  }
+  return picked
+    .sort((a, b) => a.index - b.index)
+    .map((s) => s.text)
+    .join('\n\n')
 }
 
 export interface KnowledgeSelectionOptions {
@@ -198,6 +249,9 @@ export class SpecializationRegistry {
     const info = this.getInfo(specId)
     const maxChars = options.maxChars ?? 6500
     const contextText = (options.taskContext ?? '').toLowerCase()
+    const pick = (doc: string, share: number) =>
+      selectRelevantSections(doc, contextText, ROLE_FOCUS[specId], Math.floor(maxChars * share)) ||
+      extractMarkdownExcerpt(doc, Math.floor(maxChars * share))
 
     const loadedDocs: KnowledgeDocKind[] = []
     const missingDocs: KnowledgeDocKind[] = []
@@ -207,7 +261,7 @@ export class SpecializationRegistry {
     const agentDoc = this.readDocument(specId, 'agent')
     if (agentDoc) {
       loadedDocs.push('agent')
-      sections.push(extractMarkdownExcerpt(agentDoc, Math.floor(maxChars * 0.45)))
+      sections.push(extractMarkdownExcerpt(agentDoc, Math.floor(maxChars * 0.3)))
     } else if (CATALOG[specId].agentFile) {
       missingDocs.push('agent')
     }
@@ -216,7 +270,7 @@ export class SpecializationRegistry {
     const principiosDoc = this.readDocument(specId, 'principios')
     if (principiosDoc) {
       loadedDocs.push('principios')
-      sections.push(extractMarkdownExcerpt(principiosDoc, Math.floor(maxChars * 0.45)))
+      sections.push(pick(principiosDoc, 0.6))
     } else if (info.knowledgeDir) {
       missingDocs.push('principios')
     }
@@ -231,7 +285,7 @@ export class SpecializationRegistry {
       const dossieDoc = this.readDocument(specId, 'dossie')
       if (dossieDoc) {
         loadedDocs.push('dossie')
-        sections.push(extractMarkdownExcerpt(dossieDoc, Math.floor(maxChars * 0.25)))
+        sections.push(pick(dossieDoc, 0.25))
       } else {
         missingDocs.push('dossie')
       }
@@ -244,7 +298,7 @@ export class SpecializationRegistry {
       const refDoc = this.readDocument(specId, 'referencias')
       if (refDoc) {
         loadedDocs.push('referencias')
-        sections.push(extractMarkdownExcerpt(refDoc, Math.floor(maxChars * 0.2)))
+        sections.push(pick(refDoc, 0.2))
       } else {
         missingDocs.push('referencias')
       }

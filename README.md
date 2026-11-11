@@ -77,7 +77,7 @@ server/src/
   projects/               Validação e normalização canônica de caminhos Windows/Linux (SQLite)
   tasks/                  CRUD de tarefas e missões do Modo Equipe (SQLite)
   history/                Histórico persistente com sanitização de segredos (redact)
-  team/                   Orquestrador do Modo Equipe (Arquiteto -> Aprovação -> Dev -> QA)
+  team/                   Orquestrador do Modo Equipe (Arquiteto -> Aprovação -> Dev -> QA; reprovado volta ao Dev, até 3 tentativas)
   git/                    Serviço Git local/remoto com sanitização de URL e token de push
   server.ts               Servidor HTTP + WebSocket restrito a 127.0.0.1
 web/src/

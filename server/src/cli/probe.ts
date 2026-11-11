@@ -19,7 +19,8 @@ interface CliSpec {
 
 const CATALOG: Record<CliId, CliSpec> = {
   codex: { command: 'codex', versionArgs: ['--version'], authArgs: ['login', 'status'] },
-  gemini: { command: 'gemini', versionArgs: ['--version'] },
+  // Sem comando de status: um prompt mínimo headless é a única prova de que a conta executa (gasta 1 requisição).
+  gemini: { command: 'gemini', versionArgs: ['--version'], authArgs: ['--skip-trust', '-p', 'ok'] },
   agy: { command: 'agy', versionArgs: ['--version'], authArgs: ['models'] },
 }
 
@@ -51,8 +52,12 @@ async function runProbe(cli: CliId): Promise<ProbeResult> {
   let auth: AuthState = 'unknown'
   if (spec.authArgs) {
     // Só o código de saída é usado; a saída (que pode citar a conta) é descartada.
-    const status = await runCli(executable, spec.authArgs)
-    auth = status.code === 0 ? 'ok' : 'missing'
+    try {
+      const status = await runCli(executable, spec.authArgs, { timeoutMs: 45_000 })
+      auth = status.code === 0 ? 'ok' : 'missing'
+    } catch {
+      // Demorou demais: não dá para afirmar nem que funciona nem que falha.
+    }
   }
   return { found: true, version: firstLine, auth }
 }

@@ -63,7 +63,7 @@ const VALID_AVATARS = new Set<AvatarPreset>([
   'specialist',
 ])
 const ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,39}$/
-const MAX_INSTRUCTIONS_LEN = 4000
+export const MAX_INSTRUCTIONS_LEN = 4000
 
 export const BUILTIN_AGENT_IDS = new Set(['architect', 'dev', 'qa', 'tutor'])
 
