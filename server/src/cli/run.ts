@@ -20,7 +20,7 @@ export interface RunOptions {
 
 // Quando o comando passa por cmd.exe, só aceitamos tokens simples para que
 // nada possa ser interpretado como metacaractere do shell.
-const SAFE_ARG = /^[\w.-]+$/
+const SAFE_ARG = /^[\w.=-]+$/
 
 /**
  * O Node recusa executar .cmd/.bat diretamente (proteção contra injeção), então

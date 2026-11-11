@@ -2,6 +2,19 @@
 
 export type CliId = 'codex' | 'gemini'
 
+export type ProviderId = 'codex' | 'gemini' | 'antigravity'
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'extra-high' | 'default'
+
+export interface AgentConfig {
+  agentId: string
+  provider: ProviderId
+  model: string
+  reasoningEffort: ReasoningEffort
+  updatedAt: string
+}
+
+export type AgentProfileId = 'economy' | 'balanced' | 'max_quality'
+
 /**
  * offline   = CLI não encontrado.
  * idle      = CLI pronto, sem sessão de terminal (disponível).
@@ -159,6 +172,7 @@ export type ServerMessage =
       tasks: TaskInfo[]
       missions: MissionInfo[]
       history: ActivityEntry[]
+      configs: AgentConfig[]
     }
   | { type: 'agent'; agent: AgentInfo }
   | { type: 'workspace'; workspace: Workspace }
@@ -174,10 +188,13 @@ export type ServerMessage =
   | { type: 'git-diff'; path: string; staged: boolean; text: string }
   | { type: 'git-push-preview'; preview: PushPreview }
   | { type: 'git-result'; ok: boolean; message: string }
+  /** Notificação de atividade/alterações detectadas no Git */
+  | { type: 'git-activity'; summary: string; files: string[]; agentId?: string }
   /** Listas completas, reenviadas a cada mudança (são pequenas). */
   | { type: 'tasks'; tasks: TaskInfo[] }
   | { type: 'missions'; missions: MissionInfo[] }
   | { type: 'history'; entries: ActivityEntry[] }
+  | { type: 'agent-configs'; configs: AgentConfig[] }
   /** Saída ao vivo do CLI que está trabalhando na missão. */
   | { type: 'mission-output'; missionId: number; data: string }
 
@@ -208,3 +225,15 @@ export type ClientMessage =
   | { type: 'mission-approve'; missionId: number }
   /** Rejeita o plano ou interrompe a missão. */
   | { type: 'mission-cancel'; missionId: number }
+  /** Central de Agentes: configuração individual, perfis e restauração */
+  | {
+      type: 'agent-config-set'
+      config: {
+        agentId: string
+        provider: ProviderId
+        model: string
+        reasoningEffort: ReasoningEffort
+      }
+    }
+  | { type: 'agent-config-profile'; profile: AgentProfileId }
+  | { type: 'agent-config-reset' }

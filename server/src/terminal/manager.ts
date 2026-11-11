@@ -11,13 +11,15 @@ export interface PtyLike {
   kill(): void
 }
 
-export type PtySpawner = (cli: CliId, cwd: string, cols: number, rows: number) => PtyLike
+export type PtySpawner = (cli: CliId, cwd: string, cols: number, rows: number, args?: string[]) => PtyLike
 
 export interface TerminalOptions {
   /** Sem saída por este tempo, o agente passa de 'working' para 'waiting'. */
   quietMs?: number
   /** Saída logo após uma tecla é eco da digitação, não trabalho do agente. */
   echoMs?: number
+  /** Obtém parâmetros adicionais do agente (modelo, esforço) configurados na Central. */
+  getArgs?: (agentId: string) => { cli: CliId; args: string[] }
 }
 
 interface Session {
@@ -42,6 +44,7 @@ export class TerminalManager extends EventEmitter {
   private readonly activeProjectPath: () => string | null
   private readonly quietMs: number
   private readonly echoMs: number
+  private readonly getArgs?: (agentId: string) => { cli: CliId; args: string[] }
 
   constructor(
     registry: AgentRegistry,
@@ -55,6 +58,7 @@ export class TerminalManager extends EventEmitter {
     this.activeProjectPath = activeProjectPath
     this.quietMs = options.quietMs ?? 1500
     this.echoMs = options.echoMs ?? 400
+    this.getArgs = options.getArgs
   }
 
   /** Inicia a sessão (ou reaproveita a existente) e devolve a saída acumulada. */
@@ -67,12 +71,15 @@ export class TerminalManager extends EventEmitter {
 
     const agent = this.registry.get(agentId)
     if (!agent) throw new Error('Agente desconhecido.')
-    if (agent.state === 'offline') throw new Error(`CLI "${agent.cli}" não está disponível.`)
+    const custom = this.getArgs?.(agentId)
+    const cli = custom?.cli ?? agent.cli
+    const extraArgs = custom?.args ?? []
+    if (agent.state === 'offline') throw new Error(`CLI "${cli}" não está disponível.`)
     // O CLI só nasce dentro de uma pasta que o usuário autorizou.
     const cwd = this.activeProjectPath()
     if (!cwd) throw new Error('Escolha um projeto antes de iniciar a sessão.')
 
-    const session: Session = { pty: this.spawn(agent.cli, cwd, cols, rows), cwd, buffer: '', lastInput: 0 }
+    const session: Session = { pty: this.spawn(cli, cwd, cols, rows, extraArgs), cwd, buffer: '', lastInput: 0 }
     this.sessions.set(agentId, session)
     this.registry.setRuntimeState(agentId, 'waiting', `Sessão aberta em ${cwd}`)
 

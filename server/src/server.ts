@@ -1,6 +1,18 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
-import type { AgentInfo, ClientMessage, ServerMessage, TaskInput, TaskPriority, TaskStatus } from '../../shared/protocol.ts'
+import type {
+  AgentConfig,
+  AgentInfo,
+  AgentProfileId,
+  ClientMessage,
+  ProviderId,
+  ReasoningEffort,
+  ServerMessage,
+  TaskInput,
+  TaskPriority,
+  TaskStatus,
+} from '../../shared/protocol.ts'
+import type { AgentConfigStore } from './agents/configStore.ts'
 import type { AgentRegistry } from './agents/registry.ts'
 import type { GitService } from './git/service.ts'
 import type { HistoryStore } from './history/store.ts'
@@ -17,6 +29,7 @@ export interface AppServerOptions {
   tasks: TaskStore
   history: HistoryStore
   team: TeamRunner
+  agentConfigs: AgentConfigStore
   allowedOrigins: string[]
 }
 
@@ -35,6 +48,9 @@ const isPathList = (v: unknown): v is string[] =>
 
 const VALID_PRIORITIES = new Set<TaskPriority>(['low', 'medium', 'high'])
 const VALID_STATUSES = new Set<TaskStatus>(['todo', 'doing', 'review', 'done'])
+const VALID_PROVIDERS = new Set<ProviderId>(['codex', 'gemini', 'antigravity'])
+const VALID_EFFORTS = new Set<ReasoningEffort>(['low', 'medium', 'high', 'extra-high', 'default'])
+const VALID_PROFILES = new Set<AgentProfileId>(['economy', 'balanced', 'max_quality'])
 
 function parseTaskInput(data: unknown): TaskInput | null {
   if (typeof data !== 'object' || data === null) return null
@@ -116,6 +132,28 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case 'mission-approve':
     case 'mission-cancel':
       return isId(msg.missionId) ? { type: msg.type, missionId: msg.missionId } : null
+    case 'agent-config-set': {
+      if (typeof msg.config !== 'object' || msg.config === null) return null
+      const c = msg.config as Record<string, unknown>
+      if (typeof c.agentId !== 'string' || !VALID_PROVIDERS.has(c.provider as ProviderId)) return null
+      if (typeof c.model !== 'string' || c.model.length > 100) return null
+      if (!VALID_EFFORTS.has(c.reasoningEffort as ReasoningEffort)) return null
+      return {
+        type: 'agent-config-set',
+        config: {
+          agentId: c.agentId,
+          provider: c.provider as ProviderId,
+          model: c.model,
+          reasoningEffort: c.reasoningEffort as ReasoningEffort,
+        },
+      }
+    }
+    case 'agent-config-profile':
+      return VALID_PROFILES.has(msg.profile as AgentProfileId)
+        ? { type: 'agent-config-profile', profile: msg.profile as AgentProfileId }
+        : null
+    case 'agent-config-reset':
+      return { type: 'agent-config-reset' }
     default:
       return null
   }
@@ -131,6 +169,7 @@ export function createAppServer({
   tasks,
   history,
   team,
+  agentConfigs,
   allowedOrigins,
 }: AppServerOptions): Server {
   const server = createServer((req, res) => {
@@ -307,6 +346,52 @@ export function createAppServer({
           send(socket, { type: 'notice', message: errorText(error) })
         }
         break
+      case 'agent-config-set':
+        try {
+          agentConfigs.set(message.config.agentId, message.config)
+          if (message.config.provider === 'codex' || message.config.provider === 'gemini') {
+            registry.setCli(message.config.agentId, message.config.provider)
+          }
+          history.add({
+            kind: 'agent',
+            message: `Configuração atualizada (${message.config.agentId}): ${message.config.provider} · ${message.config.model} · esforço ${message.config.reasoningEffort}`,
+          })
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'agent-config-profile':
+        try {
+          agentConfigs.applyProfile(message.profile)
+          for (const cfg of agentConfigs.list()) {
+            if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
+              registry.setCli(cfg.agentId, cfg.provider)
+            }
+          }
+          history.add({
+            kind: 'agent',
+            message: `Perfil de agentes aplicado: ${message.profile}`,
+          })
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'agent-config-reset':
+        try {
+          agentConfigs.resetDefaults()
+          for (const cfg of agentConfigs.list()) {
+            if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
+              registry.setCli(cfg.agentId, cfg.provider)
+            }
+          }
+          history.add({
+            kind: 'agent',
+            message: 'Configurações dos agentes restauradas para o padrão.',
+          })
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
     }
   }
 
@@ -318,6 +403,7 @@ export function createAppServer({
       tasks: tasks.list(),
       missions: tasks.listMissions(),
       history: history.list(),
+      configs: agentConfigs.list(),
     })
     socket.on('message', (raw) => {
       const message = parseClientMessage(raw.toString())
@@ -331,7 +417,14 @@ export function createAppServer({
   const onTasks = () => broadcast({ type: 'tasks', tasks: tasks.list() })
   const onMissions = () => broadcast({ type: 'missions', missions: tasks.listMissions() })
   const onHistory = () => broadcast({ type: 'history', entries: history.list() })
+  const onConfigs = (configs: AgentConfig[]) => broadcast({ type: 'agent-configs', configs })
   const onMissionOutput = (missionId: number, data: string) => broadcast({ type: 'mission-output', missionId, data })
+  const onGitChange = async (event: { agentId?: string; cwd: string; files: string[]; summary: string }) => {
+    broadcast({ type: 'git-activity', summary: event.summary, files: event.files, agentId: event.agentId })
+    try {
+      broadcast({ type: 'git-status', status: await git.status(event.cwd) })
+    } catch {}
+  }
 
   registry.on('change', onAgent)
   terminals.on('data', onData)
@@ -339,7 +432,9 @@ export function createAppServer({
   tasks.on('tasks', onTasks)
   tasks.on('missions', onMissions)
   history.on('added', onHistory)
+  agentConfigs.on('change', onConfigs)
   team.on('output', onMissionOutput)
+  team.on('git-change', onGitChange)
 
   server.on('close', () => {
     registry.off('change', onAgent)
@@ -348,7 +443,9 @@ export function createAppServer({
     tasks.off('tasks', onTasks)
     tasks.off('missions', onMissions)
     history.off('added', onHistory)
+    agentConfigs.off('change', onConfigs)
     team.off('output', onMissionOutput)
+    team.off('git-change', onGitChange)
     for (const client of wss.clients) client.terminate()
   })
 

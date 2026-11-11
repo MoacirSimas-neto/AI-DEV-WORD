@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
-import type { ActivityKind, CliId, GitFile, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
+import type { ActivityKind, AgentConfig, CliId, GitFile, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
+import type { AgentConfigStore } from '../agents/configStore.ts'
 import type { AgentRegistry } from '../agents/registry.ts'
 import type { CliResult, RunningCli, StartOptions } from '../cli/run.ts'
 import type { GitService } from '../git/service.ts'
@@ -34,7 +35,40 @@ export interface TeamOptions {
   registry: AgentRegistry
   git: GitService
   launch: AgentLauncher
+  configs?: AgentConfigStore
   stepTimeoutMs?: number
+}
+
+/** Prepara parâmetros dinâmicos de execução conforme provedor, modelo e esforço configurados. */
+export function getStepCliAndArgs(
+  role: 'planning' | 'developing' | 'reviewing',
+  cfg?: AgentConfig,
+): { cli: CliId; args: string[]; model: string; effort: string } {
+  const provider = (cfg?.provider === 'codex' || cfg?.provider === 'gemini')
+    ? cfg.provider
+    : (role === 'developing' ? 'codex' : 'gemini')
+  const model = cfg?.model || 'default'
+  const effort = cfg?.reasoningEffort || 'default'
+
+  let args: string[] = []
+  if (provider === 'gemini') {
+    args = ['--approval-mode', role === 'developing' ? 'auto_edit' : 'default']
+    if (model && model !== 'auto' && model !== 'default') {
+      args.push('-m', model)
+    }
+  } else {
+    const sandbox = role === 'developing' ? 'workspace-write' : 'read-only'
+    args = ['exec', '--sandbox', sandbox]
+    if (model && model !== 'default') {
+      args.push('-m', model)
+    }
+    if (effort && effort !== 'default') {
+      args.push('-c', `model_reasoning_effort=${effort}`)
+    }
+    args.push('-')
+  }
+
+  return { cli: provider, args, model, effort }
 }
 
 /** Missão com um CLI trabalhando agora. */
@@ -58,6 +92,7 @@ export class TeamRunner extends EventEmitter {
   private readonly registry: AgentRegistry
   private readonly git: GitService
   private readonly launch: AgentLauncher
+  private readonly configs?: AgentConfigStore
   private readonly stepTimeoutMs: number
   private running: Running | null = null
   /** true enquanto start/approve consultam o Git (é assíncrono). */
@@ -71,6 +106,7 @@ export class TeamRunner extends EventEmitter {
     this.registry = options.registry
     this.git = options.git
     this.launch = options.launch
+    this.configs = options.configs
     this.stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   }
 
@@ -164,7 +200,17 @@ export class TeamRunner extends EventEmitter {
   }
 
   private async runPlanning(missionId: number, task: TaskInfo, cwd: string) {
-    const plan = await this.step(missionId, 'architect', 'gemini', GEMINI_ARGS, cwd, planPrompt(task))
+    const stepConfig = getStepCliAndArgs('planning', this.configs?.get('architect'))
+    const plan = await this.step(
+      missionId,
+      'architect',
+      stepConfig.cli,
+      stepConfig.args,
+      cwd,
+      planPrompt(task),
+      stepConfig.model,
+      stepConfig.effort,
+    )
     if (plan === null) return
     const mission = this.tasks.updateMission(missionId, { phase: 'awaiting_approval', plan })
     this.running = null
@@ -174,7 +220,17 @@ export class TeamRunner extends EventEmitter {
 
   private async runDevelopment(missionId: number, task: TaskInfo, plan: string, cwd: string) {
     const run = this.running!
-    const report = await this.step(missionId, 'dev', 'codex', CODEX_ARGS, cwd, devPrompt(task, plan))
+    const devConfig = getStepCliAndArgs('developing', this.configs?.get('dev'))
+    const report = await this.step(
+      missionId,
+      'dev',
+      devConfig.cli,
+      devConfig.args,
+      cwd,
+      devPrompt(task, plan),
+      devConfig.model,
+      devConfig.effort,
+    )
     if (report === null) return
 
     let changed: GitFile[]
@@ -193,11 +249,30 @@ export class TeamRunner extends EventEmitter {
       files.length ? `Arquivos alterados pelo Dev: ${files.join(', ')}` : 'O Dev não alterou nenhum arquivo.',
       'dev',
     )
+    this.emit('git-change', {
+      agentId: 'dev',
+      cwd,
+      files,
+      summary:
+        files.length > 0
+          ? `Codex concluiu a implementação — novas alterações detectadas (${files.length} arquivo(s)).`
+          : 'Codex concluiu a implementação — nenhuma alteração detectada.',
+    })
     this.registry.setMissionState('dev', 'done', 'Implementação entregue ao QA')
     this.registry.setMissionState('qa', 'reviewing', `Revisando a missão #${missionId}`)
 
     const diff = await this.collectDiff(cwd, changed)
-    const review = await this.step(missionId, 'qa', 'gemini', GEMINI_ARGS, cwd, reviewPrompt(task, plan, report, files, diff))
+    const qaConfig = getStepCliAndArgs('reviewing', this.configs?.get('qa'))
+    const review = await this.step(
+      missionId,
+      'qa',
+      qaConfig.cli,
+      qaConfig.args,
+      cwd,
+      reviewPrompt(task, plan, report, files, diff),
+      qaConfig.model,
+      qaConfig.effort,
+    )
     if (review === null) return
 
     const verdict = parseVerdict(review)
@@ -211,12 +286,23 @@ export class TeamRunner extends EventEmitter {
   }
 
   /** Roda um CLI com o prompt e devolve a resposta, ou null se falhou ou foi cancelado. */
-  private async step(missionId: number, agentId: string, cli: CliId, args: string[], cwd: string, prompt: string) {
+  private async step(
+    missionId: number,
+    agentId: string,
+    cli: CliId,
+    args: string[],
+    cwd: string,
+    prompt: string,
+    model = 'default',
+    effort = 'default',
+  ) {
     const run = this.running
     if (!run || run.missionId !== missionId || run.cancelled) return null
     const name = this.registry.get(agentId)?.name ?? agentId
     const mission = this.requireMission(missionId)
-    this.log(mission, 'agent', `${name} (${cli}) começou a trabalhar na missão #${missionId}.`, agentId)
+    const modelInfo = model && model !== 'default' ? `, modelo: ${model}` : ''
+    const effortInfo = effort && effort !== 'default' ? `, esforço: ${effort}` : ''
+    this.log(mission, 'agent', `${name} (${cli}${modelInfo}${effortInfo}) começou a trabalhar na missão #${missionId}.`, agentId)
     try {
       run.proc = this.launch(cli, args, {
         cwd,

@@ -8,6 +8,7 @@ import path from 'node:path'
 import { after, before, test } from 'node:test'
 import { WebSocket } from 'ws'
 import type { ClientMessage, ServerMessage } from '../../shared/protocol.ts'
+import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { GitService } from './git/service.ts'
 import { HistoryStore } from './history/store.ts'
@@ -23,6 +24,7 @@ const projectDir = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-srv
 const projects = new ProjectStore(':memory:')
 const history = new HistoryStore(projects.db)
 const tasks = new TaskStore(projects.db, history)
+const agentConfigs = new AgentConfigStore(projects.db)
 const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: 'fake 1.0', auth: 'ok' }))
 const git = new GitService()
 const team = new TeamRunner({
@@ -31,6 +33,7 @@ const team = new TeamRunner({
   projects,
   registry,
   git,
+  configs: agentConfigs,
   launch: () => ({
     done: Promise.resolve({ code: 0, stdout: 'ok', stderr: '', timedOut: false }),
     kill: () => {},
@@ -60,6 +63,7 @@ const server = createAppServer({
   tasks,
   history,
   team,
+  agentConfigs,
   allowedOrigins: [ORIGIN],
 })
 let port = 0
@@ -115,6 +119,7 @@ test('cliente recebe snapshot e o resultado de uma verificação', async () => {
   const client = await connect()
   const snapshot = await client.waitFor('snapshot')
   assert.equal(snapshot.agents.length, 4)
+  assert.equal(snapshot.configs.length, 4)
   assert.deepEqual(snapshot.workspace, { projects: [], activeProjectId: null })
 
   client.send({ type: 'check-cli', agentId: 'dev' })
@@ -185,4 +190,30 @@ test('mensagens malformadas do cliente são descartadas', () => {
   assert.equal(parseClientMessage('{"type":"check-cli"}'), null)
   assert.equal(parseClientMessage('{"type":"project-select","projectId":"1"}'), null)
   assert.equal(parseClientMessage('{"type":"desconhecido","agentId":"dev"}'), null)
+})
+
+test('configuração dos agentes pode ser atualizada, aplicar perfis e restaurar padrões', async () => {
+  const client = await connect()
+  const snapshot = await client.waitFor('snapshot')
+  assert.equal(snapshot.configs.length, 4)
+
+  client.send({
+    type: 'agent-config-set',
+    config: { agentId: 'architect', provider: 'gemini', model: 'gemini-2.5-pro', reasoningEffort: 'default' },
+  })
+  const updated = await client.waitFor('agent-configs')
+  const arch = updated.configs.find((c) => c.agentId === 'architect')
+  assert.equal(arch?.model, 'gemini-2.5-pro')
+
+  client.send({ type: 'agent-config-profile', profile: 'economy' })
+  const eco = await client.waitFor('agent-configs')
+  const devEco = eco.configs.find((c) => c.agentId === 'dev')
+  assert.equal(devEco?.reasoningEffort, 'low')
+
+  client.send({ type: 'agent-config-reset' })
+  const reset = await client.waitFor('agent-configs')
+  const devReset = reset.configs.find((c) => c.agentId === 'dev')
+  assert.equal(devReset?.reasoningEffort, 'high')
+
+  client.socket.close()
 })

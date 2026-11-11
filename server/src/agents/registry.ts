@@ -58,6 +58,14 @@ export class AgentRegistry extends EventEmitter {
     return this.agents.get(agentId)
   }
 
+  /** Atualiza o CLI do agente caso o usuário mude o provedor na Central de Agentes. */
+  setCli(agentId: string, cli: CliId) {
+    const agent = this.agents.get(agentId)
+    if (!agent || agent.cli === cli) return
+    this.update(agentId, { cli, cliVersion: null, auth: 'unknown', message: 'Configuração atualizada.' })
+    void this.check(agentId)
+  }
+
   /** Consulta o CLI real do agente (existe? versão? login?). */
   async check(agentId: string): Promise<AgentInfo | null> {
     const agent = this.agents.get(agentId)

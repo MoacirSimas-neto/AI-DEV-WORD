@@ -39,7 +39,8 @@ Abra http://localhost:5173, adicione a pasta de um projeto na barra do topo.
 - Para terminal interativo: clique em um personagem e use "Iniciar sessão".
 - Para tarefas e modo equipe: clique em "Tarefas" na barra do topo.
 - Para histórico de atividades: clique em "Histórico" na barra do topo.
-- Para controle de versão: clique em "Alterações" na barra do topo.
+- Para central de configuração dos agentes: clique em "⚙ Central de Agentes" na barra do topo.
+- Para painel Git: utilize a barra lateral direita permanente ou clique em "Git (N)" para recolher/expandir.
 
 Verificações de integridade:
 ```bash
@@ -87,33 +88,54 @@ Roda typecheck do server/web, build do Vite, lint (oxlint) e suíte de testes.
 - Filtro por tipo de atividade na interface.
 - Sanitização ativa contra segredos (`redact`): chaves de API, senhas e tokens não são persistidos nem expostos.
 
-### 5. Painel Git Integrado
-- Leitura em tempo real do estado do repositório (branch, upstream, ahead/behind, arquivos).
-- Visualização de diffs com destaque de sintaxe.
-- Preparar (`git add`) e tirar (`git restore`/`git rm`) arquivos.
+### 5. Painel Git Permanente e Inteligente
+- Barra lateral direita permanente (~320px) sem sobrepor o escritório 2D, com botão de recolher/expandir.
+- Estado de visibilidade salvo automaticamente em `localStorage`.
+- Atualização em tempo real vinculada ao ciclo de vida dos agentes: quando o Dev conclui alterações, emite evento WebSocket `git-activity` que recarrega o status imediatamente.
+- Notificação banner discreta no topo do painel ao detectar novas mudanças com opção de dispensar.
+- Tonalidades visuais por tipo de alteração (Adicionado em verde, Modificado em amarelo, Removido em vermelho, Não rastreado em ciano).
+- Animação pulsante suave `git-badge-new` com respeito automático a `prefers-reduced-motion`.
+- Leitura em tempo real do estado do repositório (branch, upstream, ahead/behind, contadores e arquivos staged/unstaged).
+- Visualização de diffs inline com destaque e opção de fechar.
+- Preparar (`git add`) e tirar (`git restore`/`git rm`) arquivos individuais ou em lote.
 - Criação de commits com registro no histórico.
 - Envio remoto (`git push`) com confirmação obrigatória de dois passos via token temporário.
+
+### 6. Central de Agentes (Modelos e Raciocínio)
+- Painel modal acessível pela barra de navegação ("⚙ Central de Agentes").
+- Configuração individual por agente:
+  - **Provedor:** Gemini CLI ou Codex CLI.
+  - **Modelo:** Seleção customizável (ex: `gemini-2.5-pro`, `gemini-3.5-flash`, `auto`, `gpt-6.1-sol`, `gpt-4o`, etc.).
+  - **Esforço de Raciocínio:** `default`, `low`, `medium`, `high`, `extra-high` (injetado via flag de configuração do CLI).
+- **Perfis rápidos:**
+  - *Econômico:* Gemini Flash / Codex mini com esforço baixo.
+  - *Balanceado:* Configuração padrão de fábrica recomendada.
+  - *Qualidade Máxima:* Gemini Pro / Codex avançado com raciocínio alto.
+- Botão "Restaurar Padrões" para restabelecer os valores de fábrica.
+- Persistência das preferências no SQLite (`agent_configs`).
+- Aplicação automática tanto no **Modo Equipe** quanto nos **Terminais Interativos** (`spawnCliPty`).
 
 ## Estrutura
 
 ```
-shared/protocol.ts        contrato de tipos WebSocket (mensagens, tarefas, missões, Git)
+shared/protocol.ts        contrato de tipos WebSocket (mensagens, tarefas, missões, Git, configs)
 server/src/
   cli/                    detecção e execução dos CLIs (tratamento .cmd Windows e startCli com stdin)
   agents/registry.ts      fonte da verdade do estado dos agentes
-  terminal/               sessões de pseudo-terminal (node-pty)
+  agents/configStore.ts   persistência SQLite de provedor, modelo e raciocínio por agente
+  terminal/               sessões de pseudo-terminal (node-pty) com injeção de modelo/esforço
   projects/store.ts       gerenciamento de projetos autorizados (SQLite)
   tasks/store.ts          persistência de tarefas e missões (SQLite)
   history/store.ts        histórico de atividades e sanitização de segredos (redact)
-  team/runner.ts          orquestrador do Modo Equipe (Gemini -> Codex -> Gemini)
+  team/runner.ts          orquestrador do Modo Equipe (Gemini -> Codex -> Gemini) com configs dinâmicas
   team/prompts.ts         templates de prompts dos papéis do modo equipe
   git/service.ts          operações Git seguras e não destrutivas
   server.ts               servidor HTTP + WebSocket local
 web/src/
   net/useServer.ts        conexão reativa com WebSocket
-  net/useGitStatus.ts     polling de alterações do Git
+  net/useGitStatus.ts     polling de alterações do Git e evento push em tempo real
   game/                   escritório Phaser 2D, layout pixel art e atores
-  ui/                     componentes React (ProjectBar, TaskPanel, HistoryPanel, GitPanel, TerminalView)
+  ui/                     componentes React (ProjectBar, TaskPanel, HistoryPanel, GitPanel, AgentCenter, TerminalView)
 ```
 
 ## Segurança
@@ -135,6 +157,7 @@ web/src/
 | Sanitização de segredos em logs    | Concluído            |
 | Modo Equipe com agentes reais      | Concluído            |
 | Aprovação humana no fluxo equipe   | Concluído            |
-| Painel Git (diff, commit, push)    | Concluído            |
+| Painel Git permanente inteligente  | Concluído            |
+| Central de Agentes (modelos/esforço) | Concluído          |
 | Estados integrados no mundo 2D     | Concluído            |
 | Empacotamento Desktop (Tauri/Elec) | Pendente para futuro |

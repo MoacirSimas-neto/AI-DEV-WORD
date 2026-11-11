@@ -8,9 +8,11 @@ interface Props {
   /** Arquivos alterados no projeto ativo; null se ele não for um repositório Git. */
   changes: number | null
   taskCount: number
-  onOpenGit: () => void
+  gitOpen: boolean
+  onToggleGit: () => void
   onOpenTasks: () => void
   onOpenHistory: () => void
+  onOpenAgentCenter: () => void
   send: Send
   subscribe: Subscribe
 }
@@ -21,9 +23,11 @@ export function ProjectBar({
   online,
   changes,
   taskCount,
-  onOpenGit,
+  gitOpen,
+  onToggleGit,
   onOpenTasks,
   onOpenHistory,
+  onOpenAgentCenter,
   send,
   subscribe,
 }: Props) {
@@ -80,14 +84,23 @@ export function ProjectBar({
             >
               Remover da lista
             </button>
-            <button type="button" disabled={!active} onClick={onOpenGit}>
-              {changes ? `Alterações (${changes})` : 'Alterações'}
+            <button
+              type="button"
+              className={gitOpen ? 'btn-active' : ''}
+              disabled={!active}
+              onClick={onToggleGit}
+              title="Exibir ou ocultar a barra lateral Git permanente"
+            >
+              {changes ? `Git (${changes})` : 'Git'}
             </button>
             <button type="button" disabled={!active} onClick={onOpenTasks}>
               {taskCount ? `Tarefas (${taskCount})` : 'Tarefas'}
             </button>
             <button type="button" onClick={onOpenHistory}>
               Histórico
+            </button>
+            <button type="button" className="btn-agent-center" onClick={onOpenAgentCenter} title="Configurar provedor, modelo e esforço dos agentes">
+              ⚙ Central de Agentes
             </button>
           </>
         )}

@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs'
+import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { findCli, probeCli } from './cli/probe.ts'
 import { startCli } from './cli/run.ts'
@@ -16,8 +17,42 @@ mkdirSync(DATA_DIR, { recursive: true })
 const projects = new ProjectStore(DATABASE_FILE)
 const history = new HistoryStore(projects.db)
 const tasks = new TaskStore(projects.db, history)
+const agentConfigs = new AgentConfigStore(projects.db)
 const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
-const terminals = new TerminalManager(registry, spawnCliPty, () => projects.active()?.path ?? null)
+
+// Sincroniza o CLI de cada agente conforme a configuração persistida
+for (const cfg of agentConfigs.list()) {
+  if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
+    registry.setCli(cfg.agentId, cfg.provider)
+  }
+}
+
+const terminals = new TerminalManager(
+  registry,
+  spawnCliPty,
+  () => projects.active()?.path ?? null,
+  {
+    getArgs: (agentId) => {
+      const cfg = agentConfigs.get(agentId)
+      const cli = cfg.provider === 'codex' || cfg.provider === 'gemini' ? cfg.provider : (agentId === 'dev' ? 'codex' : 'gemini')
+      const args: string[] = []
+      if (cli === 'gemini') {
+        if (cfg.model && cfg.model !== 'auto' && cfg.model !== 'default') {
+          args.push('-m', cfg.model)
+        }
+      } else {
+        if (cfg.model && cfg.model !== 'default') {
+          args.push('-m', cfg.model)
+        }
+        if (cfg.reasoningEffort && cfg.reasoningEffort !== 'default') {
+          args.push('-c', `model_reasoning_effort=${cfg.reasoningEffort}`)
+        }
+      }
+      return { cli, args }
+    },
+  },
+)
+
 const git = new GitService()
 const team = new TeamRunner({
   tasks,
@@ -25,6 +60,7 @@ const team = new TeamRunner({
   projects,
   registry,
   git,
+  configs: agentConfigs,
   launch: (cli, args, options) => {
     const executable = findCli(cli)
     if (!executable) throw new Error(`CLI "${cli}" não encontrado no PATH.`)
@@ -42,6 +78,7 @@ const server = createAppServer({
   tasks,
   history,
   team,
+  agentConfigs,
   allowedOrigins: ALLOWED_ORIGINS,
 })
 

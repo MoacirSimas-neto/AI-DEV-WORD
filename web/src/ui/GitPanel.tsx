@@ -1,16 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { GitFile, GitStatus, PushPreview } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 
-const KIND: Record<string, string> = {
-  M: 'modificado',
-  A: 'novo',
-  '?': 'novo',
-  D: 'apagado',
-  R: 'renomeado',
-  C: 'copiado',
-  U: 'conflito',
-  T: 'tipo mudou',
+const KIND: Record<string, { label: string; tone: string }> = {
+  M: { label: 'modificado', tone: 'modified' },
+  A: { label: 'novo', tone: 'added' },
+  '?': { label: 'não rastreado', tone: 'added' },
+  D: { label: 'apagado', tone: 'deleted' },
+  R: { label: 'renomeado', tone: 'modified' },
+  C: { label: 'copiado', tone: 'added' },
+  U: { label: 'conflito', tone: 'conflict' },
+  T: { label: 'tipo mudou', tone: 'modified' },
 }
 
 interface Selection {
@@ -20,33 +20,88 @@ interface Selection {
 
 interface Props {
   status: GitStatus | null
+  projectName?: string
+  projectPath?: string
   send: Send
   subscribe: Subscribe
-  onClose: () => void
+  onToggleCollapse?: () => void
+  collapsed?: boolean
 }
 
-/** Alterações do projeto ativo: ver diff, preparar, fazer commit e enviar (com confirmação). */
-export function GitPanel({ status, send, subscribe, onClose }: Props) {
+/** Painel Git permanente com detecção inteligente de alterações e diffs. */
+export function GitPanel({
+  status,
+  projectName,
+  projectPath,
+  send,
+  subscribe,
+  onToggleCollapse,
+  collapsed = false,
+}: Props) {
   const [selection, setSelection] = useState<Selection | null>(null)
   const [diff, setDiff] = useState<(Selection & { text: string }) | null>(null)
   const [message, setMessage] = useState('')
   const [preview, setPreview] = useState<PushPreview | null>(null)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [newlyChanged, setNewlyChanged] = useState<Set<string>>(new Set())
 
-  useEffect(
-    () =>
-      subscribe((incoming) => {
-        if (incoming.type === 'git-diff') setDiff(incoming)
-        if (incoming.type === 'git-push-preview') setPreview(incoming.preview)
-        if (incoming.type === 'git-result') {
-          setResult(incoming)
-          if (incoming.ok && incoming.message.startsWith('Commit')) setMessage('')
+  const prevFilesRef = useRef<string[]>([])
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    return subscribe((incoming) => {
+      if (incoming.type === 'git-diff') setDiff(incoming)
+      if (incoming.type === 'git-push-preview') setPreview(incoming.preview)
+      if (incoming.type === 'git-result') {
+        setResult(incoming)
+        if (incoming.ok && incoming.message.startsWith('Commit')) setMessage('')
+      }
+      if (incoming.type === 'git-activity') {
+        setNotice(incoming.summary)
+        if (incoming.files.length > 0) {
+          setNewlyChanged((prev) => new Set([...prev, ...incoming.files]))
+          setTimeout(() => {
+            setNewlyChanged((prev) => {
+              const next = new Set(prev)
+              for (const f of incoming.files) next.delete(f)
+              return next
+            })
+          }, 6000)
         }
-      }),
-    [subscribe],
-  )
+        clearTimeout(noticeTimerRef.current)
+        noticeTimerRef.current = setTimeout(() => setNotice(null), 7000)
+      }
+    })
+  }, [subscribe])
 
-  // Pede o diff do arquivo escolhido e o renova quando o estado muda (o agente pode ter editado).
+  // Identifica novos arquivos quando o status é atualizado
+  useEffect(() => {
+    if (!status?.files) return
+    const currentPaths = status.files.map((f) => f.path)
+    const prev = prevFilesRef.current
+    if (prev.length > 0) {
+      const added = currentPaths.filter((p) => !prev.includes(p))
+      if (added.length > 0) {
+        setNewlyChanged((s) => new Set([...s, ...added]))
+        if (!notice) {
+          setNotice('Novas alterações detectadas no repositório.')
+          clearTimeout(noticeTimerRef.current)
+          noticeTimerRef.current = setTimeout(() => setNotice(null), 6000)
+        }
+        setTimeout(() => {
+          setNewlyChanged((s) => {
+            const next = new Set(s)
+            for (const f of added) next.delete(f)
+            return next
+          })
+        }, 6000)
+      }
+    }
+    prevFilesRef.current = currentPaths
+  }, [status, notice])
+
+  // Pede o diff do arquivo escolhido e o renova quando o estado muda
   useEffect(() => {
     if (selection) send({ type: 'git-diff', path: selection.path, staged: selection.staged })
   }, [selection, status, send])
@@ -54,6 +109,7 @@ export function GitPanel({ status, send, subscribe, onClose }: Props) {
   const files = status?.files ?? []
   const staged = files.filter((f) => f.staged)
   const unstaged = files.filter((f) => f.unstaged)
+
   const shownDiff =
     selection &&
     diff?.path === selection.path &&
@@ -61,6 +117,7 @@ export function GitPanel({ status, send, subscribe, onClose }: Props) {
     (selection.staged ? staged : unstaged).some((f) => f.path === selection.path)
       ? diff.text
       : null
+
   const canPush = !!status?.branch && (status.ahead > 0 || !status.upstream)
 
   const act = (action: () => void) => {
@@ -69,19 +126,37 @@ export function GitPanel({ status, send, subscribe, onClose }: Props) {
     action()
   }
 
+  if (collapsed) {
+    return (
+      <aside className="git-sidebar-collapsed" title="Clique para expandir o painel Git">
+        <button type="button" className="btn-expand-git" onClick={onToggleCollapse}>
+          <span className="expand-icon">«</span>
+          <span className="expand-text">Git ({files.length})</span>
+        </button>
+      </aside>
+    )
+  }
+
   const fileList = (list: GitFile[], isStaged: boolean) =>
     list.map((file) => {
       const active = selection?.path === file.path && selection.staged === isStaged
+      const kindInfo = KIND[file.code[isStaged ? 0 : 1]] ?? { label: file.code.trim(), tone: 'modified' }
+      const isNew = newlyChanged.has(file.path)
+
       return (
-        <li key={file.path} className={active ? 'git-file git-file-active' : 'git-file'}>
+        <li
+          key={`${file.path}-${isStaged ? 's' : 'u'}`}
+          className={`git-file ${active ? 'git-file-active' : ''} ${isNew ? 'git-file-new' : ''}`}
+        >
           <button
             type="button"
             className="git-file-name"
             aria-pressed={active}
             onClick={() => setSelection({ path: file.path, staged: isStaged })}
           >
-            <span className="git-kind">{KIND[file.code[isStaged ? 0 : 1]] ?? file.code.trim()}</span>
-            {file.path}
+            <span className={`git-kind git-tone-${kindInfo.tone}`}>{kindInfo.label}</span>
+            <span className="git-path-text">{file.path}</span>
+            {isNew && <span className="git-badge-new">Novo</span>}
           </button>
           <button
             type="button"
@@ -95,29 +170,61 @@ export function GitPanel({ status, send, subscribe, onClose }: Props) {
     })
 
   return (
-    <aside className="window">
-      <header className="window-head">
+    <aside className="window git-sidebar-panel">
+      <header className="window-head git-panel-head">
         <div className="window-id">
-          <h2>Alterações</h2>
-          <p>{status?.isRepo ? branchLine(status) : 'Git do projeto ativo'}</p>
+          <h2>Git</h2>
+          <p className="git-repo-title">{projectName ? `${projectName} · ${branchLine(status)}` : 'Nenhum projeto selecionado'}</p>
         </div>
-        <button type="button" className="btn-quiet window-close" aria-label="Fechar painel" onClick={onClose}>
-          ×
-        </button>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            className="btn-quiet git-collapse-btn"
+            title="Recolher painel Git"
+            aria-label="Recolher painel"
+            onClick={onToggleCollapse}
+          >
+            »
+          </button>
+        )}
       </header>
 
+      {/* Notificação discreta de autoria ou novas alterações */}
+      {notice && (
+        <div className="git-notice-banner" role="status">
+          <span>{notice}</span>
+          <button type="button" className="btn-quiet notice-dismiss" onClick={() => setNotice(null)}>
+            ×
+          </button>
+        </div>
+      )}
+
       {!status && <p className="window-message">Escolha um projeto para ver as alterações dele.</p>}
+
       {status && !status.isRepo && (
         <p className="window-message">
-          Esta pasta ainda não é um repositório Git. Rode <code>git init</code> nela para acompanhar as alterações por aqui.
+          Esta pasta não é um repositório Git. Rode <code>git init</code> nela para acompanhar alterações aqui.
         </p>
       )}
 
       {status?.isRepo && (
         <>
+          {/* Métricas rápidas */}
+          <div className="git-metrics">
+            <span className="git-metric-item" title="Caminho do repositório">
+              {projectPath ? `📁 ${projectPath}` : ''}
+            </span>
+            <div className="git-metric-badges">
+              <span className="git-badge-summary">{files.length} alterado(s)</span>
+              <span className="git-badge-summary">{staged.length} preparado(s)</span>
+              {status.ahead > 0 && <span className="git-badge-sync">▲ {status.ahead} à frente</span>}
+              {status.behind > 0 && <span className="git-badge-sync">▼ {status.behind} atrás</span>}
+            </div>
+          </div>
+
           <section>
             <div className="git-heading">
-              <h3>Preparado para o commit</h3>
+              <h3>Preparado para commit</h3>
               <span>{staged.length}</span>
             </div>
             {staged.length === 0 ? (
@@ -129,7 +236,7 @@ export function GitPanel({ status, send, subscribe, onClose }: Props) {
 
           <section>
             <div className="git-heading">
-              <h3>Alterado, ainda não preparado</h3>
+              <h3>Alterado, não preparado</h3>
               <span>{unstaged.length}</span>
               {unstaged.length > 1 && (
                 <button
@@ -149,8 +256,20 @@ export function GitPanel({ status, send, subscribe, onClose }: Props) {
             {status.truncated && <p className="git-empty">Há mais arquivos do que cabe na lista.</p>}
           </section>
 
-          {shownDiff !== null && <DiffView text={shownDiff} />}
+          {/* Visualização de diff do arquivo selecionado */}
+          {shownDiff !== null && (
+            <section className="git-diff-container">
+              <div className="git-diff-head">
+                <span className="git-diff-path">{selection?.path}</span>
+                <button type="button" className="btn-quiet" onClick={() => setSelection(null)}>
+                  Fechar Diff
+                </button>
+              </div>
+              <DiffView text={shownDiff} />
+            </section>
+          )}
 
+          {/* Commit e Push */}
           <section className="git-commit">
             <textarea
               aria-label="Mensagem do commit"
@@ -164,14 +283,19 @@ export function GitPanel({ status, send, subscribe, onClose }: Props) {
               disabled={staged.length === 0 || !message.trim()}
               onClick={() => act(() => send({ type: 'git-commit', message }))}
             >
-              Fazer commit
+              Commit
             </button>
           </section>
 
           <section className="git-push">
             <p>{pushLine(status)}</p>
-            <button type="button" className="btn-quiet" disabled={!canPush} onClick={() => act(() => send({ type: 'git-push-preview' }))}>
-              Enviar para o remoto…
+            <button
+              type="button"
+              className="btn-quiet"
+              disabled={!canPush}
+              onClick={() => act(() => send({ type: 'git-push-preview' }))}
+            >
+              Push…
             </button>
           </section>
 
@@ -188,7 +312,7 @@ export function GitPanel({ status, send, subscribe, onClose }: Props) {
                   <li key={commit}>{commit}</li>
                 ))}
               </ul>
-              {preview.setsUpstream && <p>Esta branch ainda não existe no remoto; ela será criada lá.</p>}
+              {preview.setsUpstream && <p>Esta branch será criada no remoto.</p>}
               <div className="git-confirm-actions">
                 <button
                   type="button"
@@ -213,14 +337,15 @@ export function GitPanel({ status, send, subscribe, onClose }: Props) {
   )
 }
 
-function branchLine(status: GitStatus) {
+function branchLine(status: GitStatus | null) {
+  if (!status || !status.isRepo) return 'Não é repositório'
   if (!status.branch) return 'Sem branch ativa'
-  return status.upstream ? `Branch ${status.branch}, acompanha ${status.upstream}` : `Branch ${status.branch}, sem remoto ligado`
+  return status.upstream ? `${status.branch} → ${status.upstream}` : status.branch
 }
 
 function pushLine(status: GitStatus) {
-  if (!status.branch) return 'Sem branch ativa: não há o que enviar.'
-  if (!status.upstream) return 'Esta branch ainda não foi enviada para um remoto.'
+  if (!status.branch) return 'Sem branch ativa.'
+  if (!status.upstream) return 'Branch sem remoto configurado.'
   const parts = []
   if (status.ahead) parts.push(`${status.ahead} à frente`)
   if (status.behind) parts.push(`${status.behind} atrás`)
