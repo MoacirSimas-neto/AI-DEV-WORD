@@ -402,3 +402,80 @@ test('posicionamento dinâmico no escritório 2D: inclusão, remoção e pagina�
   assert.ok(afterPlacement.visible.some((p) => p.agent.id === 'custom-agent-1'))
   assert.ok(!afterPlacement.visible.some((p) => p.agent.id === 'custom-agent-2'))
 })
+
+
+test('WebSocket de memória: listar com filtros, aprovar, rejeitar e substituir decisões', async () => {
+  const client = await connect()
+  let pId = projects.active()?.id
+  if (!pId) {
+    projects.add(projectDir)
+    pId = projects.active()!.id
+  }
+
+  // 1. Criar memória aprovada pelo usuário
+  client.send({
+    type: 'memory-create',
+    projectId: pId,
+    entry: {
+      scope: 'team',
+      agentId: null,
+      category: 'architecture',
+      content: 'Arquitetura: microsserviços Node e SQLite local',
+    },
+  })
+  const changed1 = await client.waitFor('memory-changed')
+  assert.equal(changed1.projectId, pId)
+
+  // 2. Listar memórias do projeto
+  client.send({ type: 'memory-list', projectId: pId })
+  const list1 = await client.waitFor('memory-entries')
+  const created = list1.entries.find((m) => m.content.includes('microsserviços Node'))
+  assert.ok(created)
+  assert.equal(created.status, 'approved')
+
+  // 3. Criar proposta de agente via store direto para testar aprovação via WebSocket
+  const proposal = memory.propose({
+    projectId: pId,
+    scope: 'team',
+    category: 'decision',
+    content: 'Usar Redis como cache volátil',
+    author: 'architect',
+  })
+  // Aguarda evento de criação antes de aprovar
+  await client.waitFor('memory-changed')
+
+  client.send({ type: 'memory-approve', id: proposal.id })
+  await client.waitFor('memory-changed')
+  assert.equal(memory.get(proposal.id)?.status, 'approved')
+
+  // 4. Rejeição via WebSocket
+  const proposal2 = memory.propose({
+    projectId: pId,
+    scope: 'team',
+    category: 'problem',
+    content: 'Timeout excessivo no Docker',
+    author: 'dev',
+  })
+  await client.waitFor('memory-changed')
+
+  client.send({ type: 'memory-reject', id: proposal2.id })
+  await client.waitFor('memory-changed')
+  assert.equal(memory.get(proposal2.id)?.status, 'rejected')
+
+  // 5. Substituição (supersede) e consulta de versões
+  client.send({
+    type: 'memory-supersede',
+    id: created.id,
+    content: 'Arquitetura: monolito modular Node e SQLite local',
+  })
+  await client.waitFor('memory-changed')
+  assert.equal(memory.get(created.id)?.status, 'superseded')
+
+  client.send({ type: 'memory-versions', id: created.id })
+  const versionsMsg = await client.waitFor('memory-versions')
+  assert.equal(versionsMsg.versions.length, 2)
+  assert.equal(versionsMsg.versions[0].id, created.id)
+  assert.equal(versionsMsg.versions[1].content, 'Arquitetura: monolito modular Node e SQLite local')
+
+  client.socket.close()
+})
