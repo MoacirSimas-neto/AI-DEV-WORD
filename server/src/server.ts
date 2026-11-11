@@ -2,9 +2,11 @@ import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { AgentInfo, ClientMessage, ServerMessage } from '../../shared/protocol.ts'
 import type { AgentRegistry } from './agents/registry.ts'
+import type { TerminalManager } from './terminal/manager.ts'
 
 export interface AppServerOptions {
   registry: AgentRegistry
+  terminals: TerminalManager
   allowedOrigins: string[]
 }
 
@@ -16,21 +18,38 @@ function hasLocalHost(req: IncomingMessage): boolean {
   return LOCAL_HOSTNAMES.has(hostname)
 }
 
-function parseClientMessage(raw: string): ClientMessage | null {
+const isSize = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 2 && (n as number) <= 500
+
+/** Valida o formato de tudo que chega do navegador antes de usar. */
+export function parseClientMessage(raw: string): ClientMessage | null {
+  let data: unknown
   try {
-    const data: unknown = JSON.parse(raw)
-    if (typeof data !== 'object' || data === null) return null
-    const msg = data as Record<string, unknown>
-    if (msg.type === 'check-cli' && typeof msg.agentId === 'string') {
-      return { type: 'check-cli', agentId: msg.agentId }
-    }
+    data = JSON.parse(raw)
   } catch {
-    // JSON inválido: ignorado
+    return null
   }
-  return null
+  if (typeof data !== 'object' || data === null) return null
+  const msg = data as Record<string, unknown>
+  const { agentId } = msg
+  if (typeof agentId !== 'string') return null
+
+  switch (msg.type) {
+    case 'check-cli':
+    case 'term-close':
+      return { type: msg.type, agentId }
+    case 'term-open':
+    case 'term-resize':
+      return isSize(msg.cols) && isSize(msg.rows)
+        ? { type: msg.type, agentId, cols: msg.cols, rows: msg.rows }
+        : null
+    case 'term-input':
+      return typeof msg.data === 'string' ? { type: 'term-input', agentId, data: msg.data } : null
+    default:
+      return null
+  }
 }
 
-export function createAppServer({ registry, allowedOrigins }: AppServerOptions): Server {
+export function createAppServer({ registry, terminals, allowedOrigins }: AppServerOptions): Server {
   const server = createServer((req, res) => {
     const origin = req.headers.origin
     if (!hasLocalHost(req) || (origin && !allowedOrigins.includes(origin))) {
@@ -46,6 +65,11 @@ export function createAppServer({ registry, allowedOrigins }: AppServerOptions):
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
   const send = (socket: WebSocket, message: ServerMessage) => socket.send(JSON.stringify(message))
+  const broadcast = (message: ServerMessage) => {
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) send(client, message)
+    }
+  }
 
   // Sites externos conseguem abrir WebSocket para localhost; por isso a origem
   // é obrigatória e precisa estar na lista.
@@ -60,22 +84,51 @@ export function createAppServer({ registry, allowedOrigins }: AppServerOptions):
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws))
   })
 
+  const handle = (socket: WebSocket, message: ClientMessage) => {
+    const { agentId } = message
+    switch (message.type) {
+      case 'check-cli':
+        void registry.check(agentId)
+        break
+      case 'term-open':
+        try {
+          const replay = terminals.open(agentId, message.cols, message.rows)
+          send(socket, { type: 'term-ready', agentId, replay })
+        } catch (error) {
+          const text = error instanceof Error ? error.message : String(error)
+          send(socket, { type: 'term-error', agentId, message: text })
+        }
+        break
+      case 'term-input':
+        terminals.write(agentId, message.data)
+        break
+      case 'term-resize':
+        terminals.resize(agentId, message.cols, message.rows)
+        break
+      case 'term-close':
+        terminals.close(agentId)
+        break
+    }
+  }
+
   wss.on('connection', (socket: WebSocket) => {
     send(socket, { type: 'snapshot', agents: registry.list() })
     socket.on('message', (raw) => {
       const message = parseClientMessage(raw.toString())
-      if (message?.type === 'check-cli') void registry.check(message.agentId)
+      if (message) handle(socket, message)
     })
   })
 
-  const onChange = (agent: AgentInfo) => {
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) send(client, { type: 'agent', agent })
-    }
-  }
-  registry.on('change', onChange)
+  const onAgent = (agent: AgentInfo) => broadcast({ type: 'agent', agent })
+  const onData = (agentId: string, data: string) => broadcast({ type: 'term-data', agentId, data })
+  const onExit = (agentId: string, code: number) => broadcast({ type: 'term-exit', agentId, code })
+  registry.on('change', onAgent)
+  terminals.on('data', onData)
+  terminals.on('exit', onExit)
   server.on('close', () => {
-    registry.off('change', onChange)
+    registry.off('change', onAgent)
+    terminals.off('data', onData)
+    terminals.off('exit', onExit)
     for (const client of wss.clients) client.terminate()
   })
 

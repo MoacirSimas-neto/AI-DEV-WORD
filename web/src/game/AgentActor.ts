@@ -5,11 +5,18 @@ import { CHARACTER_FRAMES, characterPalette, makePixelTexture } from './pixelArt
 
 const SCALE = 3
 const WALK_SPEED = 70 // pixels por segundo
-const BUBBLE_TEXT: Record<AgentState, string> = { idle: '', working: '...', offline: 'zzz', error: '!' }
+const BUBBLE_TEXT: Record<AgentState, string> = {
+  idle: '',
+  waiting: '?',
+  working: '...',
+  offline: 'zzz',
+  error: '!',
+}
 
 /**
  * Um personagem no mundo. O comportamento é função do estado real do agente:
- * working -> vai até a mesa e digita; idle -> passeia; offline -> dorme; error -> alerta.
+ * working -> digita na mesa; waiting -> parado na mesa esperando você;
+ * idle -> passeia; offline -> dorme; error -> alerta.
  */
 export class AgentActor {
   readonly id: string
@@ -79,6 +86,8 @@ export class AgentActor {
 
     if (state === 'working') {
       this.walkTo(DESK_SEAT.x, DESK_SEAT.y, () => this.startTyping())
+    } else if (state === 'waiting') {
+      this.walkTo(DESK_SEAT.x, DESK_SEAT.y)
     } else if (state === 'idle') {
       this.wanderSoon()
     } else if (state === 'offline') {

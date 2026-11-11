@@ -74,6 +74,7 @@ code {
   color: var(--ok);
 }
 .status-connecting,
+.badge-waiting,
 .badge-working {
   color: var(--warn);
 }
@@ -95,14 +96,23 @@ code {
 
 .stage {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
 
-@media (max-width: 860px) {
-  .stage {
-    grid-template-columns: 1fr;
+.stage:not(.stage-split) {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.stage-split {
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+}
+
+@media (max-width: 980px) {
+  .stage-split {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -114,62 +124,81 @@ code {
   background: #1f1924;
 }
 
-.panel {
+.hint {
+  margin-top: 10px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.window {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 14px;
   border: 4px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
 }
 
-.panel-empty,
-.panel-role,
-.panel-note,
-.facts dt {
-  color: var(--muted);
+.window-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.panel-head {
+.window-close {
+  margin-left: auto;
+  padding: 0 9px;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.window-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.window-status {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-}
-
-.panel-note {
-  font-size: 12px;
-}
-
-.facts {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-}
-
-.facts dt {
-  font-size: 12px;
-}
-
-.facts dd {
-  margin: 0 0 6px;
-  overflow-wrap: anywhere;
-}
-
-.panel-message {
-  padding: 8px 10px;
+  gap: 10px;
+  padding: 6px 10px;
   border-left: 4px solid var(--accent);
   background: var(--surface-2);
+  font-size: 13px;
+}
+
+.terminal {
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  background: #1f1924;
+}
+
+.terminal-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 6px 10px;
+  border-bottom: 2px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.terminal-host {
+  height: 440px;
+  padding: 6px;
 }
 
 button {
-  padding: 8px 12px;
+  padding: 4px 10px;
   border: 2px solid var(--accent);
   border-radius: 4px;
   background: transparent;
   color: var(--accent);
   font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
   cursor: pointer;
 }
 

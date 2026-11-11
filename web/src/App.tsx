@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { PhaserGame } from './game/PhaserGame.tsx'
 import { type ConnectionStatus, useServer } from './net/useServer.ts'
-import { AgentPanel } from './ui/AgentPanel.tsx'
+import { AgentWindow } from './ui/AgentWindow.tsx'
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
   connecting: 'Conectando…',
@@ -10,7 +10,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
 }
 
 function App() {
-  const { status, agents, send } = useServer()
+  const { status, agents, send, subscribe } = useServer()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = agents.find((a) => a.id === selectedId) ?? null
 
@@ -27,9 +27,20 @@ function App() {
         </p>
       )}
 
-      <main className="stage">
-        <PhaserGame agents={agents} selectedId={selectedId} onSelect={setSelectedId} />
-        <AgentPanel agent={selected} onCheck={(agentId) => send({ type: 'check-cli', agentId })} />
+      <main className={selected ? 'stage stage-split' : 'stage'}>
+        <div>
+          <PhaserGame agents={agents} selectedId={selectedId} onSelect={setSelectedId} />
+          {!selected && <p className="hint">Clique em um personagem para abrir a janela dele.</p>}
+        </div>
+        {selected && (
+          <AgentWindow
+            agent={selected}
+            online={status === 'online'}
+            send={send}
+            subscribe={subscribe}
+            onClose={() => setSelectedId(null)}
+          />
+        )}
       </main>
     </div>
   )

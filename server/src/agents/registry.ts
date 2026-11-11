@@ -45,7 +45,8 @@ export class AgentRegistry extends EventEmitter {
   async check(agentId: string): Promise<AgentInfo | null> {
     const agent = this.agents.get(agentId)
     if (!agent) return null
-    if (agent.state === 'working') return agent
+    // Com sessão de terminal aberta, quem manda no estado é o processo.
+    if (agent.state === 'working' || agent.state === 'waiting') return agent
 
     this.update(agentId, { state: 'working', message: 'Verificando o CLI…' })
     const checkedAt = new Date().toISOString()
@@ -77,6 +78,16 @@ export class AgentRegistry extends EventEmitter {
         message: error instanceof Error ? error.message : String(error),
       })
     }
+  }
+
+  get(agentId: string): AgentInfo | undefined {
+    return this.agents.get(agentId)
+  }
+
+  /** Usado pelo gerenciador de terminais para refletir o processo real. */
+  setRuntimeState(agentId: string, state: 'idle' | 'waiting' | 'working', message: string) {
+    const agent = this.agents.get(agentId)
+    if (agent && agent.state !== state) this.update(agentId, { state, message })
   }
 
   private update(agentId: string, patch: Partial<AgentInfo>): AgentInfo {

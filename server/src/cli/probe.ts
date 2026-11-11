@@ -22,10 +22,15 @@ const CATALOG: Record<CliId, CliSpec> = {
   gemini: { command: 'gemini', versionArgs: ['--version'] },
 }
 
+/** Caminho absoluto do executável do CLI, ou null se não estiver instalado. */
+export function findCli(cli: CliId): string | null {
+  return resolveCommand(CATALOG[cli].command)
+}
+
 /** Consulta o CLI real instalado: existe? qual versão? está logado? */
 export const probeCli: CliProbe = async (cli) => {
   const spec = CATALOG[cli]
-  const executable = resolveCommand(spec.command)
+  const executable = findCli(cli)
   if (!executable) return { found: false, version: null, auth: 'unknown' }
 
   const version = await runCli(executable, spec.versionArgs)

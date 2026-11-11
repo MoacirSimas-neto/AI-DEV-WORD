@@ -3,7 +3,7 @@ import type Phaser from 'phaser'
 export const WORLD = { width: 640, height: 360 }
 
 /** Onde o agente fica ao trabalhar (atrás da mesa) e onde passeia quando ocioso. */
-export const DESK_SEAT = { x: 540, y: 182 }
+export const DESK_SEAT = { x: 540, y: 176 }
 export const REST_SPOT = { x: 110, y: 300 }
 export const WANDER_AREA = { x: 220, y: 225, width: 200, height: 75 }
 

@@ -5,7 +5,8 @@ import { after, before, test } from 'node:test'
 import { WebSocket } from 'ws'
 import type { ServerMessage } from '../../shared/protocol.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
-import { createAppServer } from './server.ts'
+import { createAppServer, parseClientMessage } from './server.ts'
+import { TerminalManager } from './terminal/manager.ts'
 
 const ORIGIN = 'http://localhost:5173'
 const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({
@@ -13,7 +14,18 @@ const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({
   version: 'fake 1.0',
   auth: 'ok',
 }))
-const server = createAppServer({ registry, allowedOrigins: [ORIGIN] })
+// "Processo" falso que responde com eco, para testar o caminho do terminal.
+const terminals = new TerminalManager(registry, () => {
+  let emit: (data: string) => void = () => {}
+  return {
+    onData: (listener) => (emit = listener),
+    onExit: () => {},
+    write: (data) => emit(`eco:${data}`),
+    resize: () => {},
+    kill: () => {},
+  }
+})
+const server = createAppServer({ registry, terminals, allowedOrigins: [ORIGIN] })
 let port = 0
 
 before(async () => {
@@ -64,4 +76,35 @@ test('cliente recebe snapshot e depois os eventos de uma verificação', async (
 
   const states = received.map((m) => (m.type === 'agent' ? m.agent.state : m.type))
   assert.deepEqual(states, ['working', 'idle'])
+})
+
+test('terminal: abrir devolve term-ready e a entrada volta como term-data', async () => {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: ORIGIN })
+  await nextMessage(socket) // snapshot
+
+  const terminalMessages: ServerMessage[] = []
+  const done = new Promise<void>((resolve) => {
+    socket.on('message', (raw) => {
+      const message = JSON.parse(String(raw)) as ServerMessage
+      if (!message.type.startsWith('term-')) return
+      terminalMessages.push(message)
+      if (message.type === 'term-data') resolve()
+    })
+  })
+  socket.send(JSON.stringify({ type: 'term-open', agentId: 'dev', cols: 80, rows: 24 }))
+  socket.send(JSON.stringify({ type: 'term-input', agentId: 'dev', data: 'ls' }))
+  await done
+  socket.close()
+
+  assert.deepEqual(terminalMessages, [
+    { type: 'term-ready', agentId: 'dev', replay: '' },
+    { type: 'term-data', agentId: 'dev', data: 'eco:ls' },
+  ])
+})
+
+test('mensagens malformadas do cliente são descartadas', () => {
+  assert.equal(parseClientMessage('não é json'), null)
+  assert.equal(parseClientMessage('{"type":"term-open","agentId":"dev","cols":99999,"rows":24}'), null)
+  assert.equal(parseClientMessage('{"type":"term-input","agentId":"dev","data":42}'), null)
+  assert.equal(parseClientMessage('{"type":"desconhecido","agentId":"dev"}'), null)
 })
