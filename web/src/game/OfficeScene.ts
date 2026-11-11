@@ -1,13 +1,14 @@
 import Phaser from 'phaser'
 import type { AgentInfo } from '../../../shared/protocol.ts'
 import { AgentActor } from './AgentActor.ts'
-import { drawOffice } from './officeLayout.ts'
+import { drawOffice, type Station } from './officeLayout.ts'
 import type { WorldBridge } from './WorldBridge.ts'
 
 /** Cena única do escritório: cenário estático + um ator por agente vindo do backend. */
 export class OfficeScene extends Phaser.Scene {
   private readonly bridge: WorldBridge
   private readonly actors = new Map<string, AgentActor>()
+  private stations: Record<string, Station> = {}
 
   constructor(bridge: WorldBridge) {
     super('office')
@@ -15,7 +16,7 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   create() {
-    drawOffice(this)
+    this.stations = drawOffice(this)
 
     this.bridge.on('agents', this.syncAgents, this)
     this.bridge.on('selected', this.syncSelection, this)
@@ -36,8 +37,13 @@ export class OfficeScene extends Phaser.Scene {
     }
     for (const agent of agents) {
       const actor = this.actors.get(agent.id)
-      if (actor) actor.setState(agent.state)
-      else this.actors.set(agent.id, new AgentActor(this, agent, (id) => this.bridge.emit('select', id)))
+      if (actor) {
+        actor.setState(agent.state)
+        continue
+      }
+      const station = this.stations[agent.id]
+      if (!station) continue // agente sem mesa desenhada: não aparece no mundo
+      this.actors.set(agent.id, new AgentActor(this, agent, station, (id) => this.bridge.emit('select', id)))
     }
     this.syncSelection(this.bridge.selectedId)
   }

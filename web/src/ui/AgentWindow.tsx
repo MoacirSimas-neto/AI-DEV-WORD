@@ -1,19 +1,13 @@
-import type { AgentInfo, AgentState, AuthState } from '../../../shared/protocol.ts'
+import type { AgentInfo, AuthState } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
+import { AgentPortrait } from './AgentPortrait.tsx'
+import { stateOf } from './agentText.ts'
 import { TerminalView } from './TerminalView.tsx'
 
-const STATE_LABEL: Record<AgentState, string> = {
-  offline: 'Indisponível',
-  idle: 'Ocioso',
-  waiting: 'Aguardando você',
-  working: 'Trabalhando',
-  error: 'Erro',
-}
-
 const AUTH_LABEL: Record<AuthState, string> = {
-  ok: 'conta conectada',
-  missing: 'sem login',
-  unknown: 'login não verificado',
+  ok: 'Conta conectada',
+  missing: 'Sem login',
+  unknown: 'Login não verificado',
 }
 
 interface Props {
@@ -29,34 +23,39 @@ interface Props {
 export function AgentWindow({ agent, online, hasProject, send, subscribe, onClose }: Props) {
   const sessionActive = agent.state === 'working' || agent.state === 'waiting'
   const cliReady = agent.state === 'idle'
+  const state = stateOf(agent)
+  const version = agent.cliVersion?.replace(/^\D*/, '')
 
   return (
     <aside className="window">
       <header className="window-head">
-        <h2>{agent.name}</h2>
-        <span className={`badge badge-${agent.checking ? 'checking' : agent.state}`}>
-          {agent.checking ? 'Verificando…' : STATE_LABEL[agent.state]}
-        </span>
-        <button type="button" className="window-close" aria-label="Fechar janela" onClick={onClose}>
+        <AgentPortrait agentId={agent.id} dimmed={agent.state === 'offline'} />
+        <div className="window-id">
+          <h2>{agent.name}</h2>
+          <p>{agent.role}</p>
+        </div>
+        <button type="button" className="btn-quiet window-close" aria-label="Fechar janela" onClick={onClose}>
           ×
         </button>
       </header>
 
-      <p className="window-meta">
-        {agent.role} · <code>{agent.cliVersion ? `${agent.cli} ${agent.cliVersion.replace(/^\D*/, '')}` : agent.cli}</code>{' '}
-        · {AUTH_LABEL[agent.auth]}
-      </p>
-
-      <div className="window-status">
-        <p>{cliReady && !hasProject ? 'Escolha um projeto acima para iniciar a sessão.' : agent.message}</p>
+      <div className="window-facts">
+        <span className={`lamp lamp-${state.tone}`}>{state.label}</span>
+        <span className="tag">{version ? `${agent.cli} ${version}` : agent.cli}</span>
+        <span className={`tag tag-auth-${agent.auth}`}>{AUTH_LABEL[agent.auth]}</span>
         <button
           type="button"
+          className="btn-quiet"
           disabled={sessionActive || agent.checking || !online}
           onClick={() => send({ type: 'check-cli', agentId: agent.id })}
         >
           Verificar CLI
         </button>
       </div>
+
+      <p className="window-message">
+        {cliReady && !hasProject ? 'Escolha um projeto acima para iniciar a sessão.' : agent.message}
+      </p>
 
       <TerminalView
         key={agent.id}

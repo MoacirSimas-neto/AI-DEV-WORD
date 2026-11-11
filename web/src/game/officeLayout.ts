@@ -1,124 +1,305 @@
 import type Phaser from 'phaser'
 
-export const WORLD = { width: 640, height: 360 }
-
-/** Área do tapete, onde os agentes ociosos passeiam. */
-export const WANDER_AREA = { x: 215, y: 245, width: 210, height: 55 }
+/**
+ * Todo o cenário é desenhado numa grade de "pixels de arte" de 216x120, e cada
+ * um vale U pixels do mundo. Os personagens usam a mesma escala, o que mantém
+ * os pixels do mesmo tamanho na tela inteira.
+ */
+export const U = 3
+export const WORLD = { width: 216 * U, height: 120 * U }
+export const FONT = '"Pixelify Sans Variable", monospace'
 
 export interface Station {
-  /** Texto da plaquinha na frente da mesa. */
-  plate: string
   /** Onde o agente fica ao usar o terminal (atrás da mesa). */
   seat: { x: number; y: number }
-  /** Onde o agente "dorme" quando o CLI não está disponível. */
+  /** Faixa em frente à própria mesa onde o agente ocioso passeia (evita nomes sobrepostos). */
+  wander: { x: number; y: number; width: number; height: number }
+  /** Onde o agente fica quando o CLI não está disponível. */
   rest: { x: number; y: number }
-  hair: string
-  shirt: string
+  /** Luz do monitor: o personagem a acende conforme o estado real do agente. */
+  led: Phaser.GameObjects.Rectangle
 }
 
-const DESK = { width: 124, top: 156 }
-const deskLeft = (slot: number) => 26 + slot * 155
+// ids = agentes definidos no backend (server/src/agents/registry.ts)
+const DESKS = [
+  { id: 'architect', plate: 'Arquiteto', x: 10, restX: 44 },
+  { id: 'dev', plate: 'Dev', x: 62, restX: 88 },
+  { id: 'qa', plate: 'QA', x: 114, restX: 130 },
+  { id: 'tutor', plate: 'Tutor', x: 166, restX: 174 },
+]
 
-function station(slot: number, plate: string, hair: string, shirt: string): Station & { deskX: number } {
-  const deskX = deskLeft(slot)
-  return {
-    deskX,
-    plate,
-    seat: { x: deskX + 86, y: 176 },
-    rest: { x: deskX + 62, y: 338 },
-    hair,
-    shirt,
+const C = {
+  wall: 0xecdcb9,
+  wallStripe: 0xe3d0a9,
+  wood: 0x8a5a3c,
+  woodDark: 0x5c3d2a,
+  woodMid: 0x7a5238,
+  woodLight: 0xb58153,
+  woodShine: 0xcf9a68,
+  floorA: 0xc9955f,
+  floorB: 0xbf8a55,
+  floorSeam: 0xa87645,
+  paper: 0xf4efe6,
+  parchment: 0xf4e4c1,
+  red: 0xc0564e,
+  redDark: 0xa3443d,
+  gold: 0xe8c27a,
+  leaf: 0x4f8a5b,
+  leafLight: 0x6fae73,
+  pot: 0xb5694a,
+  metal: 0x3a3f4b,
+  metalDark: 0x2a2e38,
+  ink: 0x3a2a2e,
+}
+
+type Paint = (x: number, y: number, w: number, h: number, color: number, alpha?: number) => void
+
+/** Devolve um "pincel" que desenha retângulos em pixels de arte. */
+function painter(g: Phaser.GameObjects.Graphics): Paint {
+  return (x, y, w, h, color, alpha = 1) => {
+    g.fillStyle(color, alpha)
+    g.fillRect(x * U, y * U, w * U, h * U)
   }
 }
 
-// Chaves = ids dos agentes definidos no backend (server/src/agents/registry.ts).
-const STATIONS: Record<string, Station & { deskX: number }> = {
-  architect: station(0, 'ARQUITETO', '#2e2a3a', '#8a6fb5'),
-  dev: station(1, 'DEV', '#6b4a35', '#3fa796'),
-  qa: station(2, 'QA', '#b5564e', '#e0b04a'),
-  tutor: station(3, 'TUTOR', '#cfc6ba', '#6f9fd8'),
+/** Objeto com profundidade = base dele, para ordenar corretamente com os personagens. */
+function prop(scene: Phaser.Scene, baseY: number): Paint {
+  return painter(scene.add.graphics().setDepth(baseY * U))
 }
 
-export function stationFor(agentId: string): Station {
-  return STATIONS[agentId] ?? STATIONS.dev
-}
+/** Desenha o escritório e devolve a estação de trabalho de cada agente. */
+export function drawOffice(scene: Phaser.Scene): Record<string, Station> {
+  const p = painter(scene.add.graphics())
 
-const WALL_HEIGHT = 110
+  // Parede: papel listrado, sanca e lambri de madeira
+  p(0, 0, 216, 38, C.wall)
+  for (let x = 3; x < 216; x += 8) p(x, 2, 1, 28, C.wallStripe)
+  p(0, 0, 216, 2, C.woodMid)
+  p(0, 30, 216, 8, C.woodLight)
+  p(0, 30, 216, 1, C.woodShine)
+  for (let x = 5; x < 216; x += 12) p(x, 32, 1, 5, C.wood)
+  p(0, 37, 216, 1, C.woodDark)
 
-/** Desenha o cenário estático. Objetos usam depth = y da base para ordenar com os personagens. */
-export function drawOffice(scene: Phaser.Scene) {
-  const g = scene.add.graphics()
+  // Piso de tábuas com emendas desencontradas
+  for (let row = 0, y = 38; y < 120; row++, y += 7) {
+    p(0, y, 216, 7, row % 2 ? C.floorA : C.floorB)
+    p(0, y + 6, 216, 1, C.floorSeam)
+    for (let x = (row * 29) % 46; x < 216; x += 46) p(x, y, 1, 6, C.floorSeam)
+  }
+  p(0, 38, 216, 2, 0x000000, 0.12)
 
-  // Parede e rodapé
-  g.fillStyle(0xead9b6).fillRect(0, 0, WORLD.width, WALL_HEIGHT)
-  g.fillStyle(0xdcc8a0).fillRect(0, 0, WORLD.width, 8)
-  g.fillStyle(0x9c6b4a).fillRect(0, WALL_HEIGHT - 14, WORLD.width, 14)
-  g.fillStyle(0x7a5238).fillRect(0, WALL_HEIGHT - 4, WORLD.width, 4)
+  drawWindow(scene, p, 14)
+  drawWindow(scene, p, 166)
+  drawBookshelf(p)
+  drawTaskBoard(p)
+  drawClock(scene, p)
+  drawRug(p)
 
-  // Piso de tábuas
-  const plank = 25
-  for (let row = 0, y = WALL_HEIGHT; y < WORLD.height; row++, y += plank) {
-    g.fillStyle(row % 2 ? 0xc48f5a : 0xbb854f).fillRect(0, y, WORLD.width, plank)
-    g.fillStyle(0xa87645).fillRect(0, y + plank - 2, WORLD.width, 2)
-    for (let x = row % 2 ? 60 : 140; x < WORLD.width; x += 160) g.fillRect(x, y, 2, plank - 2)
+  const stations: Record<string, Station> = {}
+  for (const desk of DESKS) {
+    stations[desk.id] = {
+      seat: { x: (desk.x + 30) * U, y: 59 * U },
+      wander: { x: (desk.x + 9) * U, y: 90 * U, width: 22 * U, height: 14 * U },
+      rest: { x: desk.restX * U, y: 116 * U },
+      led: drawDesk(scene, p, desk.x, desk.plate),
+    }
   }
 
-  drawWindow(g, 60)
-  drawWindow(g, 468)
-  g.fillStyle(0xfff3c4, 0.18).fillRect(50, 206, 140, 60).fillRect(458, 206, 140, 60)
+  drawCoffeeCorner(scene)
+  drawWaterCooler(scene)
+  drawPlant(scene, 3, 106)
+  drawPlant(scene, 199, 106)
+  return stations
+}
 
-  // Estante com livros
-  g.fillStyle(0x7a5238).fillRect(250, 22, 140, 74)
-  g.fillStyle(0x5c3d2a).fillRect(256, 28, 128, 28).fillRect(256, 62, 128, 28)
-  const books = [0xc0564e, 0x4f8a8b, 0xe8c27a, 0x6b7fb5, 0x8fb573, 0xc98a5a]
-  for (let i = 0; i < 15; i++) {
-    g.fillStyle(books[i % books.length]).fillRect(260 + i * 8, 32 + (i % 3) * 2, 6, 24 - (i % 3) * 2)
-    g.fillStyle(books[(i + 3) % books.length]).fillRect(260 + i * 8, 68 + (i % 2) * 3, 6, 22 - (i % 2) * 3)
+function drawWindow(scene: Phaser.Scene, p: Paint, x: number) {
+  p(x - 3, 3, 42, 1, C.woodDark) // varão da cortina
+  p(x, 5, 36, 23, C.woodMid)
+  p(x + 2, 7, 32, 6, 0x7cc4e8)
+  p(x + 2, 13, 32, 6, 0xa8dcf0)
+  p(x + 2, 19, 32, 4, 0xd9f1f8)
+  p(x + 2, 23, 32, 3, 0x8fc27a) // colinas ao longe
+  p(x + 8, 22, 9, 1, 0x8fc27a)
+  p(x + 24, 22, 6, 1, 0x8fc27a)
+  p(x + 6, 11, 8, 2, 0xffffff) // nuvens
+  p(x + 8, 10, 5, 1, 0xffffff)
+  p(x + 22, 15, 7, 2, 0xffffff)
+  p(x + 24, 14, 4, 1, 0xffffff)
+  p(x + 17, 7, 2, 19, C.woodMid)
+  p(x + 2, 16, 32, 1, C.woodMid)
+  p(x - 1, 28, 38, 2, C.wood)
+  for (const cx of [x - 2, x + 33]) {
+    p(cx, 4, 5, 23, C.red)
+    p(cx, 4, 1, 23, C.redDark)
+    p(cx + 3, 4, 1, 23, C.redDark)
   }
-
-  // Tapete
-  g.fillStyle(0xe8c27a).fillRect(196, 226, 248, 92)
-  g.fillStyle(0xb5564e).fillRect(202, 232, 236, 80)
-  g.fillStyle(0xc96a5e).fillRect(214, 244, 212, 56)
-
-  for (const { deskX, plate } of Object.values(STATIONS)) drawDesk(scene, deskX, plate)
-  drawPlant(scene, 8)
-  drawPlant(scene, 592)
+  // Luz do sol projetada no chão
+  const light = scene.add.graphics()
+  light.fillStyle(0xfff3c4, 0.13)
+  light.fillPoints(
+    [
+      { x: (x + 2) * U, y: 40 * U },
+      { x: (x + 34) * U, y: 40 * U },
+      { x: (x + 42) * U, y: 70 * U },
+      { x: (x - 6) * U, y: 70 * U },
+    ],
+    true,
+  )
 }
 
-function drawWindow(g: Phaser.GameObjects.Graphics, x: number) {
-  g.fillStyle(0x6b4a35).fillRect(x, 18, 112, 68)
-  g.fillStyle(0xa8dcec).fillRect(x + 6, 24, 100, 56)
-  g.fillStyle(0xd4f0f7).fillRect(x + 6, 24, 100, 18)
-  g.fillStyle(0x6b4a35).fillRect(x + 54, 24, 4, 56).fillRect(x + 6, 50, 100, 4)
+function drawBookshelf(p: Paint) {
+  p(84, 4, 48, 30, C.woodMid)
+  p(84, 4, 48, 1, C.wood)
+  const books = [0xc0564e, 0x4f8a8b, 0xe8c27a, 0x6b7fb5, 0x8fb573, 0xc98a5a, 0x8a6fb5]
+  for (const shelfY of [6, 20]) {
+    p(86, shelfY, 44, 12, 0x4a3122)
+    for (let i = 0, x = 87; x < 128; i++, x += 3) {
+      if ((i + shelfY) % 7 === 5) continue // um vão entre os livros
+      const height = 7 + ((i * 5 + shelfY) % 4)
+      p(x, shelfY + 12 - height, 2, height, books[(i + shelfY) % books.length])
+    }
+  }
+  // Vasinho em cima da estante
+  p(89, 1, 4, 3, C.pot)
+  p(88, -1, 2, 2, C.leaf)
+  p(91, -2, 2, 3, C.leafLight)
 }
 
-function drawDesk(scene: Phaser.Scene, x: number, plate: string) {
-  const { width, top } = DESK
-  const desk = scene.add.graphics().setDepth(top + 44)
-  desk.fillStyle(0x000000, 0.15).fillRect(x + 6, top + 40, width - 6, 8)
-  desk.fillStyle(0x6b4a35).fillRect(x + 6, top + 20, 10, 26).fillRect(x + width - 16, top + 20, 10, 26)
-  desk.fillStyle(0x7a5238).fillRect(x, top + 14, width, 22)
-  desk.fillStyle(0xa9764c).fillRect(x, top, width, 16)
-  // Monitor (de costas para nós) e caneca
-  desk.fillStyle(0x3a3f4b).fillRect(x + 10, top - 26, 44, 30)
-  desk.fillStyle(0x2a2e38).fillRect(x + 14, top - 22, 36, 22).fillRect(x + 27, top + 4, 10, 4)
-  desk.fillStyle(0xf4efe6).fillRect(x + width - 16, top - 8, 9, 10)
-  desk.fillStyle(0xc0564e).fillRect(x + width - 16, top - 4, 9, 3)
+/** Quadro de tarefas com post-its (as tarefas reais chegam numa etapa futura). */
+function drawTaskBoard(p: Paint) {
+  p(137, 8, 24, 17, C.wood)
+  p(138, 9, 22, 15, C.paper)
+  p(145, 9, 1, 15, 0xd8d0c0)
+  p(152, 9, 1, 15, 0xd8d0c0)
+  const notes: [number, number, number][] = [
+    [139, 11, 0xf0d060],
+    [139, 16, 0xf0a0a0],
+    [147, 11, 0x9ad0f0],
+    [147, 16, 0xf0d060],
+    [147, 20, 0xa8e0a0],
+    [154, 12, 0xa8e0a0],
+  ]
+  for (const [x, y, color] of notes) p(x, y, 4, 3, color)
+}
+
+/** Relógio de parede com a hora real do computador. */
+function drawClock(scene: Phaser.Scene, p: Paint) {
+  p(71, 9, 9, 11, C.woodDark)
+  p(70, 10, 11, 9, C.woodDark)
+  p(72, 10, 7, 9, C.parchment)
+  p(71, 11, 9, 7, C.parchment)
+  const center = { x: 75.5 * U, y: 14.5 * U }
+  const hands = scene.add.graphics()
+  const draw = () => {
+    const now = new Date()
+    const minute = (now.getMinutes() / 60) * Math.PI * 2
+    const hour = (((now.getHours() % 12) + now.getMinutes() / 60) / 12) * Math.PI * 2
+    hands.clear()
+    hands.lineStyle(U, C.ink)
+    hands.lineBetween(center.x, center.y, center.x + Math.sin(hour) * 2 * U, center.y - Math.cos(hour) * 2 * U)
+    hands.lineStyle(U - 1, C.red)
+    hands.lineBetween(center.x, center.y, center.x + Math.sin(minute) * 3 * U, center.y - Math.cos(minute) * 3 * U)
+  }
+  draw()
+  scene.time.addEvent({ delay: 15_000, loop: true, callback: draw })
+}
+
+function drawRug(p: Paint) {
+  p(66, 78, 84, 28, C.gold)
+  p(68, 80, 80, 24, C.redDark)
+  p(70, 82, 76, 20, C.red)
+  p(72, 84, 72, 16, 0xc96a5e)
+  for (let x = 78; x < 142; x += 10) {
+    p(x, 91, 2, 2, C.gold)
+    p(x - 1, 92, 4, 0.5, C.gold)
+  }
+  for (let x = 68; x < 150; x += 4) {
+    p(x, 77, 1, 1, C.gold) // franjas
+    p(x, 106, 1, 1, C.gold)
+  }
+}
+
+function drawDesk(scene: Phaser.Scene, base: Paint, x: number, plate: string) {
+  // Cadeira: fica atrás do personagem, que a cobre ao sentar
+  base(x + 25, 45, 10, 11, 0x7a4038)
+  base(x + 26, 44, 8, 1, 0x7a4038)
+  base(x + 26, 46, 8, 1, 0x9a5a4e)
+  base(x + 25, 45, 1, 11, 0x5c2e28)
+
+  const p = prop(scene, 66)
+  p(x + 1, 66, 38, 2, 0x000000, 0.15)
+  p(x + 2, 62, 3, 5, C.woodDark)
+  p(x + 35, 62, 3, 5, C.woodDark)
+  p(x, 57, 40, 6, C.woodMid)
+  p(x, 62, 40, 1, C.woodDark)
+  p(x, 52, 40, 5, C.woodLight)
+  p(x, 52, 40, 1, C.woodShine)
+  // Monitor (de costas para nós), papéis, lápis e caneca
+  p(x + 4, 41, 15, 10, C.metalDark)
+  p(x + 5, 42, 13, 8, C.metal)
+  p(x + 10, 51, 3, 1, C.metalDark)
+  p(x + 8, 52, 7, 1, C.metalDark)
+  p(x + 21, 53, 6, 3, C.paper)
+  p(x + 22, 54, 4, 0.5, 0xb8b0a0)
+  p(x + 28, 55, 4, 1, 0xf0d060)
+  p(x + 34, 49, 3, 3, C.paper)
+  p(x + 37, 50, 1, 1, C.paper)
+  p(x + 34, 50, 3, 1, C.red)
   // Plaquinha com o papel do agente
-  desk.fillStyle(0xf4e4c1).fillRect(x + 22, top + 18, width - 44, 14)
+  p(x + 7, 58, 26, 4, C.parchment)
   scene.add
-    .text(x + width / 2, top + 25, plate, { fontFamily: 'monospace', fontSize: '10px', color: '#3a2a2e' })
+    .text((x + 20) * U, 60 * U, plate, { fontFamily: FONT, fontSize: '11px', color: '#3a2a2e' })
     .setOrigin(0.5)
-    .setDepth(top + 45)
+    .setDepth(66 * U + 1)
+
+  return scene.add
+    .rectangle((x + 16) * U, 48 * U, U, U, C.metalDark)
+    .setOrigin(0)
+    .setDepth(66 * U + 1)
 }
 
-/** Vaso nos cantos de baixo; `y` é o topo do vaso. */
-function drawPlant(scene: Phaser.Scene, x: number, y = 326) {
-  const plant = scene.add.graphics().setDepth(y + 24)
-  plant.fillStyle(0x000000, 0.15).fillRect(x + 4, y + 20, 36, 6)
-  plant.fillStyle(0xb5694a).fillRect(x + 6, y, 30, 22)
-  plant.fillStyle(0x9c5438).fillRect(x + 6, y, 30, 5)
-  plant.fillStyle(0x4f8a5b).fillRect(x + 13, y - 30, 16, 30).fillRect(x, y - 20, 13, 13).fillRect(x + 29, y - 24, 13, 15)
-  plant.fillStyle(0x6fae73).fillRect(x + 17, y - 38, 8, 16).fillRect(x + 4, y - 18, 6, 6).fillRect(x + 32, y - 22, 6, 6)
+function drawCoffeeCorner(scene: Phaser.Scene) {
+  const p = prop(scene, 86)
+  p(3, 86, 16, 2, 0x000000, 0.15)
+  p(2, 74, 16, 12, C.woodMid)
+  p(4, 77, 5, 7, C.wood)
+  p(11, 77, 5, 7, C.wood)
+  p(2, 72, 16, 3, C.woodShine)
+  p(4, 63, 8, 9, C.metal)
+  p(5, 64, 6, 3, C.metalDark)
+  p(6, 68, 4, 3, C.metalDark)
+  p(10, 64, 1, 1, 0xe07a6c)
+  p(7, 69, 2, 2, C.paper)
+  p(14, 69, 2, 3, C.paper)
+  p(14, 70, 2, 1, 0x6b7fb5)
+}
+
+function drawWaterCooler(scene: Phaser.Scene) {
+  const p = prop(scene, 86)
+  p(201, 86, 10, 2, 0x000000, 0.15)
+  p(203, 61, 6, 9, 0xa8dcf0)
+  p(204, 62, 1, 6, 0xd9f1f8)
+  p(204, 60, 4, 1, 0x7cc4e8)
+  p(202, 70, 8, 16, C.paper)
+  p(202, 70, 8, 1, 0xd8d0c0)
+  p(204, 74, 1, 2, 0x6b7fb5)
+  p(207, 74, 1, 2, C.red)
+  p(203, 78, 6, 1, 0xd8d0c0)
+}
+
+/** `y` é o topo do vaso. */
+function drawPlant(scene: Phaser.Scene, x: number, y: number) {
+  const p = prop(scene, y + 9)
+  p(x + 2, y + 9, 12, 2, 0x000000, 0.15)
+  p(x + 3, y, 9, 9, C.pot)
+  p(x + 2, y, 11, 2, 0xc98a5a)
+  p(x + 6, y - 13, 3, 13, C.leaf)
+  p(x + 2, y - 9, 4, 6, C.leaf)
+  p(x + 9, y - 10, 4, 7, C.leaf)
+  p(x, y - 6, 3, 3, C.leaf)
+  p(x + 12, y - 7, 3, 3, C.leaf)
+  p(x + 5, y - 15, 3, 4, C.leafLight)
+  p(x + 9, y - 12, 2, 3, C.leafLight)
+  p(x + 2, y - 10, 2, 2, C.leafLight)
+  p(x + 13, y - 8, 1, 2, C.leafLight)
 }

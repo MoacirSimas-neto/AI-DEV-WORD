@@ -40,6 +40,35 @@ export interface Workspace {
   activeProjectId: number | null
 }
 
+/** Um arquivo alterado. Pode estar preparado e ter mudanças não preparadas ao mesmo tempo. */
+export interface GitFile {
+  path: string
+  /** Código XY do `git status` (ex.: 'M ', '??'). */
+  code: string
+  staged: boolean
+  unstaged: boolean
+}
+
+export interface GitStatus {
+  isRepo: boolean
+  branch: string | null
+  upstream: string | null
+  ahead: number
+  behind: number
+  files: GitFile[]
+  /** true se a lista foi cortada por ter arquivos demais. */
+  truncated: boolean
+}
+
+/** O que um push faria. `token` autoriza exatamente esse push, uma única vez. */
+export interface PushPreview {
+  token: string
+  branch: string
+  target: string
+  setsUpstream: boolean
+  commits: string[]
+}
+
 export type ServerMessage =
   | { type: 'snapshot'; agents: AgentInfo[]; workspace: Workspace }
   | { type: 'agent'; agent: AgentInfo }
@@ -51,6 +80,11 @@ export type ServerMessage =
   | { type: 'term-data'; agentId: string; data: string }
   | { type: 'term-exit'; agentId: string; code: number }
   | { type: 'term-error'; agentId: string; message: string }
+  /** Estado Git do projeto ativo; null quando não há projeto. */
+  | { type: 'git-status'; status: GitStatus | null }
+  | { type: 'git-diff'; path: string; staged: boolean; text: string }
+  | { type: 'git-push-preview'; preview: PushPreview }
+  | { type: 'git-result'; ok: boolean; message: string }
 
 export type ClientMessage =
   | { type: 'check-cli'; agentId: string }
@@ -62,3 +96,11 @@ export type ClientMessage =
   | { type: 'project-add'; path: string }
   | { type: 'project-select'; projectId: number }
   | { type: 'project-remove'; projectId: number }
+  | { type: 'git-status' }
+  | { type: 'git-diff'; path: string; staged: boolean }
+  | { type: 'git-stage'; paths: string[] }
+  | { type: 'git-unstage'; paths: string[] }
+  | { type: 'git-commit'; message: string }
+  /** Pede a prévia; o push em si exige o token devolvido por ela. */
+  | { type: 'git-push-preview' }
+  | { type: 'git-push'; token: string }

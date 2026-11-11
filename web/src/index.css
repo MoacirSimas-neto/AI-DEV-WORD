@@ -1,109 +1,307 @@
+/*
+ * Tema: o escritório visto de fora, à noite. A página é a noite; os painéis são
+ * placas de madeira e folhas de pergaminho com borda em pixel.
+ */
 :root {
-  --bg: #2a2230;
-  --surface: #3a2f3f;
-  --surface-2: #4a3c4e;
-  --border: #5e4d5f;
-  --text: #f1e6d4;
-  --muted: #b9a99f;
-  --accent: #e8c27a;
-  --ok: #7fc48a;
-  --warn: #e8c27a;
-  --bad: #e07a6c;
-  --off: #8a8fa0;
+  --night: #1d1626;
+  --night-2: #2b2136;
+  --wood: #8a5a3c;
+  --wood-dark: #5c3d2a;
+  --wood-light: #b58153;
+  --parchment: #f4e4c1;
+  --parchment-2: #e6d2a8;
+  --ink: #3a2a2e;
+  --ink-soft: #7a6658;
+  --honey: #f0bd5e;
+  --honey-dark: #c98f33;
+  --moss: #5fae6e;
+  --clay: #d8644f;
+  --sky: #6fb4d8;
+  --stone: #8a8fa0;
 
-  font: 15px/1.5 ui-monospace, 'Cascadia Mono', Consolas, 'DejaVu Sans Mono', monospace;
-  color: var(--text);
-  background: var(--bg);
+  --pixel: 'Pixelify Sans Variable', ui-monospace, monospace;
+  --body: 'Nunito Variable', system-ui, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', Consolas, 'DejaVu Sans Mono', monospace;
+
+  font: 15px/1.5 var(--body);
+  font-variant-ligatures: none;
+  color: var(--parchment);
+  background-color: var(--night);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1.5px);
+  background-size: 26px 26px;
 }
 
 * {
   box-sizing: border-box;
+  /* A fonte pixelada funde "fi" num glifo ilegível; o atalho `font` desfaria uma regra sem !important. */
+  font-variant-ligatures: none !important;
 }
 
 body {
   margin: 0;
 }
 
-.app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 16px;
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-h1 {
-  margin: 0;
-  font-size: 20px;
-  letter-spacing: 1px;
-  color: var(--accent);
-}
-
-h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
+h1,
+h2,
 p {
   margin: 0;
 }
 
-code {
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--surface-2);
+/* Borda em pixel: quatro sombras deslocadas formam a moldura com cantos chanfrados. */
+.projects,
+.world,
+.window,
+.roster-card,
+.banner {
+  --edge: var(--wood-dark);
+  box-shadow:
+    0 -4px 0 var(--edge),
+    0 4px 0 var(--edge),
+    -4px 0 0 var(--edge),
+    4px 0 0 var(--edge),
+    0 10px 0 rgba(0, 0, 0, 0.3);
 }
 
-.status,
-.badge {
-  padding: 2px 10px;
-  border: 2px solid currentColor;
-  border-radius: 4px;
-  font-size: 12px;
-  white-space: nowrap;
+.app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px 24px 40px;
 }
 
-.status-online,
-.badge-idle {
-  color: var(--ok);
+/* ---------- topo ---------- */
+
+.topbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
 }
-.status-connecting,
-.badge-checking,
-.badge-waiting,
-.badge-working {
-  color: var(--warn);
+
+h1 {
+  font: 600 38px/1 var(--pixel);
+  color: var(--honey);
+  text-shadow: 0 4px 0 var(--wood-dark);
 }
-.status-offline,
-.badge-error {
-  color: var(--bad);
-}
-.badge-offline {
-  color: var(--off);
+
+.tagline {
+  margin-top: 8px;
+  color: #b9a6b8;
 }
 
 .banner {
-  margin-bottom: 12px;
+  --edge: var(--clay);
+  margin: 0 4px 20px;
   padding: 8px 12px;
-  border: 2px solid var(--bad);
-  border-radius: 4px;
-  background: var(--surface);
+  background: var(--night-2);
 }
+
+code {
+  padding: 1px 5px;
+  background: rgba(0, 0, 0, 0.25);
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+/* ---------- luz de estado ---------- */
+
+.lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.lamp::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  background: var(--lamp, var(--stone));
+  box-shadow:
+    0 0 0 2px var(--ink),
+    inset -2px -2px 0 rgba(0, 0, 0, 0.25);
+}
+
+.lamp-idle {
+  --lamp: var(--moss);
+}
+.lamp-waiting,
+.lamp-working {
+  --lamp: var(--honey);
+}
+.lamp-checking {
+  --lamp: var(--sky);
+}
+.lamp-error {
+  --lamp: var(--clay);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lamp-working::before,
+  .lamp-checking::before {
+    animation: blink 0.8s steps(2, jump-none) infinite;
+  }
+}
+
+@keyframes blink {
+  to {
+    opacity: 0.3;
+  }
+}
+
+/* ---------- botões e campos ---------- */
+
+button {
+  padding: 5px 12px;
+  border: 0;
+  background: var(--honey);
+  color: var(--ink);
+  font: 600 15px/1.3 var(--pixel);
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow:
+    0 -3px 0 var(--ink),
+    0 3px 0 var(--ink),
+    -3px 0 0 var(--ink),
+    3px 0 0 var(--ink),
+    inset 0 -3px 0 var(--honey-dark);
+}
+
+button:hover:not(:disabled) {
+  background: #f7cf7e;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(2px);
+}
+
+button:disabled {
+  background: var(--parchment-2);
+  color: var(--ink-soft);
+  box-shadow:
+    0 -3px 0 var(--ink),
+    0 3px 0 var(--ink),
+    -3px 0 0 var(--ink),
+    3px 0 0 var(--ink);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-quiet {
+  background: var(--parchment-2);
+  box-shadow:
+    0 -3px 0 var(--ink),
+    0 3px 0 var(--ink),
+    -3px 0 0 var(--ink),
+    3px 0 0 var(--ink),
+    inset 0 -3px 0 #cdb787;
+}
+
+.btn-quiet:hover:not(:disabled) {
+  background: var(--parchment);
+}
+
+select,
+input {
+  min-width: 0;
+  padding: 5px 9px;
+  border: 0;
+  background: var(--parchment);
+  color: var(--ink);
+  font: 600 14px/1.3 var(--body);
+  box-shadow:
+    0 -3px 0 var(--ink),
+    0 3px 0 var(--ink),
+    -3px 0 0 var(--ink),
+    3px 0 0 var(--ink),
+    inset 0 3px 0 var(--parchment-2);
+}
+
+input::placeholder {
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--sky);
+  outline-offset: 4px;
+}
+
+/* ---------- placa de projetos ---------- */
+
+.projects {
+  margin: 0 4px 24px;
+  padding: 12px 16px;
+  background: var(--wood);
+  border-top: 4px solid var(--wood-light);
+  border-bottom: 4px solid #74492f;
+}
+
+.projects-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.projects label {
+  font: 600 18px/1 var(--pixel);
+  color: var(--parchment);
+  text-shadow: 0 2px 0 var(--wood-dark);
+}
+
+.projects select {
+  max-width: 220px;
+}
+
+.projects-path {
+  max-width: 320px;
+  overflow: hidden;
+  color: var(--parchment-2);
+  font: 12px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-empty {
+  color: var(--parchment);
+}
+
+.projects-add {
+  display: flex;
+  flex: 1 1 340px;
+  gap: 14px;
+  margin-left: auto;
+}
+
+.projects-add input {
+  flex: 1;
+}
+
+.projects-error {
+  margin-top: 12px;
+  padding: 4px 10px;
+  background: var(--parchment);
+  color: #9c3524;
+  font-weight: 700;
+}
+
+/* ---------- palco ---------- */
 
 .stage {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: 28px;
   align-items: start;
+  padding: 0 4px;
 }
 
 .stage:not(.stage-split) {
-  max-width: 960px;
+  max-width: 1000px;
   margin: 0 auto;
 }
 
@@ -111,170 +309,366 @@ code {
   grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1000px) {
   .stage-split {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 .world {
-  aspect-ratio: 16 / 9;
-  border: 4px solid var(--border);
-  border-radius: 6px;
+  aspect-ratio: 648 / 360;
   overflow: hidden;
-  background: #1f1924;
+  border: 4px solid var(--wood);
+  background: var(--night);
 }
 
-.hint {
-  margin-top: 10px;
-  text-align: center;
-  color: var(--muted);
+/* ---------- equipe ---------- */
+
+.roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 20px;
+  margin-top: 28px;
 }
+
+.roster-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  background: var(--parchment);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+}
+
+.roster-card:hover:not(:disabled) {
+  background: #fbefd2;
+}
+
+.roster-card:active:not(:disabled) {
+  transform: none;
+}
+
+.roster-card[aria-pressed='true'] {
+  --edge: var(--honey);
+  background: #fff6dd;
+}
+
+.roster-text {
+  display: grid;
+  min-width: 0;
+}
+
+.roster-text strong {
+  font: 600 19px/1.1 var(--pixel);
+}
+
+.roster-role {
+  margin-bottom: 4px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.portrait {
+  flex: none;
+  width: 48px;
+  height: 39px;
+  background: #cfe6ef;
+  box-shadow: 0 0 0 3px var(--ink);
+  image-rendering: pixelated;
+}
+
+.portrait-dimmed {
+  filter: grayscale(1) opacity(0.6);
+}
+
+/* ---------- janela do agente ---------- */
 
 .window {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border: 4px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
+  gap: 12px;
+  padding: 16px;
+  background: var(--parchment);
+  color: var(--ink);
 }
 
 .window-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
+}
+
+.window-head .portrait {
+  width: 64px;
+  height: 52px;
+}
+
+.window-id {
+  flex: 1;
+  min-width: 0;
+}
+
+.window-id h2 {
+  font: 600 28px/1 var(--pixel);
+}
+
+.window-id p {
+  color: var(--ink-soft);
 }
 
 .window-close {
-  margin-left: auto;
+  align-self: start;
   padding: 0 9px;
-  font-size: 18px;
-  line-height: 1.4;
+  font-size: 20px;
 }
 
-.window-meta {
-  color: var(--muted);
+.window-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.window-facts button {
+  margin-left: auto;
+}
+
+.tag {
+  padding: 1px 8px;
+  background: var(--parchment-2);
+  font: 12px var(--mono);
+}
+
+.tag-auth-ok {
+  background: #cfe3b8;
+}
+
+.tag-auth-missing {
+  background: #f0c2b4;
+}
+
+.window-message {
+  padding: 6px 10px;
+  border-left: 4px solid var(--honey-dark);
+  background: var(--parchment-2);
   font-size: 13px;
-}
-
-.window-status p {
-  min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.window-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px;
-  border-left: 4px solid var(--accent);
-  background: var(--surface-2);
-  font-size: 13px;
-}
+/* ---------- terminal: uma tela escura embutida no pergaminho ---------- */
 
 .term-panel {
-  border: 2px solid var(--border);
-  border-radius: 4px;
-  background: #1f1924;
+  margin: 4px;
+  background: var(--night);
+  color: var(--parchment);
+  box-shadow:
+    0 -4px 0 var(--ink),
+    0 4px 0 var(--ink),
+    -4px 0 0 var(--ink),
+    4px 0 0 var(--ink);
 }
 
 .term-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 8px 6px 10px;
-  border-bottom: 2px solid var(--border);
-  color: var(--muted);
-  font-size: 13px;
+  padding: 8px 10px 10px 12px;
+  background: var(--night-2);
+  font: 600 16px/1 var(--pixel);
 }
 
 .term-host {
-  height: clamp(280px, calc(100vh - 360px), 620px);
-  padding: 6px;
+  height: clamp(280px, calc(100vh - 430px), 620px);
+  padding: 8px;
 }
 
-button {
-  padding: 4px 10px;
-  border: 2px solid var(--accent);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  font-size: 13px;
-  white-space: nowrap;
-  cursor: pointer;
-}
+/* ---------- painel de alterações (Git) ---------- */
 
-button:hover:not(:disabled) {
-  background: var(--accent);
-  color: var(--bg);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.projects {
-  margin-bottom: 12px;
-  padding: 8px 12px;
-  border: 2px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  font-size: 13px;
-}
-
-.projects-row {
+.git-heading {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
-.projects label {
-  color: var(--accent);
+.git-heading h3 {
+  margin: 0;
+  font: 600 18px/1.1 var(--pixel);
 }
 
-.projects-empty {
-  color: var(--muted);
+.git-heading span {
+  padding: 0 7px;
+  background: var(--ink);
+  color: var(--parchment);
+  font: 600 13px/1.5 var(--body);
 }
 
-.projects-add {
-  display: flex;
-  flex: 1 1 320px;
-  gap: 8px;
+.git-heading button {
   margin-left: auto;
 }
 
-.projects select,
-.projects input {
-  min-width: 0;
-  padding: 4px 8px;
-  border: 2px solid var(--border);
-  border-radius: 4px;
-  background: #1f1924;
-  color: var(--text);
-  font: inherit;
+.git-empty {
+  color: var(--ink-soft);
+  font-size: 13px;
 }
 
-.projects select {
-  max-width: 340px;
+.git-files {
+  display: grid;
+  gap: 2px;
+  max-height: 190px;
+  margin: 0;
+  padding: 0 4px 4px 0;
+  overflow-y: auto;
+  list-style: none;
 }
 
-.projects input {
+.git-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px 3px 0;
+}
+
+.git-file-active {
+  background: var(--parchment-2);
+}
+
+.git-file-name {
   flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  overflow: hidden;
+  background: none;
+  box-shadow: none;
+  font: 13px/1.5 var(--mono);
+  text-align: left;
+  text-overflow: ellipsis;
 }
 
-.projects select:focus-visible,
-.projects input:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.git-file-name:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
 }
 
-.projects-error {
-  margin-top: 6px;
-  color: var(--bad);
+.git-file-name:active:not(:disabled) {
+  transform: none;
+}
+
+.git-kind {
+  display: inline-block;
+  width: 84px;
+  color: var(--ink-soft);
+  font: 600 12px var(--body);
+}
+
+.diff {
+  max-height: 300px;
+  margin: 4px;
+  padding: 8px 10px;
+  overflow: auto;
+  background: var(--night);
+  color: #d9cfe0;
+  font: 12px/1.5 var(--mono);
+  box-shadow:
+    0 -4px 0 var(--ink),
+    0 4px 0 var(--ink),
+    -4px 0 0 var(--ink),
+    4px 0 0 var(--ink);
+}
+
+.diff-add {
+  color: #8fe0a0;
+}
+
+.diff-del {
+  color: #f09a8a;
+}
+
+.diff-hunk {
+  color: var(--sky);
+}
+
+.diff-meta {
+  color: #8f7f9a;
+}
+
+.git-commit {
+  display: flex;
+  align-items: start;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.git-commit textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 0;
+  background: #fffaf0;
+  color: var(--ink);
+  font: 14px/1.4 var(--body);
+  resize: vertical;
+  box-shadow:
+    0 -3px 0 var(--ink),
+    0 3px 0 var(--ink),
+    -3px 0 0 var(--ink),
+    3px 0 0 var(--ink);
+}
+
+.git-commit textarea:focus-visible {
+  outline: 3px solid var(--sky);
+  outline-offset: 4px;
+}
+
+.git-push {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.git-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: #fff6dd;
+  box-shadow:
+    0 -4px 0 var(--honey-dark),
+    0 4px 0 var(--honey-dark),
+    -4px 0 0 var(--honey-dark),
+    4px 0 0 var(--honey-dark);
+}
+
+.git-confirm ul {
+  max-height: 140px;
+  margin: 0;
+  padding-left: 18px;
+  overflow-y: auto;
+  font: 12px/1.6 var(--mono);
+}
+
+.git-confirm-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.git-result {
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.git-result-ok {
+  background: #cfe3b8;
+}
+
+.git-result-bad {
+  background: #f0c2b4;
 }

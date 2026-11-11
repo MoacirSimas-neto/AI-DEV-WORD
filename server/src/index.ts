@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { probeCli } from './cli/probe.ts'
 import { ALLOWED_ORIGINS, DATA_DIR, DATABASE_FILE, HOST, PORT } from './config.ts'
+import { GitService } from './git/service.ts'
 import { ProjectStore } from './projects/store.ts'
 import { createAppServer } from './server.ts'
 import { TerminalManager } from './terminal/manager.ts'
@@ -11,7 +12,13 @@ mkdirSync(DATA_DIR, { recursive: true })
 const projects = new ProjectStore(DATABASE_FILE)
 const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
 const terminals = new TerminalManager(registry, spawnCliPty, () => projects.active()?.path ?? null)
-const server = createAppServer({ registry, terminals, projects, allowedOrigins: ALLOWED_ORIGINS })
+const server = createAppServer({
+  registry,
+  terminals,
+  projects,
+  git: new GitService(),
+  allowedOrigins: ALLOWED_ORIGINS,
+})
 
 server.on('error', (error: NodeJS.ErrnoException) => {
   const reason =

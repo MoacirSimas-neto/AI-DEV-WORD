@@ -1,26 +1,40 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { PhaserGame } from './game/PhaserGame.tsx'
+import { useGitStatus } from './net/useGitStatus.ts'
 import { type ConnectionStatus, useServer } from './net/useServer.ts'
 import { AgentWindow } from './ui/AgentWindow.tsx'
+import { GitPanel } from './ui/GitPanel.tsx'
 import { ProjectBar } from './ui/ProjectBar.tsx'
+import { TeamRoster } from './ui/TeamRoster.tsx'
 
-const STATUS_LABEL: Record<ConnectionStatus, string> = {
-  connecting: 'Conectando…',
-  online: 'Backend conectado',
-  offline: 'Backend desconectado',
+const STATUS: Record<ConnectionStatus, { label: string; tone: string }> = {
+  connecting: { label: 'Conectando…', tone: 'checking' },
+  online: { label: 'Backend conectado', tone: 'idle' },
+  offline: { label: 'Backend desconectado', tone: 'error' },
 }
+
+/** O que ocupa a coluna da direita: a janela de um agente, o painel Git, ou nada. */
+type Panel = { agentId: string } | 'git' | null
 
 function App() {
   const { status, agents, workspace, send, subscribe } = useServer()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const selected = agents.find((a) => a.id === selectedId) ?? null
+  const [panel, setPanel] = useState<Panel>(null)
   const online = status === 'online'
+  const gitStatus = useGitStatus(send, subscribe, online, workspace.activeProjectId)
+
+  const selectedId = panel && panel !== 'git' ? panel.agentId : null
+  const selected = agents.find((a) => a.id === selectedId) ?? null
+  const selectAgent = useCallback((agentId: string) => setPanel({ agentId }), [])
+  const close = () => setPanel(null)
 
   return (
     <div className="app">
       <header className="topbar">
-        <h1>AI Dev World</h1>
-        <span className={`status status-${status}`}>{STATUS_LABEL[status]}</span>
+        <div>
+          <h1>AI Dev World</h1>
+          <p className="tagline">Seu escritório de agentes, rodando na sua máquina</p>
+        </div>
+        <span className={`lamp lamp-${STATUS[status].tone}`}>{STATUS[status].label}</span>
       </header>
 
       {status === 'offline' && (
@@ -29,12 +43,19 @@ function App() {
         </p>
       )}
 
-      <ProjectBar workspace={workspace} online={online} send={send} subscribe={subscribe} />
+      <ProjectBar
+        workspace={workspace}
+        online={online}
+        changes={gitStatus?.isRepo ? gitStatus.files.length : null}
+        onOpenGit={() => setPanel('git')}
+        send={send}
+        subscribe={subscribe}
+      />
 
-      <main className={selected ? 'stage stage-split' : 'stage'}>
-        <div>
-          <PhaserGame agents={agents} selectedId={selectedId} onSelect={setSelectedId} />
-          {!selected && <p className="hint">Clique em um personagem para abrir a janela dele.</p>}
+      <main className={selected || panel === 'git' ? 'stage stage-split' : 'stage'}>
+        <div className="stage-world">
+          <PhaserGame agents={agents} selectedId={selectedId} onSelect={selectAgent} />
+          <TeamRoster agents={agents} selectedId={selectedId} onSelect={selectAgent} />
         </div>
         {selected && (
           <AgentWindow
@@ -43,9 +64,10 @@ function App() {
             hasProject={workspace.activeProjectId !== null}
             send={send}
             subscribe={subscribe}
-            onClose={() => setSelectedId(null)}
+            onClose={close}
           />
         )}
+        {panel === 'git' && <GitPanel status={gitStatus} send={send} subscribe={subscribe} onClose={close} />}
       </main>
     </div>
   )

@@ -5,13 +5,17 @@ import type { Send, Subscribe } from '../net/useServer.ts'
 interface Props {
   workspace: Workspace
   online: boolean
+  /** Arquivos alterados no projeto ativo; null se ele não for um repositório Git. */
+  changes: number | null
+  onOpenGit: () => void
   send: Send
   subscribe: Subscribe
 }
 
 /** Escolha da pasta em que os agentes trabalham. Só pastas listadas aqui chegam aos CLIs. */
-export function ProjectBar({ workspace, online, send, subscribe }: Props) {
+export function ProjectBar({ workspace, online, changes, onOpenGit, send, subscribe }: Props) {
   const { projects, activeProjectId } = workspace
+  const active = projects.find((p) => p.id === activeProjectId)
   const [path, setPath] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -48,18 +52,23 @@ export function ProjectBar({ workspace, online, send, subscribe }: Props) {
             >
               {activeProjectId === null && <option value="">Escolha…</option>}
               {projects.map((p) => (
-                <option key={p.id} value={p.id} title={p.path}>
-                  {p.name} — {p.path}
+                <option key={p.id} value={p.id}>
+                  {p.name}
                 </option>
               ))}
             </select>
+            {active && <span className="projects-path">{active.path}</span>}
             <button
               type="button"
+              className="btn-quiet"
               disabled={!online || activeProjectId === null}
               title="Tira da lista; não apaga nada do disco"
               onClick={() => activeProjectId !== null && send({ type: 'project-remove', projectId: activeProjectId })}
             >
               Remover da lista
+            </button>
+            <button type="button" disabled={!active} onClick={onOpenGit}>
+              {changes ? `Alterações (${changes})` : 'Alterações'}
             </button>
           </>
         )}

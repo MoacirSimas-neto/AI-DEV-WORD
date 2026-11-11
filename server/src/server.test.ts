@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { mkdtempSync, realpathSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -8,6 +9,7 @@ import { after, before, test } from 'node:test'
 import { WebSocket } from 'ws'
 import type { ClientMessage, ServerMessage } from '../../shared/protocol.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
+import { GitService } from './git/service.ts'
 import { ProjectStore } from './projects/store.ts'
 import { createAppServer, parseClientMessage } from './server.ts'
 import { TerminalManager } from './terminal/manager.ts'
@@ -32,7 +34,7 @@ const terminals = new TerminalManager(
   },
   () => projects.active()?.path ?? null,
 )
-const server = createAppServer({ registry, terminals, projects, allowedOrigins: [ORIGIN] })
+const server = createAppServer({ registry, terminals, projects, git: new GitService(), allowedOrigins: [ORIGIN] })
 let port = 0
 
 before(async () => {
@@ -118,7 +120,38 @@ test('terminal é recusado sem projeto e funciona depois de adicionar um', async
   client.socket.close()
 })
 
+test('git: estado, diff e preparação pelo WebSocket; push sem prévia é recusado', async () => {
+  const client = await connect()
+  await client.waitFor('snapshot') // o projeto ativo já é projectDir (teste anterior)
+
+  client.send({ type: 'git-status' })
+  assert.equal((await client.waitFor('git-status')).status?.isRepo, false)
+
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: projectDir })
+  writeFileSync(path.join(projectDir, 'nota.txt'), 'linha nova\n')
+  client.send({ type: 'git-status' })
+  const { status } = await client.waitFor('git-status')
+  assert.deepEqual(
+    status?.files.map((f) => f.path),
+    ['nota.txt'],
+  )
+
+  client.send({ type: 'git-diff', path: 'nota.txt', staged: false })
+  assert.match((await client.waitFor('git-diff')).text, /\+linha nova/)
+
+  client.send({ type: 'git-stage', paths: ['nota.txt'] })
+  assert.equal((await client.waitFor('git-status')).status?.files[0].staged, true)
+
+  client.send({ type: 'git-push', token: 'sem-previa' })
+  const refused = await client.waitFor('git-result')
+  assert.equal(refused.ok, false)
+  assert.match(refused.message, /expirou ou o repositório mudou/)
+  client.socket.close()
+})
+
 test('mensagens malformadas do cliente são descartadas', () => {
+  assert.equal(parseClientMessage('{"type":"git-stage","paths":[]}'), null)
+  assert.equal(parseClientMessage('{"type":"git-push"}'), null)
   assert.equal(parseClientMessage('não é json'), null)
   assert.equal(parseClientMessage('{"type":"term-open","agentId":"dev","cols":99999,"rows":24}'), null)
   assert.equal(parseClientMessage('{"type":"term-input","agentId":"dev","data":42}'), null)

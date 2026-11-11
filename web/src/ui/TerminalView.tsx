@@ -29,7 +29,7 @@ export function TerminalView({ agentId, cliName, sessionActive, canStart, online
       fontFamily: "ui-monospace, 'Cascadia Mono', Consolas, 'DejaVu Sans Mono', monospace",
       fontSize: 13,
       cursorBlink: true,
-      theme: { background: '#1f1924', foreground: '#f1e6d4', cursor: '#e8c27a' },
+      theme: { background: '#1d1626', foreground: '#f1e6d4', cursor: '#e8c27a' },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
