@@ -30,10 +30,54 @@ export interface SpecializationInfo {
   availableDocs: KnowledgeDocKind[]
 }
 
+/** Limite máximo de especialistas opcionais além dos 3 obrigatórios (Arquiteto, Dev, QA). */
+export const MAX_MISSION_SPECIALISTS = 3
+
+export type SpecialistRole =
+  | 'database'
+  | 'security'
+  | 'ui'
+  | 'docs'
+  | 'api'
+  | 'testing'
+  | 'data'
+  | 'custom'
+
+export type SpecialistTiming = 'pre-dev' | 'post-dev'
+
+export interface MissionSpecialistSelection {
+  agentId: string
+  role: SpecialistRole
+  timing: SpecialistTiming
+  expectedContribution?: string
+}
+
 export interface MissionTeamSelection {
   plannerId: string
   devId: string
   qaId: string
+  specialists?: MissionSpecialistSelection[]
+}
+
+export type SpecialistExecutionState =
+  | 'pending'
+  | 'waiting'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'skipped'
+
+export interface SpecialistResult {
+  agentId: string
+  role: SpecialistRole
+  timing: SpecialistTiming
+  status: SpecialistExecutionState
+  summary: string
+  details: string
+  error?: string | null
+  startedAt?: string
+  finishedAt?: string
 }
 
 export interface AgentSnapshotEntry {
@@ -272,6 +316,10 @@ export interface MissionInfo {
   verdict: 'approved' | 'changes' | null
   /** Classificação detalhada do QA (ex.: 'APROVADO COM RESSALVAS'). */
   verdictDetail?: string | null
+  /** Especialistas opcionais selecionados para a missão (máximo 3). */
+  specialists?: MissionSpecialistSelection[]
+  /** Resultados e análises dos especialistas (pré-dev e pós-dev). */
+  specialistResults?: SpecialistResult[]
   /** Rodadas Dev -> QA já encerradas, da mais antiga para a mais recente. */
   attempts?: MissionAttempt[]
   /** Perguntas do planejador e respostas do usuário, em ordem. */

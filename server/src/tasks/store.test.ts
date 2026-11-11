@@ -121,6 +121,41 @@ test('TaskStore: migração de missões antigas e preservação de histórico/mi
   assert.equal(legacyMission.verdict, 'approved')
   assert.equal(legacyMission.verdictDetail, null)
   assert.deepEqual(legacyMission.files, ['index.ts'])
+  assert.deepEqual(legacyMission.specialists, [])
+  assert.deepEqual(legacyMission.specialistResults, [])
+
+  // 1.1 Testa persistência de missão com especialistas da Etapa 7
+  store.updateMission(legacyMission.id, { phase: 'done' })
+  const specMission = store.createMission(1, 1, {
+    plannerId: 'architect',
+    devId: 'dev',
+    qaId: 'qa',
+    specialists: [
+      { agentId: 'data-expert', role: 'database', timing: 'pre-dev', expectedContribution: 'Schema SQL' },
+      { agentId: 'sec-guard', role: 'security', timing: 'post-dev', expectedContribution: 'Análise de injeção' },
+    ],
+  })
+  assert.equal(specMission.specialists?.length, 2)
+  assert.equal(specMission.specialists?.[0].role, 'database')
+  assert.equal(specMission.specialists?.[1].timing, 'post-dev')
+
+  store.updateMission(specMission.id, {
+    phase: 'done',
+    specialistResults: [
+      {
+        agentId: 'data-expert',
+        role: 'database',
+        timing: 'pre-dev',
+        status: 'completed',
+        summary: 'Tabelas normalizadas',
+        details: 'CREATE TABLE produtos...',
+      },
+    ],
+  })
+  const updatedSpec = store.getMission(specMission.id)!
+  assert.equal(updatedSpec.specialistResults?.length, 1)
+  assert.equal(updatedSpec.specialistResults?.[0].status, 'completed')
+  assert.equal(updatedSpec.specialistResults?.[0].summary, 'Tabelas normalizadas')
 
   // 2. Cria agente customizado, associa a tarefa/missão/histórico e depois desativa o agente
   const configs = new AgentConfigStore(db)

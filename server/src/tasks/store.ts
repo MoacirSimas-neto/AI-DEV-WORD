@@ -7,6 +7,8 @@ import type {
   MissionClarification,
   MissionInfo,
   MissionPhase,
+  MissionSpecialistSelection,
+  SpecialistResult,
   TaskInfo,
   TaskInput,
   TaskStatus,
@@ -39,6 +41,8 @@ const SCHEMA = `
     verdict TEXT,
     verdict_detail TEXT,
     team_snapshot TEXT NOT NULL DEFAULT '{}',
+    specialists TEXT NOT NULL DEFAULT '[]',
+    specialist_results TEXT NOT NULL DEFAULT '[]',
     files TEXT NOT NULL DEFAULT '[]',
     attempts TEXT NOT NULL DEFAULT '[]',
     clarifications TEXT NOT NULL DEFAULT '[]',
@@ -62,6 +66,8 @@ const EXTRA_MISSION_COLUMNS: [string, string][] = [
   ['qa_id', "TEXT NOT NULL DEFAULT 'qa'"],
   ['verdict_detail', 'TEXT'],
   ['team_snapshot', "TEXT NOT NULL DEFAULT '{}'"],
+  ['specialists', "TEXT NOT NULL DEFAULT '[]'"],
+  ['specialist_results', "TEXT NOT NULL DEFAULT '[]'"],
   ['attempts', "TEXT NOT NULL DEFAULT '[]'"],
   ['clarifications', "TEXT NOT NULL DEFAULT '[]'"],
   ['memory_context', "TEXT NOT NULL DEFAULT '{}'"],
@@ -83,7 +89,8 @@ const TASK_COLUMNS = `id, project_id AS projectId, title, description, priority,
 const MISSION_COLUMNS = `id, task_id AS taskId, project_id AS projectId, phase,
   planner_id AS plannerId, dev_id AS devId, qa_id AS qaId,
   plan, dev_report AS devReport, review, verdict, verdict_detail AS verdictDetail,
-  team_snapshot AS teamSnapshot, files, attempts, clarifications, memory_context AS memoryContext, error, created_at AS createdAt, updated_at AS updatedAt`
+  team_snapshot AS teamSnapshot, specialists, specialist_results AS specialistResults,
+  files, attempts, clarifications, memory_context AS memoryContext, error, created_at AS createdAt, updated_at AS updatedAt`
 
 type MissionPatch = Partial<
   Pick<
@@ -98,6 +105,8 @@ type MissionPatch = Partial<
     | 'verdict'
     | 'verdictDetail'
     | 'teamSnapshot'
+    | 'specialists'
+    | 'specialistResults'
     | 'files'
     | 'attempts'
     | 'clarifications'
@@ -117,6 +126,8 @@ const MISSION_FIELDS: Record<keyof MissionPatch, string> = {
   verdict: 'verdict',
   verdictDetail: 'verdict_detail',
   teamSnapshot: 'team_snapshot',
+  specialists: 'specialists',
+  specialistResults: 'specialist_results',
   files: 'files',
   attempts: 'attempts',
   clarifications: 'clarifications',
@@ -147,6 +158,8 @@ const toMission = (row: Record<string, unknown>): MissionInfo => ({
   verdict: (row.verdict as 'approved' | 'changes' | null) ?? null,
   verdictDetail: (row.verdictDetail as string | null) ?? null,
   teamSnapshot: parseJsonSafe<Record<string, AgentSnapshotEntry>>(row.teamSnapshot, {}),
+  specialists: parseJsonSafe<MissionSpecialistSelection[]>(row.specialists, []),
+  specialistResults: parseJsonSafe<SpecialistResult[]>(row.specialistResults, []),
   files: parseJsonSafe<string[]>(row.files, []),
   attempts: parseJsonSafe<MissionAttempt[]>(row.attempts, []),
   clarifications: parseJsonSafe<MissionClarification[]>(row.clarifications, []),
@@ -161,6 +174,7 @@ export interface CreateMissionOptions {
   devId?: string
   qaId?: string
   teamSnapshot?: Record<string, AgentSnapshotEntry>
+  specialists?: MissionSpecialistSelection[]
 }
 
 /**
@@ -296,13 +310,14 @@ export class TaskStore extends EventEmitter {
     const devId = (options?.devId ?? 'dev').trim() || 'dev'
     const qaId = (options?.qaId ?? 'qa').trim() || 'qa'
     const teamSnapshot = JSON.stringify(options?.teamSnapshot ?? {})
+    const specialists = JSON.stringify(options?.specialists ?? [])
     try {
       const result = this.db
         .prepare(
-          `INSERT INTO missions (task_id, project_id, phase, planner_id, dev_id, qa_id, team_snapshot, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO missions (task_id, project_id, phase, planner_id, dev_id, qa_id, team_snapshot, specialists, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(taskId, projectId, 'planning', plannerId, devId, qaId, teamSnapshot, now, now)
+        .run(taskId, projectId, 'planning', plannerId, devId, qaId, teamSnapshot, specialists, now, now)
       this.emit('missions')
       return this.getMission(Number(result.lastInsertRowid))!
     } catch (error) {
@@ -315,7 +330,9 @@ export class TaskStore extends EventEmitter {
     const keys = Object.keys(patch) as (keyof MissionPatch)[]
     const values = keys.map((k) => {
       if (k === 'files') return JSON.stringify(patch.files)
-      if (k === 'attempts' || k === 'clarifications' || k === 'memoryContext') return JSON.stringify(patch[k])
+      if (k === 'attempts' || k === 'clarifications' || k === 'memoryContext' || k === 'specialists' || k === 'specialistResults') {
+        return JSON.stringify(patch[k])
+      }
       if (k === 'teamSnapshot') return JSON.stringify(patch.teamSnapshot)
       return patch[k] as string | null
     })
