@@ -3,7 +3,7 @@ import type { MissionInfo, MissionPhase } from './protocol.ts'
 export type StageStatus = 'pending' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'cancelled'
 
 export interface MissionStageInfo {
-  id: 'planning' | 'developing' | 'reviewing' | 'delivery'
+  id: 'planning' | 'pre-dev-specialists' | 'developing' | 'post-dev-specialists' | 'reviewing' | 'delivery'
   label: string
   agentId: string | null
   agentRole: string
@@ -165,25 +165,73 @@ export function computeMissionProgress(mission: MissionInfo | null | undefined):
                 ? 'Falha ao gerar o plano.'
                 : 'Cancelado durante o planejamento.',
     },
-    {
-      id: 'developing',
-      label: 'Desenvolvimento',
-      agentId: devId,
-      agentRole: devRole,
-      status: devStatus,
-      summary:
-        devStatus === 'running'
-          ? 'Aplicando código no repositório local...'
-          : devStatus === 'completed'
-            ? mission.files.length > 0
-              ? `Implementado (${mission.files.length} arquivo(s) tocado(s)).`
-              : 'Etapa executada sem arquivos alterados.'
-            : devStatus === 'failed'
-              ? 'Falha na etapa de implementação.'
-              : devStatus === 'cancelled'
-                ? 'Cancelado antes de concluir o desenvolvimento.'
-                : 'Aguardando aprovação do plano.',
-    },
+  ]
+
+  // Estágio Especialistas Pré-Dev (se houver)
+  const preDevSpecs = (mission.specialists ?? []).filter((s) => s.timing === 'pre-dev')
+  if (preDevSpecs.length > 0) {
+    const preDevResults = (mission.specialistResults ?? []).filter((r) => r.timing === 'pre-dev')
+    const allDone = preDevResults.length === preDevSpecs.length && preDevResults.every((r) => r.status === 'completed')
+    const anyFailed = preDevResults.some((r) => r.status === 'failed')
+    const isRunningPre = phase === 'developing' && !allDone && !anyFailed
+
+    stages.push({
+      id: 'pre-dev-specialists',
+      label: `Análise Especializada (${preDevSpecs.map((s) => s.role).join(', ')})`,
+      agentId: preDevSpecs[0].agentId,
+      agentRole: preDevSpecs.map((s) => snap[s.agentId]?.name || s.agentId).join(', '),
+      status: anyFailed ? 'failed' : allDone ? 'completed' : isRunningPre ? 'running' : 'pending',
+      summary: allDone
+        ? `${preDevResults.length} análise(s) técnica(s) entregue(s) ao Desenvolvedor.`
+        : isRunningPre
+          ? 'Especialistas analisando requisitos antes da implementação...'
+          : 'Aguardando aprovação do plano.',
+    })
+  }
+
+  stages.push({
+    id: 'developing',
+    label: 'Desenvolvimento',
+    agentId: devId,
+    agentRole: devRole,
+    status: devStatus,
+    summary:
+      devStatus === 'running'
+        ? 'Aplicando código no repositório local...'
+        : devStatus === 'completed'
+          ? mission.files.length > 0
+            ? `Implementado (${mission.files.length} arquivo(s) tocado(s)).`
+            : 'Etapa executada sem arquivos alterados.'
+          : devStatus === 'failed'
+            ? 'Falha na etapa de implementação.'
+            : devStatus === 'cancelled'
+              ? 'Cancelado antes de concluir o desenvolvimento.'
+              : 'Aguardando aprovação do plano.',
+  })
+
+  // Estágio Especialistas Pós-Dev (se houver)
+  const postDevSpecs = (mission.specialists ?? []).filter((s) => s.timing === 'post-dev')
+  if (postDevSpecs.length > 0) {
+    const postDevResults = (mission.specialistResults ?? []).filter((r) => r.timing === 'post-dev')
+    const allDone = postDevResults.length === postDevSpecs.length && postDevResults.every((r) => r.status === 'completed')
+    const anyFailed = postDevResults.some((r) => r.status === 'failed')
+    const isRunningPost = phase === 'reviewing' && !allDone && !anyFailed
+
+    stages.push({
+      id: 'post-dev-specialists',
+      label: `Revisão Especializada (${postDevSpecs.map((s) => s.role).join(', ')})`,
+      agentId: postDevSpecs[0].agentId,
+      agentRole: postDevSpecs.map((s) => snap[s.agentId]?.name || s.agentId).join(', '),
+      status: anyFailed ? 'failed' : allDone ? 'completed' : isRunningPost ? 'running' : 'pending',
+      summary: allDone
+        ? `${postDevResults.length} parecer(es) especializado(s) entregue(s) ao QA.`
+        : isRunningPost
+          ? 'Especialistas auditando o código implementado...'
+          : 'Aguardando implementação pelo Desenvolvedor.',
+    })
+  }
+
+  stages.push(
     {
       id: 'reviewing',
       label: 'Revisão QA',
@@ -216,9 +264,9 @@ export function computeMissionProgress(mission: MissionInfo | null | undefined):
       summary:
         deliveryStatus === 'completed'
           ? 'Relatório final pronto. Revise o diff no Git Control para fazer commit.'
-          : 'Disponibilizada após conclusão das 3 etapas.',
+          : 'Disponibilizada após conclusão das etapas.',
     },
-  ]
+  )
 
   return {
     missionId: mission.id,

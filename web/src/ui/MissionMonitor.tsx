@@ -300,6 +300,34 @@ export function MissionMonitor({
             </section>
           )}
 
+          {/* Pareceres dos Especialistas (Etapa 7) */}
+          {currentMission.specialistResults && currentMission.specialistResults.length > 0 && (
+            <section className="mission-details-box">
+              <summary style={{ cursor: 'pointer', fontWeight: 'bold', padding: '6px 0' }}>
+                Contribuições dos Especialistas ({currentMission.specialistResults.length})
+              </summary>
+              <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {currentMission.specialistResults.map((res, i) => (
+                  <div key={i} className="task-item" style={{ margin: 0, padding: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <strong>{res.agentId} ({res.role})</strong>
+                      <span className={`task-status-pill status-${res.status === 'completed' ? 'done' : res.status === 'running' ? 'doing' : 'todo'}`}>
+                        {res.timing === 'pre-dev' ? 'Pré-Dev' : 'Pós-Dev'} · {res.status}
+                      </span>
+                    </div>
+                    <p style={{ margin: '4px 0', fontSize: '0.9em' }}>{res.summary}</p>
+                    <details>
+                      <summary style={{ cursor: 'pointer', fontSize: '0.85em', color: 'var(--text-dim)' }}>Ver análise completa</summary>
+                      <pre className="mission-plan-text" style={{ maxHeight: '180px', overflowY: 'auto', marginTop: '4px' }}>
+                        {res.details}
+                      </pre>
+                    </details>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Resultado da Revisão de QA */}
           {currentMission.review && (
             <section className="mission-review-box">

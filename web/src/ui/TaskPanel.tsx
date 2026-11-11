@@ -3,12 +3,16 @@ import type {
   AgentConfig,
   AgentInfo,
   MissionInfo,
+  MissionSpecialistSelection,
   MissionTeamSelection,
+  SpecialistRole,
+  SpecialistTiming,
   TaskInfo,
   TaskInput,
   TaskPriority,
   TaskStatus,
 } from '../../../shared/protocol.ts'
+import { MAX_MISSION_SPECIALISTS } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
 import { ClarificationBox } from './ClarificationBox.tsx'
@@ -58,6 +62,12 @@ export function TaskPanel({
   const [plannerId, setPlannerId] = useState<string>('architect')
   const [devId, setDevId] = useState<string>('dev')
   const [qaId, setQaId] = useState<string>('qa')
+  const [specialists, setSpecialists] = useState<MissionSpecialistSelection[]>([])
+  const [addingSpecialist, setAddingSpecialist] = useState<boolean>(false)
+  const [newSpecAgentId, setNewSpecAgentId] = useState<string>('')
+  const [newSpecRole, setNewSpecRole] = useState<SpecialistRole>('database')
+  const [newSpecTiming, setNewSpecTiming] = useState<SpecialistTiming>('pre-dev')
+  const [newSpecContribution, setNewSpecContribution] = useState<string>('')
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -114,7 +124,7 @@ export function TaskPanel({
     },
   ]
 
-  const offlineTeamAgents = [effectivePlannerId, effectiveDevId, effectiveQaId]
+  const offlineTeamAgents = [effectivePlannerId, effectiveDevId, effectiveQaId, ...specialists.map(s => s.agentId)]
     .map((id) => agents.find((a) => a.id === id))
     .filter((a): a is AgentInfo => !a || a.state === 'offline')
 
@@ -126,7 +136,7 @@ export function TaskPanel({
   const teamReady = !missingRoleSelection && offlineTeamAgents.length === 0
 
   const verifyTeamClis = () => {
-    for (const id of new Set([effectivePlannerId, effectiveDevId, effectiveQaId])) {
+    for (const id of new Set([effectivePlannerId, effectiveDevId, effectiveQaId, ...specialists.map(s => s.agentId)])) {
       send({ type: 'check-cli', agentId: id })
     }
   }
@@ -139,8 +149,37 @@ export function TaskPanel({
           plannerId: effectivePlannerId,
           devId: effectiveDevId,
           qaId: effectiveQaId,
+          specialists: specialists.length > 0 ? specialists : undefined,
         }
     send({ type: 'mission-start', taskId, team })
+  }
+
+  const addSpecialist = () => {
+    if (!newSpecAgentId || specialists.length >= MAX_MISSION_SPECIALISTS) return
+    if (specialists.some((s) => s.agentId === newSpecAgentId)) {
+      setNotice('Este especialista já foi adicionado.')
+      return
+    }
+    if ([effectivePlannerId, effectiveDevId, effectiveQaId].includes(newSpecAgentId)) {
+      setNotice('O agente já possui função principal na missão.')
+      return
+    }
+    setSpecialists([
+      ...specialists,
+      {
+        agentId: newSpecAgentId,
+        role: newSpecRole,
+        timing: newSpecTiming,
+        expectedContribution: newSpecContribution.trim() || undefined,
+      },
+    ])
+    setNewSpecAgentId('')
+    setNewSpecContribution('')
+    setAddingSpecialist(false)
+  }
+
+  const removeSpecialist = (agentIdToRemove: string) => {
+    setSpecialists(specialists.filter((s) => s.agentId !== agentIdToRemove))
   }
 
   const resetForm = () => {
@@ -364,6 +403,117 @@ export function TaskPanel({
                 </div>
               )
             })}
+          </div>
+
+          {/* Especialistas Opcionais da Missão (Etapa 7) */}
+          <div className="team-specialists-section">
+            <div className="team-specialists-head">
+              <h4>Especialistas Adicionais ({specialists.length}/{MAX_MISSION_SPECIALISTS})</h4>
+              {!useDefaultTeam && specialists.length < MAX_MISSION_SPECIALISTS && !addingSpecialist && (
+                <button
+                  type="button"
+                  className="btn-quiet"
+                  onClick={() => setAddingSpecialist(true)}
+                >
+                  + Adicionar Especialista
+                </button>
+              )}
+            </div>
+
+            {specialists.length > 0 && (
+              <div className="team-specialists-list">
+                {specialists.map((s) => {
+                  const ag = agents.find((a) => a.id === s.agentId)
+                  return (
+                    <div key={s.agentId} className="team-specialist-chip">
+                      <strong>{ag?.name || s.agentId}</strong>
+                      <span className="spec-role-tag">{s.role}</span>
+                      <span className="spec-timing-tag">{s.timing === 'pre-dev' ? 'Pré-Dev (Análise)' : 'Pós-Dev (Revisão)'}</span>
+                      <button
+                        type="button"
+                        className="btn-quiet chip-remove"
+                        aria-label={`Remover especialista ${s.agentId}`}
+                        onClick={() => removeSpecialist(s.agentId)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {addingSpecialist && (
+              <div className="team-specialist-form">
+                <h5>Novo Especialista na Missão</h5>
+                <div className="specialist-form-row">
+                  <select
+                    value={newSpecAgentId}
+                    onChange={(e) => setNewSpecAgentId(e.target.value)}
+                  >
+                    <option value="">Selecione um agente...</option>
+                    {agents
+                      .filter((a) => ![effectivePlannerId, effectiveDevId, effectiveQaId, ...specialists.map((s) => s.agentId)].includes(a.id))
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.role})
+                        </option>
+                      ))}
+                  </select>
+
+                  <select
+                    value={newSpecRole}
+                    onChange={(e) => setNewSpecRole(e.target.value as SpecialistRole)}
+                  >
+                    <option value="database">Banco de Dados</option>
+                    <option value="security">Segurança</option>
+                    <option value="ui">Design / UI</option>
+                    <option value="docs">Documentação</option>
+                    <option value="api">APIs / Integrações</option>
+                    <option value="testing">Testes Automatizados</option>
+                    <option value="data">Dados / BI</option>
+                    <option value="custom">Personalizado</option>
+                  </select>
+
+                  <select
+                    value={newSpecTiming}
+                    onChange={(e) => setNewSpecTiming(e.target.value as SpecialistTiming)}
+                  >
+                    <option value="pre-dev">Antes do Dev (Análise/Schema)</option>
+                    <option value="post-dev">Depois do Dev (Revisão Especializada)</option>
+                  </select>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Contribuição esperada (ex: Modelagem de entidades, checagem de vulnerabilidades)"
+                  value={newSpecContribution}
+                  onChange={(e) => setNewSpecContribution(e.target.value)}
+                  maxLength={200}
+                />
+
+                <div className="specialist-form-actions">
+                  <button
+                    type="button"
+                    disabled={!newSpecAgentId}
+                    onClick={addSpecialist}
+                  >
+                    Confirmar Especialista
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-quiet"
+                    onClick={() => {
+                      setAddingSpecialist(false)
+                      setNewSpecAgentId('')
+                      setNewSpecContribution('')
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {!teamReady && (
