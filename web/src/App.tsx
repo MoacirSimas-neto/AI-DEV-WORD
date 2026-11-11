@@ -9,6 +9,7 @@ import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
 import { GitPanel } from './ui/GitPanel.tsx'
 import { HistoryPanel } from './ui/HistoryPanel.tsx'
 import { HomeView } from './ui/HomeView.tsx'
+import { MemoryCenter } from './ui/MemoryCenter.tsx'
 import { MissionMonitor } from './ui/MissionMonitor.tsx'
 import { ProjectBar } from './ui/ProjectBar.tsx'
 import { TaskPanel } from './ui/TaskPanel.tsx'
@@ -20,7 +21,7 @@ const STATUS: Record<ConnectionStatus, { label: string; tone: string }> = {
   offline: { label: 'Backend desconectado', tone: 'error' },
 }
 
-export type NavTab = 'home' | 'office' | 'tasks' | 'history' | 'agents'
+export type NavTab = 'home' | 'office' | 'tasks' | 'history' | 'agents' | 'memory'
 
 function App() {
   const {
@@ -168,6 +169,13 @@ function App() {
               onClick={() => setActiveTab('agents')}
             >
               Central de Agentes
+            </button>
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'memory' ? 'nav-tab-active' : ''}`}
+              onClick={() => setActiveTab('memory')}
+            >
+              Memória
             </button>
           </nav>
 
@@ -368,6 +376,23 @@ function App() {
                 configs={configs}
                 allConfigs={allConfigs}
                 specializations={specializations}
+                online={online}
+                send={send}
+                subscribe={subscribe}
+                onClose={() => setActiveTab('office')}
+              />
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {/* ABA 6: CENTRAL DE MEMÓRIA */}
+        {activeTab === 'memory' && (
+          <div className="full-view-container">
+            <ErrorBoundary fallbackTitle="Falha na Central de Memória">
+              <MemoryCenter
+                projectId={workspace.activeProjectId}
+                projectName={activeProject?.name}
+                agents={agents}
                 online={online}
                 send={send}
                 subscribe={subscribe}
