@@ -8,6 +8,7 @@ import type {
   MissionInfo,
   MissionPhase,
   MissionSpecialistSelection,
+  SkillApplication,
   SpecialistResult,
   TaskInfo,
   TaskInput,
@@ -47,6 +48,7 @@ const SCHEMA = `
     attempts TEXT NOT NULL DEFAULT '[]',
     clarifications TEXT NOT NULL DEFAULT '[]',
     memory_context TEXT NOT NULL DEFAULT '{}',
+    skill_applications TEXT NOT NULL DEFAULT '[]',
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -71,6 +73,7 @@ const EXTRA_MISSION_COLUMNS: [string, string][] = [
   ['attempts', "TEXT NOT NULL DEFAULT '[]'"],
   ['clarifications', "TEXT NOT NULL DEFAULT '[]'"],
   ['memory_context', "TEXT NOT NULL DEFAULT '{}'"],
+  ['skill_applications', "TEXT NOT NULL DEFAULT '[]'"],
 ]
 
 export const OPEN_PHASES: MissionPhase[] = ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing']
@@ -90,7 +93,7 @@ const MISSION_COLUMNS = `id, task_id AS taskId, project_id AS projectId, phase,
   planner_id AS plannerId, dev_id AS devId, qa_id AS qaId,
   plan, dev_report AS devReport, review, verdict, verdict_detail AS verdictDetail,
   team_snapshot AS teamSnapshot, specialists, specialist_results AS specialistResults,
-  files, attempts, clarifications, memory_context AS memoryContext, error, created_at AS createdAt, updated_at AS updatedAt`
+  files, attempts, clarifications, memory_context AS memoryContext, skill_applications AS skillApplications, error, created_at AS createdAt, updated_at AS updatedAt`
 
 type MissionPatch = Partial<
   Pick<
@@ -111,6 +114,7 @@ type MissionPatch = Partial<
     | 'attempts'
     | 'clarifications'
     | 'memoryContext'
+    | 'skillApplications'
     | 'error'
   >
 >
@@ -132,6 +136,7 @@ const MISSION_FIELDS: Record<keyof MissionPatch, string> = {
   attempts: 'attempts',
   clarifications: 'clarifications',
   memoryContext: 'memory_context',
+  skillApplications: 'skill_applications',
   error: 'error',
 }
 
@@ -164,6 +169,7 @@ const toMission = (row: Record<string, unknown>): MissionInfo => ({
   attempts: parseJsonSafe<MissionAttempt[]>(row.attempts, []),
   clarifications: parseJsonSafe<MissionClarification[]>(row.clarifications, []),
   memoryContext: parseJsonSafe<Record<string, MemoryContextRecord>>(row.memoryContext, {}),
+  skillApplications: parseJsonSafe<SkillApplication[]>(row.skillApplications, []),
   error: (row.error as string | null) ?? null,
   createdAt: String(row.createdAt ?? ''),
   updatedAt: String(row.updatedAt ?? ''),
@@ -330,7 +336,7 @@ export class TaskStore extends EventEmitter {
     const keys = Object.keys(patch) as (keyof MissionPatch)[]
     const values = keys.map((k) => {
       if (k === 'files') return JSON.stringify(patch.files)
-      if (k === 'attempts' || k === 'clarifications' || k === 'memoryContext' || k === 'specialists' || k === 'specialistResults') {
+      if (k === 'attempts' || k === 'clarifications' || k === 'memoryContext' || k === 'skillApplications' || k === 'specialists' || k === 'specialistResults') {
         return JSON.stringify(patch[k])
       }
       if (k === 'teamSnapshot') return JSON.stringify(patch.teamSnapshot)

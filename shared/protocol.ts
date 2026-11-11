@@ -89,6 +89,71 @@ export interface AgentSnapshotEntry {
   reasoningEffort?: ReasoningEffort
   specializationId: SpecializationId
   customInstructions?: string
+  /** Skills resolvidas para o agente no início da missão (versão e hash congelados). */
+  skills?: SkillRef[]
+}
+
+/** context = instruções compostas no prompt; native = exigiria integração nativa do CLI (não feita pelo AI Dev World). */
+export type SkillMode = 'context' | 'native'
+/**
+ * configured = ativa para o agente, ainda não executada; applied = as instruções chegaram ao prompt;
+ * disabled = desativada (global ou no agente); incompatible = o modo da skill não é suportado na execução;
+ * failed = deveria ser aplicada e não foi (ver `reason`).
+ */
+export type SkillApplyState = 'configured' | 'applied' | 'disabled' | 'incompatible' | 'failed'
+
+export interface SkillInfo {
+  id: string
+  name: string
+  description: string
+  /** De onde veio o conteúdo (repositório, commit, licença) ou 'local'. */
+  origin: string
+  version: string
+  /** SHA-256 do conteúdo. */
+  hash: string
+  content: string
+  /** Ativada para todos os agentes que não tenham ajuste individual. */
+  enabled: boolean
+  mode: SkillMode
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SkillInput {
+  id: string
+  name: string
+  content: string
+  description?: string
+  origin?: string
+  version?: string
+  mode?: SkillMode
+  enabled?: boolean
+}
+
+/** Ajuste individual; a ausência de ajuste significa herdar a configuração global. */
+export interface SkillAgentOverride {
+  agentId: string
+  skillId: string
+  state: 'on' | 'off'
+}
+
+export interface SkillRef {
+  id: string
+  name: string
+  version: string
+  hash: string
+  mode: SkillMode
+  state: SkillApplyState
+  /** true quando o estado vem de um ajuste individual do agente, não da configuração global. */
+  individual?: boolean
+  reason?: string
+}
+
+/** Uma skill em uma execução de CLI da missão. */
+export interface SkillApplication extends SkillRef {
+  agentId: string
+  stage: string
+  at: string
 }
 
 export interface AgentConfig {
@@ -326,6 +391,8 @@ export interface MissionInfo {
   clarifications?: MissionClarification[]
   /** Memórias entregues a cada etapa (planning, developing, reviewing) na última execução dela. */
   memoryContext?: Record<string, MemoryContextRecord>
+  /** Skills de cada execução de CLI desta missão, em ordem. Nunca muda com edições posteriores da skill. */
+  skillApplications?: SkillApplication[]
   /** Snapshot sem credenciais dos agentes participantes no momento da missão. */
   teamSnapshot?: Record<string, AgentSnapshotEntry>
   /** Arquivos com alterações depois que o Dev terminou. */
@@ -405,7 +472,10 @@ export type ServerMessage =
       configs: AgentConfig[]
       allConfigs?: AgentConfig[]
       specializations?: SpecializationInfo[]
+      skills?: SkillInfo[]
+      skillOverrides?: SkillAgentOverride[]
     }
+  | { type: 'skills'; skills: SkillInfo[]; overrides: SkillAgentOverride[] }
   | { type: 'agent'; agent: AgentInfo }
   | { type: 'agents'; agents: AgentInfo[] }
   | { type: 'workspace'; workspace: Workspace }
@@ -504,3 +574,8 @@ export type ClientMessage =
   | { type: 'agent-set-active'; agentId: string; active: boolean }
   | { type: 'agents-list' }
   | { type: 'specializations-list' }
+  /** Skills globais: registro, ativação para todos e ajuste por agente. */
+  | { type: 'skills-list' }
+  | { type: 'skill-save'; skill: SkillInput }
+  | { type: 'skill-set-enabled'; id: string; enabled: boolean }
+  | { type: 'skill-set-agent'; agentId: string; skillId: string; state: 'inherit' | 'on' | 'off' }
