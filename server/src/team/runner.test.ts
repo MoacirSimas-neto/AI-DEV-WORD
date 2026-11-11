@@ -813,3 +813,64 @@ test('TeamRunner devolve ao Dev o parecer completo do QA reprovado e conclui só
   ])
   assert.ok(history.list().some((h) => h.message.includes('devolvida a')))
 })
+
+test('TeamRunner: prompt do Antigravity perto do limite do Windows cede o diff e, se não couber, falha com erro claro', async () => {
+  const setup = (planChars: number) => {
+    const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-arg-')))
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp })
+    writeFileSync(path.join(tmp, 'init.txt'), 'init')
+    execFileSync('git', ['add', '.'], { cwd: tmp })
+    execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp })
+    const projects = new ProjectStore(':memory:')
+    projects.add(tmp)
+    const history = new HistoryStore(projects.db)
+    const tasks = new TaskStore(projects.db, history)
+    const configs = new AgentConfigStore(projects.db) // padrão: QA no Antigravity (prompt como argumento)
+    const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+    registry.syncFromConfigs(configs.list())
+    const qaArgs: string[] = []
+    const runner = new TeamRunner({
+      tasks,
+      history,
+      projects,
+      registry,
+      git: new GitService(),
+      configs,
+      launch: (cli, args, options) => {
+        const prompt = options.input ?? args.at(-1)!
+        let stdout = 'p'.repeat(planChars)
+        if (cli === 'codex') {
+          writeFileSync(path.join(tmp, 'grande.txt'), 'linha\n'.repeat(8000)) // diff de ~56 mil caracteres
+          stdout = 'feito'
+        } else if (prompt.includes('Você é o QA Engineer')) {
+          qaArgs.push(prompt)
+          stdout = 'ok\nVEREDITO: APROVADO'
+        }
+        return { done: Promise.resolve({ code: 0, stdout, stderr: '', timedOut: false }), kill: () => {} }
+      },
+    })
+    return { tasks, projects, registry, runner, qaArgs }
+  }
+  const run = async (planChars: number) => {
+    const s = setup(planChars)
+    for (const a of s.registry.list()) await s.registry.check(a.id)
+    const task = s.tasks.create(s.projects.active()!.id, { title: 'T', description: '', priority: 'low', status: 'todo', agentId: null })
+    const mission = await s.runner.start(task.id)
+    for (let i = 0; i < 100 && s.tasks.getMission(mission.id)!.phase !== 'awaiting_approval'; i++) await new Promise((r) => setTimeout(r, 20))
+    await s.runner.approve(mission.id)
+    for (let i = 0; i < 200 && !['done', 'failed'].includes(s.tasks.getMission(mission.id)!.phase); i++) await new Promise((r) => setTimeout(r, 20))
+    return { mission: s.tasks.getMission(mission.id)!, qaArgs: s.qaArgs }
+  }
+
+  // Plano médio + diff enorme: o diff é cortado e o argumento fica abaixo do limite.
+  const fits = await run(8000)
+  assert.equal(fits.mission.phase, 'done')
+  assert.ok(fits.qaArgs[0].length <= 30_000, `argumento com ${fits.qaArgs[0].length} caracteres`)
+  assert.ok(fits.qaArgs[0].includes('diferenças cortadas'))
+
+  // Plano que sozinho já não cabe: o CLI nem é chamado e a missão explica o motivo.
+  const tooBig = await run(31_000)
+  assert.equal(tooBig.mission.phase, 'failed')
+  assert.match(tooBig.mission.error ?? '', /não cabe na linha de comando/)
+  assert.equal(tooBig.qaArgs.length, 0)
+})
