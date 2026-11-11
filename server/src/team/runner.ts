@@ -7,11 +7,14 @@ import type {
   GitFile,
   MissionAttempt,
   MissionInfo,
+  MissionSpecialistSelection,
   MissionTeamSelection,
   ProviderId,
   SpecializationId,
+  SpecialistResult,
   TaskInfo,
 } from '../../../shared/protocol.ts'
+import { MAX_MISSION_SPECIALISTS } from '../../../shared/protocol.ts'
 import type { AgentConfigStore } from '../agents/configStore.ts'
 import type { AgentRegistry } from '../agents/registry.ts'
 import { defaultSpecializations, type SpecializationRegistry } from '../agents/specializations.ts'
@@ -30,6 +33,8 @@ import {
   planPrompt,
   type ReworkContext,
   reviewPrompt,
+  specialistPostDevPrompt,
+  specialistPreDevPrompt,
 } from './prompts.ts'
 
 /** Inicia um CLI oficial sem terminal. Em produção é o startCli; nos testes, um falso. */
@@ -88,7 +93,7 @@ export function agyEffortArgs(model: string, effort: string): string[] {
 
 /** Prepara parâmetros dinâmicos de execução conforme provedor, modelo e esforço configurados. */
 export function getStepCliAndArgs(
-  role: 'planning' | 'developing' | 'reviewing',
+  role: 'planning' | 'developing' | 'reviewing' | 'analyzing',
   cfg?: AgentConfig,
 ): { cli: CliId; args: string[]; model: string; effort: string; passPromptAsArg?: boolean } {
   const provider = (cfg?.provider === 'codex' || cfg?.provider === 'gemini' || cfg?.provider === 'antigravity')
@@ -196,7 +201,7 @@ export class TeamRunner extends EventEmitter {
   async start(taskId: number, team?: Partial<MissionTeamSelection>): Promise<MissionInfo> {
     this.assertTeamFree()
     const { task, cwd } = this.context(taskId)
-    const { plannerId, devId, qaId, teamSnapshot } = this.validateAndBuildTeam(team)
+    const { plannerId, devId, qaId, specialists, teamSnapshot } = this.validateAndBuildTeam(team)
     this.preparing = true
     try {
       await this.requireCleanRepo(cwd)
@@ -212,12 +217,17 @@ export class TeamRunner extends EventEmitter {
       plannerId,
       devId,
       qaId,
+      specialists,
       teamSnapshot,
     })
     this.running = { missionId: mission.id, cancelled: false }
     this.tasks.setStatus(task.id, 'doing')
-    this.log(mission, 'mission', `Missão #${mission.id} iniciada: "${task.title}" (${plannerId} → ${devId} → ${qaId})`)
-    for (const id of new Set([...TEAM, plannerId, devId, qaId])) this.registry.setMissionState(id, null)
+    const teamDesc = specialists.length > 0
+      ? `${plannerId} → [${specialists.map(s => `${s.agentId}:${s.role}`).join(', ')}] → ${devId} → ${qaId}`
+      : `${plannerId} → ${devId} → ${qaId}`
+    this.log(mission, 'mission', `Missão #${mission.id} iniciada: "${task.title}" (${teamDesc})`)
+    const allParticipantIds = new Set([...TEAM, plannerId, devId, qaId, ...specialists.map(s => s.agentId)])
+    for (const id of allParticipantIds) this.registry.setMissionState(id, null)
     this.registry.setMissionState(plannerId, 'planning', `Planejando a missão #${mission.id}`)
     void this.runPlanning(mission.id, task, cwd)
     return mission
@@ -230,8 +240,8 @@ export class TeamRunner extends EventEmitter {
       throw new Error('Esta missão não está aguardando aprovação.')
     }
     const { task, cwd } = this.context(mission.taskId)
-    const [plannerId, devId, qaId] = this.missionTeam(mission)
-    this.assertAgentsAvailable([plannerId, devId, qaId])
+    const [plannerId, devId, qaId, specialists] = this.missionTeam(mission)
+    this.assertAgentsAvailable([plannerId, devId, qaId, ...specialists.map((s) => s.agentId)])
     this.preparing = true
     try {
       await this.requireCleanRepo(cwd)
@@ -294,7 +304,7 @@ export class TeamRunner extends EventEmitter {
         ? `Plano da missão #${missionId} rejeitado pelo usuário.`
         : `Missão #${missionId} cancelada pelo usuário.`,
     )
-    for (const id of new Set([...TEAM, ...this.missionTeam(mission)])) {
+    for (const id of new Set([...TEAM, ...this.missionParticipantIds(mission)])) {
       this.registry.setMissionState(id, null)
     }
   }
@@ -359,14 +369,89 @@ export class TeamRunner extends EventEmitter {
   private async runDevelopment(missionId: number, task: TaskInfo, plan: string, cwd: string) {
     const run = this.running!
     const current = this.requireMission(missionId)
-    const [, devId, qaId] = this.missionTeam(current)
+    const [, devId, qaId, specialists] = this.missionTeam(current)
     const devCfg = this.resolveMissionAgentConfig(current, devId, 'developer')
     const devConfig = getStepCliAndArgs('developing', devCfg)
     const qaCfg = this.resolveMissionAgentConfig(current, qaId, 'qa-tester')
     const qaConfig = getStepCliAndArgs('reviewing', qaCfg)
     const devLabel = devCfg?.name || devId
     const attempts: MissionAttempt[] = []
+    const specialistResults: SpecialistResult[] = current.specialistResults ? [...current.specialistResults] : []
     let rework: ReworkContext | undefined
+
+    // 1. Execução de Especialistas Pré-Desenvolvimento (se houver)
+    const preDevSpecialists = specialists.filter((s) => s.timing === 'pre-dev')
+    for (const spec of preDevSpecialists) {
+      if (run.cancelled) return
+      const sCfg = this.resolveMissionAgentConfig(current, spec.agentId, 'developer')
+      const sStepConfig = getStepCliAndArgs('analyzing', sCfg)
+      const sMemory = this.memoryBlock(current, 'developing', spec.agentId, task)
+      if (sMemory === null) return
+
+      this.registry.setMissionState(spec.agentId, 'working', `Análise técnica de ${spec.role} para missão #${missionId}`)
+      const startedAt = new Date().toISOString()
+      const sPrompt = specialistPreDevPrompt(task, plan, {
+        role: spec.role,
+        expectedContribution: spec.expectedContribution,
+        agentName: sCfg?.name,
+        specializationId: sCfg?.specializationId,
+        customInstructions: sCfg?.customInstructions,
+        registry: this.specializations,
+        memory: sMemory,
+      })
+
+      const analysis = await this.step(
+        missionId,
+        spec.agentId,
+        sStepConfig.cli,
+        sStepConfig.args,
+        cwd,
+        sPrompt,
+        sStepConfig.model,
+        sStepConfig.effort,
+        sStepConfig.passPromptAsArg,
+      )
+      const finishedAt = new Date().toISOString()
+
+      if (analysis === null) {
+        specialistResults.push({
+          agentId: spec.agentId,
+          role: spec.role,
+          timing: 'pre-dev',
+          status: 'failed',
+          summary: `Falha na análise técnica de ${spec.role}`,
+          details: 'Execução falhou ou terminou sem resposta.',
+          error: 'Análise falhou',
+          startedAt,
+          finishedAt,
+        })
+        this.tasks.updateMission(missionId, { specialistResults })
+        return
+      }
+
+      const summaryLine = analysis.split('\n').find((l) => l.trim().length > 0)?.slice(0, 200) || `Análise de ${spec.role} concluída.`
+      specialistResults.push({
+        agentId: spec.agentId,
+        role: spec.role,
+        timing: 'pre-dev',
+        status: 'completed',
+        summary: summaryLine,
+        details: analysis,
+        startedAt,
+        finishedAt,
+      })
+      this.tasks.updateMission(missionId, { specialistResults })
+      this.registry.setMissionState(spec.agentId, 'done', `Análise de ${spec.role} concluída`)
+      this.log(current, 'agent', `Especialista ${sCfg?.name || spec.agentId} (${spec.role}) entregou análise prévia para o Dev.`, spec.agentId)
+    }
+
+    // Contexto acumulado de especialistas pré-dev para o Dev
+    const preDevContext = specialistResults
+      .filter((r) => r.timing === 'pre-dev' && r.status === 'completed')
+      .map((r) => `#### Especialista em ${r.role} (${r.agentId}):\n${r.details}`)
+      .join('\n\n')
+
+    this.registry.setMissionState(devId, 'working', `Implementando a missão #${missionId}`)
 
     // Rodadas Dev -> QA: o QA devolve ao Dev o que reprovar, até MAX_ATTEMPTS.
     for (let attempt = 1; ; attempt++) {
@@ -384,6 +469,7 @@ export class TeamRunner extends EventEmitter {
           memory: devMemory,
         },
         rework,
+        preDevContext || undefined,
       )
       const report = await this.step(
         missionId,
@@ -425,6 +511,81 @@ export class TeamRunner extends EventEmitter {
             : `${cliActor} concluiu a implementação — nenhuma alteração detectada.`,
       })
       this.registry.setMissionState(devId, 'done', 'Implementação entregue ao QA')
+
+      let diff = await this.collectDiff(cwd, changed)
+
+      // 2. Execução de Especialistas Pós-Desenvolvimento (Revisores especializados)
+      const postDevSpecialists = specialists.filter((s) => s.timing === 'post-dev')
+      for (const spec of postDevSpecialists) {
+        if (run.cancelled) return
+        const sCfg = this.resolveMissionAgentConfig(current, spec.agentId, 'qa-tester')
+        const sStepConfig = getStepCliAndArgs('reviewing', sCfg)
+        const sMemory = this.memoryBlock(current, 'reviewing', spec.agentId, task)
+        if (sMemory === null) return
+
+        this.registry.setMissionState(spec.agentId, 'reviewing', `Revisão técnica de ${spec.role} para missão #${missionId}`)
+        const startedAt = new Date().toISOString()
+        const sPrompt = specialistPostDevPrompt(task, plan, report, files, diff, {
+          role: spec.role,
+          expectedContribution: spec.expectedContribution,
+          agentName: sCfg?.name,
+          specializationId: sCfg?.specializationId,
+          customInstructions: sCfg?.customInstructions,
+          registry: this.specializations,
+          memory: sMemory,
+        })
+
+        const reviewAnalysis = await this.step(
+          missionId,
+          spec.agentId,
+          sStepConfig.cli,
+          sStepConfig.args,
+          cwd,
+          sPrompt,
+          sStepConfig.model,
+          sStepConfig.effort,
+          sStepConfig.passPromptAsArg,
+        )
+        const finishedAt = new Date().toISOString()
+
+        if (reviewAnalysis === null) {
+          specialistResults.push({
+            agentId: spec.agentId,
+            role: spec.role,
+            timing: 'post-dev',
+            status: 'failed',
+            summary: `Falha na revisão técnica de ${spec.role}`,
+            details: 'Execução falhou ou terminou sem resposta.',
+            error: 'Revisão falhou',
+            startedAt,
+            finishedAt,
+          })
+          this.tasks.updateMission(missionId, { specialistResults })
+          return
+        }
+
+        const summaryLine = reviewAnalysis.split('\n').find((l) => l.trim().length > 0)?.slice(0, 200) || `Revisão de ${spec.role} concluída.`
+        specialistResults.push({
+          agentId: spec.agentId,
+          role: spec.role,
+          timing: 'post-dev',
+          status: 'completed',
+          summary: summaryLine,
+          details: reviewAnalysis,
+          startedAt,
+          finishedAt,
+        })
+        this.tasks.updateMission(missionId, { specialistResults })
+        this.registry.setMissionState(spec.agentId, 'done', `Revisão de ${spec.role} concluída`)
+        this.log(current, 'agent', `Especialista ${sCfg?.name || spec.agentId} (${spec.role}) entregou revisão especializada para o QA.`, spec.agentId)
+      }
+
+      // Contexto acumulado de pareceres pós-dev para o QA
+      const postDevContext = specialistResults
+        .filter((r) => r.timing === 'post-dev' && r.status === 'completed')
+        .map((r) => `#### Parecer do Revisor Especializado em ${r.role} (${r.agentId}):\n${r.details}`)
+        .join('\n\n')
+
       this.registry.setMissionState(qaId, 'reviewing', `Revisando a missão #${missionId} (tentativa ${attempt}/${MAX_ATTEMPTS})`)
 
       const qaOpts = {
@@ -434,12 +595,11 @@ export class TeamRunner extends EventEmitter {
         registry: this.specializations,
         memory: qaMemory,
       }
-      let diff = await this.collectDiff(cwd, changed)
       // shortcut: na linha de comando o parecer anterior vai só com o começo (onde ficam os achados); sem limite quando o agy aceitar prompt por stdin.
       const qaRework = rework && qaConfig.passPromptAsArg ? { ...rework, review: rework.review.slice(0, 8000) } : rework
       if (qaConfig.passPromptAsArg) {
         // O prompt vai na linha de comando: o diff cede espaço (o QA ainda lê os arquivos).
-        const room = MAX_ARG_PROMPT - reviewPrompt(task, plan, report, files, '', qaOpts, qaRework).length
+        const room = MAX_ARG_PROMPT - reviewPrompt(task, plan, report, files, '', qaOpts, qaRework, postDevContext || undefined).length
         if (diff.length > room) diff = `${diff.slice(0, Math.max(0, room))}
 … diferenças cortadas: leia os arquivos …`
       }
@@ -449,7 +609,7 @@ export class TeamRunner extends EventEmitter {
         qaConfig.cli,
         qaConfig.args,
         cwd,
-        reviewPrompt(task, plan, report, files, diff, qaOpts, qaRework),
+        reviewPrompt(task, plan, report, files, diff, qaOpts, qaRework, postDevContext || undefined),
         qaConfig.model,
         qaConfig.effort,
         qaConfig.passPromptAsArg,
@@ -562,7 +722,7 @@ export class TeamRunner extends EventEmitter {
     this.running = null
     if (this.tasks.get(mission.taskId)) this.tasks.setStatus(mission.taskId, 'todo')
     this.log(mission, 'error', message, agentId)
-    for (const id of new Set([...TEAM, ...this.missionTeam(mission)])) {
+    for (const id of new Set([...TEAM, ...this.missionParticipantIds(mission)])) {
       if (id !== agentId) this.registry.setMissionState(id, null)
     }
     this.registry.setMissionState(agentId, 'error', message.split('\n')[0])
@@ -591,8 +751,13 @@ export class TeamRunner extends EventEmitter {
     }
   }
 
-  private missionTeam(mission: Pick<MissionInfo, 'plannerId' | 'devId' | 'qaId'>): [string, string, string] {
-    return [mission.plannerId || 'architect', mission.devId || 'dev', mission.qaId || 'qa']
+  private missionTeam(mission: Pick<MissionInfo, 'plannerId' | 'devId' | 'qaId' | 'specialists'>): [string, string, string, MissionSpecialistSelection[]] {
+    return [mission.plannerId || 'architect', mission.devId || 'dev', mission.qaId || 'qa', mission.specialists ?? []]
+  }
+
+  private missionParticipantIds(mission: Pick<MissionInfo, 'plannerId' | 'devId' | 'qaId' | 'specialists'>): string[] {
+    const [p, d, q, specs] = this.missionTeam(mission)
+    return [p, d, q, ...specs.map((s) => s.agentId)]
   }
 
   private resolveMissionAgentConfig(
@@ -621,15 +786,42 @@ export class TeamRunner extends EventEmitter {
     plannerId: string
     devId: string
     qaId: string
+    specialists: MissionSpecialistSelection[]
     teamSnapshot: Record<string, AgentSnapshotEntry>
   } {
     const plannerId = (team?.plannerId ?? 'architect').trim() || 'architect'
     const devId = (team?.devId ?? 'dev').trim() || 'dev'
     const qaId = (team?.qaId ?? 'qa').trim() || 'qa'
+    const rawSpecialists = team?.specialists ?? []
+
+    if (rawSpecialists.length > MAX_MISSION_SPECIALISTS) {
+      throw new Error(`Máximo de ${MAX_MISSION_SPECIALISTS} especialistas permitidos por missão.`)
+    }
+
+    const specialists: MissionSpecialistSelection[] = []
+    const seenSpecialistAgents = new Set<string>()
+
+    for (const spec of rawSpecialists) {
+      const sId = spec.agentId.trim()
+      if (!sId) continue
+      if (sId === plannerId || sId === devId || sId === qaId) {
+        throw new Error(`O agente "${sId}" já possui função principal na missão e não pode ser especialista adicional.`)
+      }
+      if (seenSpecialistAgents.has(sId)) {
+        throw new Error(`O agente especialista "${sId}" não pode ser adicionado em duplicidade.`)
+      }
+      seenSpecialistAgents.add(sId)
+      specialists.push({
+        agentId: sId,
+        role: spec.role || 'custom',
+        timing: spec.timing === 'post-dev' ? 'post-dev' : 'pre-dev',
+        expectedContribution: spec.expectedContribution ? redact(spec.expectedContribution.trim()) : undefined,
+      })
+    }
 
     const slots: {
       agentId: string
-      expectedCategory: 'planning' | 'developing' | 'reviewing'
+      expectedCategory?: 'planning' | 'developing' | 'reviewing' | 'teaching'
       defaultSpec: SpecializationId
       stageLabel: string
     }[] = [
@@ -637,6 +829,14 @@ export class TeamRunner extends EventEmitter {
       { agentId: devId, expectedCategory: 'developing', defaultSpec: 'developer', stageLabel: 'desenvolvimento' },
       { agentId: qaId, expectedCategory: 'reviewing', defaultSpec: 'qa-tester', stageLabel: 'revisão QA' },
     ]
+
+    for (const spec of specialists) {
+      slots.push({
+        agentId: spec.agentId,
+        defaultSpec: spec.timing === 'post-dev' ? 'qa-tester' : 'developer',
+        stageLabel: `especialista em ${spec.role}`,
+      })
+    }
 
     const teamSnapshot: Record<string, AgentSnapshotEntry> = {}
 
@@ -649,7 +849,7 @@ export class TeamRunner extends EventEmitter {
         if (cfg.active === false) {
           throw new Error(`O agente "${cfg.name || slot.agentId}" está inativo e não pode participar de missões.`)
         }
-        if (cfg.roleCategory && cfg.roleCategory !== slot.expectedCategory) {
+        if (slot.expectedCategory && cfg.roleCategory && cfg.roleCategory !== slot.expectedCategory) {
           throw new Error(
             `O agente "${cfg.name || slot.agentId}" possui categoria "${cfg.roleCategory}", incompatível com a etapa de ${slot.stageLabel} (requer "${slot.expectedCategory}").`,
           )
@@ -685,7 +885,7 @@ export class TeamRunner extends EventEmitter {
       }
     }
 
-    return { plannerId, devId, qaId, teamSnapshot }
+    return { plannerId, devId, qaId, specialists, teamSnapshot }
   }
 
   /** Diferenças entregues ao QA. Nunca falha: sem diff, o QA ainda lê os arquivos. */

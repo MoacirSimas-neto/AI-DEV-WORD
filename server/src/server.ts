@@ -13,9 +13,11 @@ import type {
   MemoryInput,
   CustomAgentInput,
   CustomAgentPatch,
+  MissionSpecialistSelection,
   ProviderId,
   ReasoningEffort,
   ServerMessage,
+  SpecialistRole,
   TaskInput,
   TaskPriority,
   TaskStatus,
@@ -178,6 +180,25 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         if (tm.plannerId !== undefined && typeof tm.plannerId !== 'string') return null
         if (tm.devId !== undefined && typeof tm.devId !== 'string') return null
         if (tm.qaId !== undefined && typeof tm.qaId !== 'string') return null
+
+        let specialists: MissionSpecialistSelection[] | undefined
+        if (Array.isArray(tm.specialists)) {
+          specialists = []
+          for (const s of tm.specialists) {
+            if (typeof s !== 'object' || s === null) return null
+            const spec = s as Record<string, unknown>
+            if (typeof spec.agentId !== 'string' || !spec.agentId.trim()) return null
+            if (typeof spec.role !== 'string') return null
+            if (spec.timing !== 'pre-dev' && spec.timing !== 'post-dev') return null
+            specialists.push({
+              agentId: spec.agentId.trim(),
+              role: spec.role as SpecialistRole,
+              timing: spec.timing,
+              expectedContribution: typeof spec.expectedContribution === 'string' ? spec.expectedContribution.slice(0, 500) : undefined,
+            })
+          }
+        }
+
         return {
           type: 'mission-start',
           taskId: msg.taskId,
@@ -185,6 +206,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
             ...(tm.plannerId ? { plannerId: tm.plannerId } : {}),
             ...(tm.devId ? { devId: tm.devId } : {}),
             ...(tm.qaId ? { qaId: tm.qaId } : {}),
+            ...(specialists ? { specialists } : {}),
           },
         }
       }

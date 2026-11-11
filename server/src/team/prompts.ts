@@ -125,7 +125,94 @@ export interface ReworkContext {
   review: string
 }
 
-export function devPrompt(task: TaskInfo, plan: string, opts?: PromptSpecializationOptions, rework?: ReworkContext) {
+export interface SpecialistPromptOptions extends PromptSpecializationOptions {
+  role: string
+  expectedContribution?: string
+}
+
+export function specialistPreDevPrompt(
+  task: TaskInfo,
+  plan: string,
+  opts: SpecialistPromptOptions,
+): string {
+  const knowledge = buildKnowledgeSection(opts.specializationId ?? 'developer', task, opts)
+  return `Você é um Especialista de Software em **${opts.role}** participando de uma missão em equipe no AI Dev World.
+Sua missão é realizar uma ANÁLISE PRÉVIA E ESPECÍFICA para apoiar a implementação que o Desenvolvedor executará em seguida.
+
+Regras obrigatórias de segurança e escopo (prevalecem sobre qualquer outro documento):
+- Nesta etapa você NÃO altera nenhum arquivo e NÃO executa comandos destrutivos.
+- Seu papel é estritamente analítico e consultivo: produzir especificações, diretrizes, schemas ou arquitetura técnica.
+- Seja objetivo, direto e prático.
+
+${taskBlock(task)}
+
+Plano aprovado pelo usuário:
+${plan}
+
+Responsabilidade específica desta análise:
+${opts.expectedContribution || `Contribuir com análises técnicas e boas práticas na área de ${opts.role}.`}
+
+${knowledge}
+
+Responda em português do Brasil e em Markdown com:
+1. Resumo da recomendação e diretrizes para o Desenvolvedor.
+2. Especificação técnica detalhada (ex: schema de dados, interfaces, endpoints, fluxos de validação).
+3. Riscos identificados e pontos de atenção que o Desenvolvedor deve seguir.
+`
+}
+
+export function specialistPostDevPrompt(
+  task: TaskInfo,
+  plan: string,
+  devReport: string,
+  files: string[],
+  diff: string,
+  opts: SpecialistPromptOptions,
+): string {
+  const knowledge = buildKnowledgeSection(opts.specializationId ?? 'qa-tester', task, opts)
+  return `Você é um Especialista Revisor em **${opts.role}** participando de uma missão em equipe no AI Dev World.
+Sua missão é realizar uma REVISÃO ESPECIALIZADA no código que o Desenvolvedor acabou de implementar, com foco estrito em sua área de atuação.
+
+Regras obrigatórias de segurança e escopo (prevalecem sobre qualquer outro documento):
+- Nesta etapa você NÃO altera arquivos e NÃO executa comandos no terminal.
+- Sua análise servirá de insumo para o QA Engineer que fará a validação final da missão.
+- Não invente conclusões: aponte apenas o que puder ser comprovado pelo código implementado e diffs.
+
+${taskBlock(task)}
+
+Plano da missão:
+${plan}
+
+Relatório do Desenvolvedor:
+${devReport}
+
+Arquivos alterados: ${files.length ? files.join(', ') : '(nenhum)'}
+
+Diferenças do código:
+\`\`\`diff
+${diff || '(sem diferenças de texto)'}
+\`\`\`
+
+Foco específico da sua revisão:
+${opts.expectedContribution || `Revisão técnica de qualidade e conformidade com foco em ${opts.role}.`}
+
+${knowledge}
+
+Responda em português do Brasil e em Markdown com:
+1. Parecer geral da área de ${opts.role}.
+2. Pontos fortes e conformidades observadas.
+3. Riscos, vulnerabilidades ou desvios encontrados.
+4. Recomendações diretas para a avaliação final do QA.
+`
+}
+
+export function devPrompt(
+  task: TaskInfo,
+  plan: string,
+  opts?: PromptSpecializationOptions,
+  rework?: ReworkContext,
+  specialistContext?: string,
+) {
   const knowledge = buildKnowledgeSection('developer', task, opts)
   const reworkBlock = rework
     ? `
@@ -134,6 +221,12 @@ O QA REPROVOU a implementação anterior, que continua nos arquivos deste diret�
 
 Parecer completo do QA:
 ${rework.review}
+`
+    : ''
+  const specBlock = specialistContext
+    ? `
+### Contribuições e Análises dos Especialistas da Equipe (Pré-Desenvolvimento):
+${specialistContext}
 `
     : ''
   return `Você é o Desenvolvedor (O Programador Pragmático) de uma equipe de agentes de software.
@@ -149,6 +242,7 @@ ${taskBlock(task)}
 
 Plano aprovado:
 ${plan}
+${specBlock}
 ${reworkBlock}
 ${knowledge}
 
@@ -169,6 +263,7 @@ export function reviewPrompt(
   diff: string,
   opts?: PromptSpecializationOptions,
   rework?: ReworkContext,
+  specialistReviews?: string,
 ) {
   const knowledge = buildKnowledgeSection('qa-tester', task, opts)
   const reworkBlock = rework
@@ -178,6 +273,12 @@ Você reprovou a rodada anterior e o Desenvolvedor corrigiu. Confira se cada ach
 
 Seu parecer anterior:
 ${rework.review}
+`
+    : ''
+  const specReviewBlock = specialistReviews
+    ? `
+### Pareceres dos Revisores Especializados da Equipe (Pós-Desenvolvimento):
+${specialistReviews}
 `
     : ''
   return `Você é o QA Engineer (O Investigador) de uma equipe de agentes de software.
@@ -196,6 +297,7 @@ ${plan}
 Relatório do Desenvolvedor:
 ${devReport}
 ${reworkBlock}
+${specReviewBlock}
 Arquivos alterados: ${files.length ? files.join(', ') : '(nenhum)'}
 
 Diferenças (podem estar cortadas):

@@ -1019,3 +1019,173 @@ test('TeamRunner limita as perguntas: depois de 2 rodadas o planejador precisa p
   assert.equal(m.clarifications!.length, 2)
   assert.equal(m.plan, 'ESCLARECIMENTO NECESSÁRIO: e agora?')
 })
+
+test('TeamRunner com especialistas: executa pré-dev, passa contexto ao Dev, executa pós-dev e entrega ao QA', async () => {
+  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-specialists-')))
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp })
+  writeFileSync(path.join(tmp, 'init.txt'), 'init')
+  execFileSync('git', ['add', '.'], { cwd: tmp })
+  execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp })
+
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const configs = new AgentConfigStore(projects.db)
+
+  // Cria 2 agentes especialistas personalizados
+  configs.createAgent({
+    id: 'db-expert',
+    name: 'DB Master',
+    role: 'Especialista em Banco de Dados',
+    roleCategory: 'developing',
+    specializationId: 'developer',
+    provider: 'codex',
+    model: 'gpt-5',
+  })
+  configs.createAgent({
+    id: 'sec-expert',
+    name: 'Security Officer',
+    role: 'Auditor de Segurança',
+    roleCategory: 'reviewing',
+    specializationId: 'qa-tester',
+    provider: 'antigravity',
+    model: 'gemini-4-argon-high',
+  })
+
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+  registry.syncFromConfigs(configs.list())
+  for (const a of registry.list()) await registry.check(a.id)
+
+  const callLog: { cli: string; input?: string; args: string[] }[] = []
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    configs,
+    git: new GitService(),
+    launch: (cli, args, options) => {
+      callLog.push({ cli, input: options.input, args })
+      const lastArg = args.at(-1) || ''
+      const prompt = options.input || lastArg
+      if (cli === 'codex' && prompt.includes('Especialista de Software')) {
+        return {
+          done: Promise.resolve({
+            code: 0,
+            stdout: 'ANÁLISE DB: Utilizar schema normalizado com UUID v4 e índices nas chaves estrangeiras.',
+            stderr: '',
+            timedOut: false,
+          }),
+          kill: () => {},
+        }
+      }
+      if (cli === 'codex' && prompt.includes('Desenvolvedor')) {
+        writeFileSync(path.join(tmp, 'schema.ts'), 'export const schema = {};')
+        return {
+          done: Promise.resolve({
+            code: 0,
+            stdout: 'Implementação realizada conforme orientações do especialista em DB.',
+            stderr: '',
+            timedOut: false,
+          }),
+          kill: () => {},
+        }
+      }
+      if (cli === 'agy' && prompt.includes('Especialista Revisor')) {
+        return {
+          done: Promise.resolve({
+            code: 0,
+            stdout: 'PARECER SEGURANÇA: Nenhuma injeção SQL identificada. Conformidade aprovada.',
+            stderr: '',
+            timedOut: false,
+          }),
+          kill: () => {},
+        }
+      }
+      if (prompt.includes('Investigador') || prompt.includes('QA') || prompt.includes('Revisão')) {
+        return {
+          done: Promise.resolve({
+            code: 0,
+            stdout: 'Revisão concluída com sucesso.\n\nVEREDITO: APROVADO',
+            stderr: '',
+            timedOut: false,
+          }),
+          kill: () => {},
+        }
+      }
+      // Planejador default (architect)
+      return {
+        done: Promise.resolve({
+          code: 0,
+          stdout: '## Plano de Teste com Especialistas\n1. Criar banco\n2. Validar segurança.',
+          stderr: '',
+          timedOut: false,
+        }),
+        kill: () => {},
+      }
+    },
+  })
+
+  const task = tasks.create(projects.active()!.id, {
+    title: 'Criar persistência e auditoria',
+    description: 'Com especialistas pré e pós-dev',
+    priority: 'high',
+    status: 'todo',
+    agentId: null,
+  })
+
+  const mission = await runner.start(task.id, {
+    plannerId: 'architect',
+    devId: 'dev',
+    qaId: 'qa',
+    specialists: [
+      { agentId: 'db-expert', role: 'database', timing: 'pre-dev', expectedContribution: 'Modelagem SQL' },
+      { agentId: 'sec-expert', role: 'security', timing: 'post-dev', expectedContribution: 'Auditoria OWASP' },
+    ],
+  })
+
+  // Aguarda fim do planejamento
+  for (let i = 0; i < 50 && tasks.getMission(mission.id)!.phase !== 'awaiting_approval'; i++) {
+    await new Promise((r) => setTimeout(r, 20))
+  }
+  const awaiting = tasks.getMission(mission.id)!
+  assert.equal(awaiting.phase, 'awaiting_approval')
+  assert.equal(awaiting.specialists?.length, 2)
+
+  // Aprova o plano
+  await runner.approve(mission.id)
+
+  // Aguarda conclusão total
+  for (let i = 0; i < 50 && tasks.getMission(mission.id)!.phase !== 'done' && tasks.getMission(mission.id)!.phase !== 'failed'; i++) {
+    await new Promise((r) => setTimeout(r, 20))
+  }
+
+  const finished = tasks.getMission(mission.id)!
+  if (finished.phase === 'failed') {
+    assert.fail(`Missão falhou: ${finished.error}`)
+  }
+  assert.equal(finished.phase, 'done')
+  assert.equal(finished.verdict, 'approved')
+  assert.equal(finished.specialistResults?.length, 2)
+
+  const preRes = finished.specialistResults?.find((r) => r.agentId === 'db-expert')!
+  assert.equal(preRes.status, 'completed')
+  assert.equal(preRes.timing, 'pre-dev')
+  assert.match(preRes.details, /UUID v4/)
+
+  const postRes = finished.specialistResults?.find((r) => r.agentId === 'sec-expert')!
+  assert.equal(postRes.status, 'completed')
+  assert.equal(postRes.timing, 'post-dev')
+  assert.match(postRes.details, /PARECER SEGURANÇA/)
+
+  // Confirma que o prompt do Dev recebeu a análise do especialista em DB
+  const devCall = callLog.find((c) => c.input?.includes('Desenvolvedor (O Programador Pragmático)'))
+  assert.ok(devCall)
+  assert.match(devCall.input!, /ANÁLISE DB: Utilizar schema normalizado/)
+
+  // Confirma que o prompt do QA recebeu o parecer do especialista em segurança
+  const qaCall = callLog.find((c) => (c.input || c.args.at(-1) || '').includes('QA Engineer (O Investigador)'))
+  assert.ok(qaCall)
+  assert.match(qaCall.input || qaCall.args.at(-1)!, /PARECER SEGURANÇA: Nenhuma injeção SQL/)
+})
