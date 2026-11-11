@@ -9,7 +9,7 @@ import { HistoryStore } from './history/store.ts'
 import { ProjectStore } from './projects/store.ts'
 import { createAppServer } from './server.ts'
 import { TaskStore } from './tasks/store.ts'
-import { TeamRunner } from './team/runner.ts'
+import { agyEffortArgs, TeamRunner } from './team/runner.ts'
 import { TerminalManager } from './terminal/manager.ts'
 import { spawnCliPty } from './terminal/spawnPty.ts'
 
@@ -44,9 +44,7 @@ const terminals = new TerminalManager(
         if (cfg.model && cfg.model !== 'default') {
           args.push('--model', cfg.model)
         }
-        if (cfg.reasoningEffort && cfg.reasoningEffort !== 'default') {
-          args.push('--effort', cfg.reasoningEffort)
-        }
+        args.push(...agyEffortArgs(cfg.model, cfg.reasoningEffort))
       } else {
         if (cfg.model && cfg.model !== 'default') {
           args.push('-m', cfg.model)

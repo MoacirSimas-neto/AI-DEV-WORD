@@ -211,9 +211,27 @@ test('getStepCliAndArgs configura Antigravity CLI com --model, --effort e modo c
   assert.equal(planStep.passPromptAsArg, true)
   assert.ok(planStep.args.includes('--model'))
   assert.ok(planStep.args.includes('gemini-4-argon-high'))
-  assert.ok(planStep.args.includes('--effort'))
-  assert.ok(planStep.args.includes('high'))
+  // O esforço já vem no nome do modelo: o agy recusa um --effort divergente.
+  assert.ok(!planStep.args.includes('--effort'))
   assert.ok(planStep.args.includes('-p'))
+
+  const mismatched = getStepCliAndArgs('planning', {
+    agentId: 'architect',
+    provider: 'antigravity',
+    model: 'gemini-3.8-flash-high',
+    reasoningEffort: 'medium',
+    updatedAt: '',
+  })
+  assert.ok(!mismatched.args.includes('--effort'))
+
+  const noTier = getStepCliAndArgs('planning', {
+    agentId: 'architect',
+    provider: 'antigravity',
+    model: 'default',
+    reasoningEffort: 'extra-high',
+    updatedAt: '',
+  })
+  assert.deepEqual(noTier.args, ['--effort', 'xhigh', '-p'])
 
   const devStep = getStepCliAndArgs('developing', {
     agentId: 'dev',
@@ -225,6 +243,7 @@ test('getStepCliAndArgs configura Antigravity CLI com --model, --effort e modo c
   assert.equal(devStep.cli, 'agy')
   assert.ok(devStep.args.includes('--mode'))
   assert.ok(devStep.args.includes('accept-edits'))
+  assert.ok(!devStep.args.includes('extra-high'))
   assert.ok(devStep.args.includes('-p'))
 })
 
@@ -668,3 +687,61 @@ test('TeamRunner cancelamento e recuperação funcionam com equipes personalizad
 })
 
 
+
+test('TeamRunner avisa o Antigravity headless que não há comandos e explica a etapa vazia por permissão negada', async () => {
+  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-agy-')))
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp })
+  writeFileSync(path.join(tmp, 'init.txt'), 'init')
+  execFileSync('git', ['add', '.'], { cwd: tmp })
+  execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp })
+
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const configs = new AgentConfigStore(projects.db) // padrão: Arquiteto no Antigravity (agy)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+  registry.syncFromConfigs(configs.list())
+  for (const a of registry.list()) await registry.check(a.id)
+
+  const prompts: string[] = []
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    git: new GitService(),
+    configs,
+    launch: (cli, args) => {
+      assert.equal(cli, 'agy')
+      prompts.push(args.at(-1)!)
+      return {
+        done: Promise.resolve({
+          code: 0,
+          stdout: '',
+          stderr:
+            'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied.',
+          timedOut: false,
+        }),
+        kill: () => {},
+      }
+    },
+  })
+
+  const task = tasks.create(projects.active()!.id, {
+    title: 'Tarefa',
+    description: 'Teste',
+    priority: 'low',
+    status: 'todo',
+    agentId: null,
+  })
+  const mission = await runner.start(task.id)
+  for (let i = 0; i < 50 && tasks.getMission(mission.id)!.phase === 'planning'; i++) {
+    await new Promise((r) => setTimeout(r, 20))
+  }
+
+  assert.match(prompts[0], /NÃO pode executar comandos de terminal/)
+  const failed = tasks.getMission(mission.id)!
+  assert.equal(failed.phase, 'failed')
+  assert.match(failed.error ?? '', /negou uma ferramenta de comando/)
+})

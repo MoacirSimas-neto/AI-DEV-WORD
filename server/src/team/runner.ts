@@ -38,6 +38,12 @@ const DEFAULT_STEP_TIMEOUT_MS = 20 * 60_000
 const MAX_TEXT = 100_000
 const MAX_DIFF = 60_000
 const LIMIT_PATTERN = /rate.?limit|quota|usage limit|too many requests|\b429\b|resource.?exhausted/i
+// O Antigravity headless não consegue pedir permissão de comando: a tentativa é
+// negada e o turno inteiro sai vazio (código 0). O aviso evita a tentativa.
+const AGY_HEADLESS_NOTICE = `
+
+Restrição do ambiente (prevalece sobre qualquer outra instrução, inclusive o plano): nesta execução você NÃO pode executar comandos de terminal; qualquer tentativa é negada e a etapa termina sem resposta. Use apenas leitura de arquivos e análise estática (e edição de arquivos, se esta etapa permitir), e declare como "não executado" tudo o que dependeria de um comando.`
+const AGY_COMMAND_DENIED = /auto-denied|headless mode cannot prompt/i
 // Diferenças desses arquivos não vão para o QA: costumam guardar credenciais.
 const SECRET_FILE = /(^|[\\/])\.env(\.|$)|\.(pem|key|p12|pfx)$|(^|[\\/])id_(rsa|ed25519)/i
 
@@ -51,6 +57,15 @@ export interface TeamOptions {
   configs?: AgentConfigStore
   specializations?: SpecializationRegistry
   stepTimeoutMs?: number
+}
+
+/**
+ * No Antigravity o esforço já vem no nome do modelo (…-low/-medium/-high) e o CLI
+ * recusa um --effort divergente; os valores aceitos são low|medium|high|xhigh|max.
+ */
+export function agyEffortArgs(model: string, effort: string): string[] {
+  if (!effort || effort === 'default' || /-(low|medium|high)$/.test(model)) return []
+  return ['--effort', effort === 'extra-high' ? 'xhigh' : effort]
 }
 
 /** Prepara parâmetros dinâmicos de execução conforme provedor, modelo e esforço configurados. */
@@ -81,9 +96,7 @@ export function getStepCliAndArgs(
     if (model && model !== 'default') {
       args.push('--model', model)
     }
-    if (effort && effort !== 'default') {
-      args.push('--effort', effort)
-    }
+    args.push(...agyEffortArgs(model, effort))
     args.push('-p')
     passPromptAsArg = true
   } else {
@@ -386,8 +399,9 @@ export class TeamRunner extends EventEmitter {
     const effortInfo = effort && effort !== 'default' ? `, esforço: ${effort}` : ''
     this.log(mission, 'agent', `${name} (${cli}${modelInfo}${effortInfo}) começou a trabalhar na missão #${missionId}.`, agentId)
     try {
-      const stepArgs = passPromptAsArg ? [...args, prompt] : args
-      const stepInput = passPromptAsArg ? undefined : prompt
+      const fullPrompt = cli === 'agy' ? prompt + AGY_HEADLESS_NOTICE : prompt
+      const stepArgs = passPromptAsArg ? [...args, fullPrompt] : args
+      const stepInput = passPromptAsArg ? undefined : fullPrompt
       run.proc = this.launch(cli, stepArgs, {
         cwd,
         input: stepInput,
@@ -414,6 +428,11 @@ export class TeamRunner extends EventEmitter {
       }
 
       const text = cleanOutput(result.stdout).trim().slice(0, MAX_TEXT)
+      if (!text && cli === 'agy' && AGY_COMMAND_DENIED.test(result.stderr)) {
+        throw new Error(
+          `${name}: o Antigravity CLI negou uma ferramenta de comando no modo headless e encerrou a etapa sem resposta. Tente de novo ou use outro provedor para este agente.`,
+        )
+      }
       if (!text) throw new Error(`${name}: o ${cli} terminou sem resposta.`)
       this.log(mission, 'agent', `${name} (${cli}) terminou a sua etapa da missão #${missionId}.`, agentId)
       return text

@@ -43,3 +43,9 @@ test('HistoryStore registra e lista entradas com limite e ordem correta', () => 
   assert.equal(list[0].id, 2) // mais recente primeiro
   assert.equal(list[1].id, 1)
 })
+
+test('redact é idempotente: reaplicar não deforma o texto já sanitizado', () => {
+  const once = redact('use api_key=sk-test-1234567890abcdefXYZ e token: abcd1234 aqui')
+  assert.equal(once, 'use api_key=[SEGREDO REMOVIDO] e token: [SEGREDO REMOVIDO] aqui')
+  assert.equal(redact(redact(once)), once)
+})

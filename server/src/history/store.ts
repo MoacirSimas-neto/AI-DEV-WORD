@@ -30,7 +30,7 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, '[SEGREDO REMOVIDO]'],
   [/\bAKIA[0-9A-Z]{16}\b/g, '[SEGREDO REMOVIDO]'],
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [SEGREDO REMOVIDO]'],
-  [/\b((?:password|passwd|pwd|senha|secret|token|api[_-]?key|client[_-]?secret)["']?\s*[:=]\s*)(["']?)[^\s"']{4,}\2/gi, '$1[SEGREDO REMOVIDO]'],
+  [/\b((?:password|passwd|pwd|senha|secret|token|api[_-]?key|client[_-]?secret)["']?\s*[:=]\s*)(["']?)(?!\[SEGREDO REMOVIDO\])[^\s"']{4,}\2/gi, '$1[SEGREDO REMOVIDO]'],
   [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, '$1[SEGREDO REMOVIDO]@'],
 ]
 
