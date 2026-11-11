@@ -1,0 +1,22 @@
+{
+  "name": "ai-dev-world",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "workspaces": [
+    "web",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c green,cyan \"npm run dev -w server\" \"npm run dev -w web\"",
+    "test": "npm test -w server",
+    "typecheck": "npm run typecheck -w server && npm run build -w web",
+    "lint": "npm run lint -w web",
+    "check": "npm run typecheck && npm test && npm run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
