@@ -45,24 +45,24 @@ export function useServer() {
       socket.onmessage = (event) => {
         const message = JSON.parse(String(event.data)) as ServerMessage
         if (message.type === 'snapshot') {
-          setAgents(message.agents)
-          setWorkspace(message.workspace)
-          setTasks(message.tasks)
-          setMissions(message.missions)
-          setHistory(message.history)
-          setConfigs(message.configs)
+          setAgents(Array.isArray(message.agents) ? message.agents : [])
+          setWorkspace(message.workspace ?? EMPTY_WORKSPACE)
+          setTasks(Array.isArray(message.tasks) ? message.tasks : [])
+          setMissions(Array.isArray(message.missions) ? message.missions : [])
+          setHistory(Array.isArray(message.history) ? message.history : [])
+          setConfigs(Array.isArray(message.configs) ? message.configs : [])
         } else if (message.type === 'agent') {
           setAgents((prev) => prev.map((a) => (a.id === message.agent.id ? message.agent : a)))
         } else if (message.type === 'workspace') {
-          setWorkspace(message.workspace)
+          setWorkspace(message.workspace ?? EMPTY_WORKSPACE)
         } else if (message.type === 'tasks') {
-          setTasks(message.tasks)
+          setTasks(Array.isArray(message.tasks) ? message.tasks : [])
         } else if (message.type === 'missions') {
-          setMissions(message.missions)
+          setMissions(Array.isArray(message.missions) ? message.missions : [])
         } else if (message.type === 'history') {
-          setHistory(message.entries)
+          setHistory(Array.isArray(message.entries) ? message.entries : [])
         } else if (message.type === 'agent-configs') {
-          setConfigs(message.configs)
+          setConfigs(Array.isArray(message.configs) ? message.configs : [])
         }
         for (const listener of listeners.current) listener(message)
       }

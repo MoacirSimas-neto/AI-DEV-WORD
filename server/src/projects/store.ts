@@ -53,8 +53,10 @@ export class ProjectStore {
 
   /** Registra uma pasta existente e a torna o projeto ativo. */
   add(rawPath: string) {
-    const input = rawPath.trim().replace(/^"(.*)"$/, '$1')
-    if (!path.isAbsolute(input)) throw new Error('Informe o caminho completo da pasta.')
+    const unquoted = rawPath.trim().replace(/^["'](.*)["']$/, '$1').trim()
+    if (!unquoted) throw new Error('Informe o caminho completo da pasta.')
+    if (!path.isAbsolute(unquoted)) throw new Error('Informe o caminho completo da pasta.')
+    const input = path.resolve(unquoted)
 
     let folder: string
     try {

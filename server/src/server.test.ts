@@ -215,5 +215,26 @@ test('configuração dos agentes pode ser atualizada, aplicar perfis e restaurar
   const devReset = reset.configs.find((c) => c.agentId === 'dev')
   assert.equal(devReset?.reasoningEffort, 'high')
 
+  // Configura agente com Antigravity
+  client.send({
+    type: 'agent-config-set',
+    config: { agentId: 'architect', provider: 'antigravity', model: 'gemini-4-argon-high', reasoningEffort: 'high' },
+  })
+  const agyUpdated = await client.waitFor('agent-configs')
+  const archAgy = agyUpdated.configs.find((c) => c.agentId === 'architect')
+  assert.equal(archAgy?.provider, 'antigravity')
+  assert.equal(archAgy?.model, 'gemini-4-argon-high')
+
+  // Validação de projeto
+  client.send({ type: 'project-validate', path: projectDir })
+  const validRes = await client.waitFor('project-validate-result')
+  assert.equal(validRes.valid, true)
+  assert.equal(validRes.exists, true)
+  assert.equal(validRes.isDirectory, true)
+
+  client.send({ type: 'project-validate', path: 'caminho_inexistente_xyz' })
+  const invalidRes = await client.waitFor('project-validate-result')
+  assert.equal(invalidRes.valid, false)
+
   client.socket.close()
 })

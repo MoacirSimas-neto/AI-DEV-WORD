@@ -39,6 +39,20 @@ const CODEX_MODELS = [
   { id: 'o1', label: 'o1' },
 ]
 
+const ANTIGRAVITY_MODELS = [
+  { id: 'default', label: 'Padrão do Antigravity CLI' },
+  { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
+  { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
+  { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
+  { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+  { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
+  { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
+  { id: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 (High)' },
+  { id: 'claude-sonnet-5-5-medium', label: 'Claude Sonnet 5.5 (Medium)' },
+  { id: 'claude-sonnet-5-5-high', label: 'Claude Sonnet 5.5 (High)' },
+  { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' },
+]
+
 export function AgentCenter({ agents, configs, online, send, onClose }: Props) {
   const [profilePreview, setProfilePreview] = useState<AgentProfileId | null>(null)
   const [savingNotice, setSavingNotice] = useState<string | null>(null)
@@ -155,6 +169,7 @@ export function AgentCenter({ agents, configs, online, send, onClose }: Props) {
 
           const isGemini = cfg.provider === 'gemini'
           const isCodex = cfg.provider === 'codex'
+          const isAntigravity = cfg.provider === 'antigravity'
 
           return (
             <div key={agent.id} className="agent-config-card">
@@ -172,19 +187,21 @@ export function AgentCenter({ agents, configs, online, send, onClose }: Props) {
                   id={`provider-${agent.id}`}
                   value={cfg.provider}
                   disabled={!online}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const nextProvider = e.target.value as ProviderId
+                    let nextModel = 'default'
+                    if (nextProvider === 'gemini') nextModel = 'auto'
+                    else if (nextProvider === 'antigravity') nextModel = 'gemini-4-argon-high'
                     handleConfigChange(agent.id, {
-                      provider: e.target.value as ProviderId,
-                      model: e.target.value === 'gemini' ? 'auto' : 'default',
+                      provider: nextProvider,
+                      model: nextModel,
                       reasoningEffort: 'default',
                     })
-                  }
+                  }}
                 >
+                  <option value="antigravity">Antigravity CLI (agy)</option>
                   <option value="gemini">Gemini CLI</option>
                   <option value="codex">Codex CLI</option>
-                  <option value="antigravity" disabled>
-                    Antigravity (futuro)
-                  </option>
                 </select>
               </div>
 
@@ -236,7 +253,30 @@ export function AgentCenter({ agents, configs, online, send, onClose }: Props) {
                   </select>
                 )}
 
-                {!isGemini && !isCodex && (
+                {isAntigravity && (
+                  <select
+                    id={`model-${agent.id}`}
+                    value={cfg.model}
+                    disabled={!online}
+                    onChange={(e) =>
+                      handleConfigChange(agent.id, {
+                        ...cfg,
+                        model: e.target.value,
+                      })
+                    }
+                  >
+                    {ANTIGRAVITY_MODELS.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                    {!ANTIGRAVITY_MODELS.some((m) => m.id === cfg.model) && (
+                      <option value={cfg.model}>{cfg.model} (personalizado)</option>
+                    )}
+                  </select>
+                )}
+
+                {!isGemini && !isCodex && !isAntigravity && (
                   <input
                     id={`model-${agent.id}`}
                     value={cfg.model}
@@ -253,7 +293,7 @@ export function AgentCenter({ agents, configs, online, send, onClose }: Props) {
 
               <div className="agent-config-field">
                 <label htmlFor={`effort-${agent.id}`}>Esforço de raciocínio:</label>
-                {isCodex ? (
+                {isCodex || isAntigravity ? (
                   <select
                     id={`effort-${agent.id}`}
                     value={cfg.reasoningEffort}

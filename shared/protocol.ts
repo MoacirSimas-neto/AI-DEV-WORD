@@ -1,6 +1,6 @@
 // Contrato entre backend e frontend. Somente tipos: nada aqui vira código em runtime.
 
-export type CliId = 'codex' | 'gemini'
+export type CliId = 'codex' | 'gemini' | 'agy'
 
 export type ProviderId = 'codex' | 'gemini' | 'antigravity'
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'extra-high' | 'default'
@@ -197,9 +197,22 @@ export type ServerMessage =
   | { type: 'agent-configs'; configs: AgentConfig[] }
   /** Saída ao vivo do CLI que está trabalhando na missão. */
   | { type: 'mission-output'; missionId: number; data: string }
+  | {
+      type: 'project-validate-result'
+      path: string
+      valid: boolean
+      exists: boolean
+      isDirectory: boolean
+      isRepo: boolean
+      branch: string | null
+      error?: string
+    }
+  | { type: 'dialog-folder-selected'; path: string | null }
 
 export type ClientMessage =
   | { type: 'check-cli'; agentId: string }
+  | { type: 'dialog-open-folder' }
+  | { type: 'project-validate'; path: string }
   /** Inicia a sessão do agente ou se reconecta a uma já existente. */
   | { type: 'term-open'; agentId: string; cols: number; rows: number }
   | { type: 'term-input'; agentId: string; data: string }

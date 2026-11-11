@@ -43,19 +43,35 @@ export interface TeamOptions {
 export function getStepCliAndArgs(
   role: 'planning' | 'developing' | 'reviewing',
   cfg?: AgentConfig,
-): { cli: CliId; args: string[]; model: string; effort: string } {
-  const provider = (cfg?.provider === 'codex' || cfg?.provider === 'gemini')
+): { cli: CliId; args: string[]; model: string; effort: string; passPromptAsArg?: boolean } {
+  const provider = (cfg?.provider === 'codex' || cfg?.provider === 'gemini' || cfg?.provider === 'antigravity')
     ? cfg.provider
     : (role === 'developing' ? 'codex' : 'gemini')
+  const cli: CliId = provider === 'antigravity' ? 'agy' : provider
   const model = cfg?.model || 'default'
   const effort = cfg?.reasoningEffort || 'default'
 
   let args: string[] = []
-  if (provider === 'gemini') {
+  let passPromptAsArg = false
+
+  if (cli === 'gemini') {
     args = ['--approval-mode', role === 'developing' ? 'auto_edit' : 'default']
     if (model && model !== 'auto' && model !== 'default') {
       args.push('-m', model)
     }
+  } else if (cli === 'agy') {
+    args = []
+    if (role === 'developing') {
+      args.push('--mode', 'accept-edits')
+    }
+    if (model && model !== 'default') {
+      args.push('--model', model)
+    }
+    if (effort && effort !== 'default') {
+      args.push('--effort', effort)
+    }
+    args.push('-p')
+    passPromptAsArg = true
   } else {
     const sandbox = role === 'developing' ? 'workspace-write' : 'read-only'
     args = ['exec', '--sandbox', sandbox]
@@ -68,7 +84,7 @@ export function getStepCliAndArgs(
     args.push('-')
   }
 
-  return { cli: provider, args, model, effort }
+  return { cli, args, model, effort, passPromptAsArg }
 }
 
 /** Missão com um CLI trabalhando agora. */
@@ -210,6 +226,7 @@ export class TeamRunner extends EventEmitter {
       planPrompt(task),
       stepConfig.model,
       stepConfig.effort,
+      stepConfig.passPromptAsArg,
     )
     if (plan === null) return
     const mission = this.tasks.updateMission(missionId, { phase: 'awaiting_approval', plan })
@@ -230,6 +247,7 @@ export class TeamRunner extends EventEmitter {
       devPrompt(task, plan),
       devConfig.model,
       devConfig.effort,
+      devConfig.passPromptAsArg,
     )
     if (report === null) return
 
@@ -272,6 +290,7 @@ export class TeamRunner extends EventEmitter {
       reviewPrompt(task, plan, report, files, diff),
       qaConfig.model,
       qaConfig.effort,
+      qaConfig.passPromptAsArg,
     )
     if (review === null) return
 
@@ -295,6 +314,7 @@ export class TeamRunner extends EventEmitter {
     prompt: string,
     model = 'default',
     effort = 'default',
+    passPromptAsArg = false,
   ) {
     const run = this.running
     if (!run || run.missionId !== missionId || run.cancelled) return null
@@ -304,9 +324,11 @@ export class TeamRunner extends EventEmitter {
     const effortInfo = effort && effort !== 'default' ? `, esforço: ${effort}` : ''
     this.log(mission, 'agent', `${name} (${cli}${modelInfo}${effortInfo}) começou a trabalhar na missão #${missionId}.`, agentId)
     try {
-      run.proc = this.launch(cli, args, {
+      const stepArgs = passPromptAsArg ? [...args, prompt] : args
+      const stepInput = passPromptAsArg ? undefined : prompt
+      run.proc = this.launch(cli, stepArgs, {
         cwd,
-        input: prompt,
+        input: stepInput,
         timeoutMs: this.stepTimeoutMs,
         onOutput: (text) => {
           const clean = cleanOutput(text)
@@ -320,6 +342,15 @@ export class TeamRunner extends EventEmitter {
         throw new Error(`${name}: tempo esgotado (${Math.round(this.stepTimeoutMs / 60_000)} min). O processo foi encerrado.`)
       }
       if (result.code !== 0) throw new Error(failureText(name, cli, result))
+
+      // Verificação de permissões e operações bloqueadas para Antigravity headless
+      if (cli === 'agy') {
+        const fullOutput = `${result.stdout}\n${result.stderr}`
+        if (/permission denied|operation blocked|denied by policy|user approval required/i.test(fullOutput)) {
+          this.log(mission, 'error', `Aviso (${name}): Operações foram bloqueadas por restrições de permissão do Antigravity CLI.`, agentId)
+        }
+      }
+
       const text = cleanOutput(result.stdout).trim().slice(0, MAX_TEXT)
       if (!text) throw new Error(`${name}: o ${cli} terminou sem resposta.`)
       this.log(mission, 'agent', `${name} (${cli}) terminou a sua etapa da missão #${missionId}.`, agentId)

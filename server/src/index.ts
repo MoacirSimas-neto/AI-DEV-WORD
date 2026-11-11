@@ -22,9 +22,8 @@ const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
 
 // Sincroniza o CLI de cada agente conforme a configuração persistida
 for (const cfg of agentConfigs.list()) {
-  if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
-    registry.setCli(cfg.agentId, cfg.provider)
-  }
+  const cli = cfg.provider === 'antigravity' ? 'agy' : cfg.provider
+  registry.setCli(cfg.agentId, cli)
 }
 
 const terminals = new TerminalManager(
@@ -34,11 +33,18 @@ const terminals = new TerminalManager(
   {
     getArgs: (agentId) => {
       const cfg = agentConfigs.get(agentId)
-      const cli = cfg.provider === 'codex' || cfg.provider === 'gemini' ? cfg.provider : (agentId === 'dev' ? 'codex' : 'gemini')
+      const cli: 'codex' | 'gemini' | 'agy' = cfg.provider === 'antigravity' ? 'agy' : cfg.provider
       const args: string[] = []
       if (cli === 'gemini') {
         if (cfg.model && cfg.model !== 'auto' && cfg.model !== 'default') {
           args.push('-m', cfg.model)
+        }
+      } else if (cli === 'agy') {
+        if (cfg.model && cfg.model !== 'default') {
+          args.push('--model', cfg.model)
+        }
+        if (cfg.reasoningEffort && cfg.reasoningEffort !== 'default') {
+          args.push('--effort', cfg.reasoningEffort)
         }
       } else {
         if (cfg.model && cfg.model !== 'default') {

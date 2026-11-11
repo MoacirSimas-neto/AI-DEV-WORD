@@ -1,9 +1,13 @@
+import { execFile } from 'node:child_process'
+import { realpathSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
+import path from 'node:path'
 import { WebSocket, WebSocketServer } from 'ws'
 import type {
   AgentConfig,
   AgentInfo,
   AgentProfileId,
+  CliId,
   ClientMessage,
   ProviderId,
   ReasoningEffort,
@@ -52,6 +56,32 @@ const VALID_PROVIDERS = new Set<ProviderId>(['codex', 'gemini', 'antigravity'])
 const VALID_EFFORTS = new Set<ReasoningEffort>(['low', 'medium', 'high', 'extra-high', 'default'])
 const VALID_PROFILES = new Set<AgentProfileId>(['economy', 'balanced', 'max_quality'])
 
+const providerToCli = (provider: ProviderId): CliId => (provider === 'antigravity' ? 'agy' : provider)
+
+export async function openNativeFolderDialog(): Promise<string | null> {
+  if (process.platform === 'win32') {
+    return new Promise((resolve) => {
+      const psScript = `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Selecione a pasta do projeto'; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }`
+      execFile('powershell', ['-NoProfile', '-STA', '-Command', psScript], { timeout: 60000 }, (err, stdout) => {
+        if (err || !stdout.trim()) resolve(null)
+        else resolve(stdout.trim())
+      })
+    })
+  }
+  return new Promise((resolve) => {
+    execFile('zenity', ['--file-selection', '--directory'], { timeout: 60000 }, (err, stdout) => {
+      if (err || !stdout.trim()) {
+        execFile('kdialog', ['--getexistingdirectory'], { timeout: 60000 }, (kErr, kStdout) => {
+          if (kErr || !kStdout.trim()) resolve(null)
+          else resolve(kStdout.trim())
+        })
+      } else {
+        resolve(stdout.trim())
+      }
+    })
+  })
+}
+
 function parseTaskInput(data: unknown): TaskInput | null {
   if (typeof data !== 'object' || data === null) return null
   const t = data as Record<string, unknown>
@@ -97,6 +127,12 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case 'project-add':
       return typeof msg.path === 'string' && msg.path.length <= 1024
         ? { type: 'project-add', path: msg.path }
+        : null
+    case 'dialog-open-folder':
+      return { type: 'dialog-open-folder' }
+    case 'project-validate':
+      return typeof msg.path === 'string' && msg.path.length <= 1024
+        ? { type: 'project-validate', path: msg.path }
         : null
     case 'project-select':
     case 'project-remove':
@@ -252,6 +288,79 @@ export function createAppServer({
       case 'project-add':
         changeWorkspace(socket, () => projects.add(message.path))
         break
+      case 'dialog-open-folder':
+        openNativeFolderDialog().then((selectedPath) => {
+          send(socket, { type: 'dialog-folder-selected', path: selectedPath })
+        })
+        break
+      case 'project-validate': {
+        const raw = message.path.trim().replace(/^"(.*)"$/, '$1')
+        if (!path.isAbsolute(raw)) {
+          send(socket, {
+            type: 'project-validate-result',
+            path: raw,
+            valid: false,
+            exists: false,
+            isDirectory: false,
+            isRepo: false,
+            branch: null,
+            error: 'Informe um caminho completo da pasta.',
+          })
+          break
+        }
+        try {
+          const resolved = realpathSync.native(raw)
+          const stat = statSync(resolved)
+          if (!stat.isDirectory()) {
+            send(socket, {
+              type: 'project-validate-result',
+              path: resolved,
+              valid: false,
+              exists: true,
+              isDirectory: false,
+              isRepo: false,
+              branch: null,
+              error: 'O caminho não é uma pasta.',
+            })
+            break
+          }
+          git.status(resolved)
+            .then((gitStat) => {
+              send(socket, {
+                type: 'project-validate-result',
+                path: resolved,
+                valid: true,
+                exists: true,
+                isDirectory: true,
+                isRepo: !!gitStat.isRepo,
+                branch: gitStat.branch,
+              })
+            })
+            .catch(() => {
+              send(socket, {
+                type: 'project-validate-result',
+                path: resolved,
+                valid: true,
+                exists: true,
+                isDirectory: true,
+                isRepo: false,
+                branch: null,
+              })
+            })
+        } catch {
+          send(socket, {
+            type: 'project-validate-result',
+            path: raw,
+            valid: false,
+            exists: false,
+            isDirectory: false,
+            isRepo: false,
+            branch: null,
+            error: 'Pasta não encontrada no disco.',
+          })
+        }
+        break
+      }
       case 'project-select':
         changeWorkspace(socket, () => projects.select(message.projectId))
         break
@@ -349,9 +458,7 @@ export function createAppServer({
       case 'agent-config-set':
         try {
           agentConfigs.set(message.config.agentId, message.config)
-          if (message.config.provider === 'codex' || message.config.provider === 'gemini') {
-            registry.setCli(message.config.agentId, message.config.provider)
-          }
+          registry.setCli(message.config.agentId, providerToCli(message.config.provider))
           history.add({
             kind: 'agent',
             message: `Configuração atualizada (${message.config.agentId}): ${message.config.provider} · ${message.config.model} · esforço ${message.config.reasoningEffort}`,
@@ -364,9 +471,7 @@ export function createAppServer({
         try {
           agentConfigs.applyProfile(message.profile)
           for (const cfg of agentConfigs.list()) {
-            if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
-              registry.setCli(cfg.agentId, cfg.provider)
-            }
+            registry.setCli(cfg.agentId, providerToCli(cfg.provider))
           }
           history.add({
             kind: 'agent',
@@ -380,9 +485,7 @@ export function createAppServer({
         try {
           agentConfigs.resetDefaults()
           for (const cfg of agentConfigs.list()) {
-            if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
-              registry.setCli(cfg.agentId, cfg.provider)
-            }
+            registry.setCli(cfg.agentId, providerToCli(cfg.provider))
           }
           history.add({
             kind: 'agent',

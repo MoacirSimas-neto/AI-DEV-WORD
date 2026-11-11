@@ -31,8 +31,18 @@ export function resolveCommand(name: string, options: ResolveOptions = {}): stri
   const pathVar = (isWindows ? (env.Path ?? env.PATH) : env.PATH) ?? ''
   const extensions = isWindows ? WINDOWS_EXTENSIONS : ['']
 
-  for (const dir of pathVar.split(p.delimiter)) {
-    if (!dir) continue
+  const searchDirs = pathVar.split(p.delimiter).filter(Boolean)
+  if (name === 'agy' || name === 'antigravity') {
+    if (isWindows) {
+      if (env.LOCALAPPDATA) searchDirs.push(p.join(env.LOCALAPPDATA, 'agy', 'bin'))
+      if (env.USERPROFILE) searchDirs.push(p.join(env.USERPROFILE, 'AppData', 'Local', 'agy', 'bin'))
+    } else {
+      if (env.HOME) searchDirs.push(p.join(env.HOME, '.local', 'bin'))
+      searchDirs.push('/usr/local/bin')
+    }
+  }
+
+  for (const dir of searchDirs) {
     for (const ext of extensions) {
       const candidate = p.join(dir, name + ext)
       if (isExecutable(candidate)) return candidate

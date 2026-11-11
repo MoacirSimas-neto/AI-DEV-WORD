@@ -10,7 +10,7 @@ import { GitService } from '../git/service.ts'
 import { HistoryStore } from '../history/store.ts'
 import { ProjectStore } from '../projects/store.ts'
 import { TaskStore } from '../tasks/store.ts'
-import { TeamRunner } from './runner.ts'
+import { TeamRunner, getStepCliAndArgs } from './runner.ts'
 
 test('TeamRunner fluxo completo: planejar -> aprovar -> desenvolver -> revisar', async () => {
   const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-test-')))
@@ -195,4 +195,33 @@ test('TeamRunner aplica configurações dinâmicas de provedor/modelo/esforço e
   assert.equal(callArgs[2].cli, 'gemini')
   assert.ok(callArgs[2].args.includes('-m'))
   assert.ok(callArgs[2].args.includes('gemini-3.5-flash'))
+})
+
+test('getStepCliAndArgs configura Antigravity CLI com --model, --effort e modo correto', () => {
+  const planStep = getStepCliAndArgs('planning', {
+    agentId: 'architect',
+    provider: 'antigravity',
+    model: 'gemini-4-argon-high',
+    reasoningEffort: 'high',
+    updatedAt: '',
+  })
+  assert.equal(planStep.cli, 'agy')
+  assert.equal(planStep.passPromptAsArg, true)
+  assert.ok(planStep.args.includes('--model'))
+  assert.ok(planStep.args.includes('gemini-4-argon-high'))
+  assert.ok(planStep.args.includes('--effort'))
+  assert.ok(planStep.args.includes('high'))
+  assert.ok(planStep.args.includes('-p'))
+
+  const devStep = getStepCliAndArgs('developing', {
+    agentId: 'dev',
+    provider: 'antigravity',
+    model: 'claude-opus-5-5-high',
+    reasoningEffort: 'extra-high',
+    updatedAt: '',
+  })
+  assert.equal(devStep.cli, 'agy')
+  assert.ok(devStep.args.includes('--mode'))
+  assert.ok(devStep.args.includes('accept-edits'))
+  assert.ok(devStep.args.includes('-p'))
 })

@@ -20,6 +20,7 @@ interface CliSpec {
 const CATALOG: Record<CliId, CliSpec> = {
   codex: { command: 'codex', versionArgs: ['--version'], authArgs: ['login', 'status'] },
   gemini: { command: 'gemini', versionArgs: ['--version'] },
+  agy: { command: 'agy', versionArgs: ['--version'], authArgs: ['models'] },
 }
 
 /** Caminho absoluto do executável do CLI, ou null se não estiver instalado. */

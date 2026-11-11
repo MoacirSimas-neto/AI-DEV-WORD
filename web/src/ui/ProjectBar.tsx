@@ -35,22 +35,61 @@ export function ProjectBar({
   const active = projects.find((p) => p.id === activeProjectId)
   const [path, setPath] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [validation, setValidation] = useState<{ isRepo: boolean; branch: string | null } | null>(null)
+  const [validating, setValidating] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
 
   useEffect(
     () =>
       subscribe((message) => {
-        if (message.type === 'notice') setError(message.message)
+        if (message.type === 'notice') {
+          setError(message.message)
+          setValidating(false)
+          setBrowsing(false)
+        }
         if (message.type === 'workspace') {
           setError(null)
           setPath('')
+          setValidation(null)
+        }
+        if (message.type === 'dialog-folder-selected') {
+          setBrowsing(false)
+          if (message.path) {
+            setPath(message.path)
+            setValidating(true)
+            send({ type: 'project-validate', path: message.path })
+          }
+        }
+        if (message.type === 'project-validate-result') {
+          setValidating(false)
+          if (message.valid) {
+            setValidation({ isRepo: message.isRepo, branch: message.branch })
+            setError(null)
+          } else {
+            setValidation(null)
+            setError(message.error ?? 'Pasta inválida.')
+          }
         }
       }),
-    [subscribe],
+    [subscribe, send],
   )
+
+  const handleBrowse = () => {
+    setBrowsing(true)
+    setError(null)
+    send({ type: 'dialog-open-folder' })
+  }
+
+  const handleValidate = () => {
+    if (!path.trim()) return
+    setValidating(true)
+    setError(null)
+    send({ type: 'project-validate', path: path.trim() })
+  }
 
   const add = (event: FormEvent) => {
     event.preventDefault()
-    if (path.trim()) send({ type: 'project-add', path })
+    if (path.trim()) send({ type: 'project-add', path: path.trim() })
   }
 
   return (
@@ -65,7 +104,10 @@ export function ProjectBar({
               id="project-select"
               value={activeProjectId ?? ''}
               disabled={!online}
-              onChange={(e) => send({ type: 'project-select', projectId: Number(e.target.value) })}
+              onChange={(e) => {
+                const val = e.target.value
+                if (val) send({ type: 'project-select', projectId: Number(val) })
+              }}
             >
               {activeProjectId === null && <option value="">Escolha…</option>}
               {projects.map((p) => (
@@ -74,7 +116,7 @@ export function ProjectBar({
                 </option>
               ))}
             </select>
-            {active && <span className="projects-path">{active.path}</span>}
+            {active && <span className="projects-path" title={active.path}>{active.path}</span>}
             <button
               type="button"
               className="btn-quiet"
@@ -108,16 +150,52 @@ export function ProjectBar({
         <form className="projects-add" onSubmit={add}>
           <input
             aria-label="Caminho completo da pasta do projeto"
-            placeholder="Caminho completo da pasta, ex.: C:\projetos\meu-app"
+            placeholder="Caminho completo da pasta, ex.: C:\AI DEV WORD"
             value={path}
-            onChange={(e) => setPath(e.target.value)}
+            onChange={(e) => {
+              setPath(e.target.value)
+              setValidation(null)
+              setError(null)
+            }}
             spellCheck={false}
           />
+          <button
+            type="button"
+            className="btn-quiet"
+            disabled={!online || browsing}
+            title="Abrir seletor de pastas nativo"
+            onClick={handleBrowse}
+          >
+            {browsing ? 'Abrindo…' : 'Procurar…'}
+          </button>
+          {path.trim() && !validation && (
+            <button
+              type="button"
+              className="btn-quiet"
+              disabled={!online || validating}
+              title="Verificar se o diretório existe e se possui Git"
+              onClick={handleValidate}
+            >
+              {validating ? 'Verificando…' : 'Validar'}
+            </button>
+          )}
           <button type="submit" disabled={!online || !path.trim()}>
             Adicionar pasta
           </button>
         </form>
       </div>
+
+      {validation && (
+        <div className="projects-validation-info" role="status">
+          <span className="validation-badge validation-ok">✓ Pasta válida</span>
+          <span className="validation-meta">
+            {validation.isRepo
+              ? `Repositório Git ativo (${validation.branch ?? 'HEAD destacado'})`
+              : 'Pasta comum (sem Git — painel Git indicará isso)'}
+          </span>
+        </div>
+      )}
+
       {error && <p className="projects-error">{error}</p>}
     </section>
   )

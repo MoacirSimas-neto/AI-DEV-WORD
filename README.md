@@ -1,27 +1,28 @@
 # AI Dev World
 
 Escritório 2D em pixel art onde cada personagem é um agente de IA real: clicar
-nele abre um terminal de verdade rodando o CLI oficial (Codex ou Gemini) na
+nele abre um terminal de verdade rodando o CLI oficial (Codex, Gemini ou Antigravity) na
 pasta do seu projeto. Roda inteiro na sua máquina.
 
-| Personagem | Papel               | CLI    |
-| ---------- | ------------------- | ------ |
-| Arquiteto  | Planeja a solução   | Gemini |
-| Dev        | Implementa o código | Codex  |
-| QA         | Revisa e testa      | Gemini |
-| Tutor      | Explica e ensina    | Gemini |
+| Personagem | Papel               | CLI Padrão               |
+| ---------- | ------------------- | ------------------------ |
+| Arquiteto  | Planeja a solução   | Antigravity CLI (`agy`)  |
+| Dev        | Implementa o código | Codex CLI                |
+| QA         | Revisa e testa      | Antigravity CLI (`agy`)  |
+| Tutor      | Explica e ensina    | Gemini CLI               |
 
 Cada personagem pode abrir uma sessão individual e interativa de terminal, ou
-participar da orquestração automática no **Modo Equipe** (Gemini planeja ->
-aprovação humana -> Codex desenvolve -> Gemini revisa).
+participar da orquestração automática no **Modo Equipe** (Antigravity/Gemini planeja ->
+aprovação humana -> Codex desenvolve -> Antigravity/Gemini revisa).
 
 ## Requisitos
 
 - Node.js 22.18 ou mais novo (testado no 24).
-- [Codex CLI](https://github.com/openai/codex) e
-  [Gemini CLI](https://github.com/google-gemini/gemini-cli) instalados e com
-  login feito pelo próprio CLI (`codex login`, `gemini`). Um personagem cujo CLI
-  não está instalado aparece como "Indisponível".
+- CLIs instalados e autenticados:
+  - [Google Antigravity CLI (`agy`)](https://antigravity.google)
+  - [Codex CLI](https://github.com/openai/codex) (`codex login`)
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini`)
+  Um personagem cujo CLI não está instalado ou sem login aparece como "Indisponível".
 - Git instalado e disponível no PATH.
 - Linux: o `node-pty` é compilado na instalação, então são necessários
   `build-essential` e Python, e o npm pode pedir para aprovar o script de
@@ -103,39 +104,46 @@ Roda typecheck do server/web, build do Vite, lint (oxlint) e suíte de testes.
 
 ### 6. Central de Agentes (Modelos e Raciocínio)
 - Painel modal acessível pela barra de navegação ("⚙ Central de Agentes").
+- Três provedores oficiais independentes: **Google Antigravity CLI (`agy`)**, **Codex CLI** e **Gemini CLI**.
 - Configuração individual por agente:
-  - **Provedor:** Gemini CLI ou Codex CLI.
-  - **Modelo:** Seleção customizável (ex: `gemini-2.5-pro`, `gemini-3.5-flash`, `auto`, `gpt-6.1-sol`, `gpt-4o`, etc.).
-  - **Esforço de Raciocínio:** `default`, `low`, `medium`, `high`, `extra-high` (injetado via flag de configuração do CLI).
+  - **Provedor:** Antigravity, Gemini ou Codex.
+  - **Modelo:** Seleção customizável com modelos oficiais (ex: `gemini-4-argon-high`, `gemini-3.8-flash-high`, `claude-opus-5-5-high`, `gpt-5`, `gemini-2.5-pro`, etc.).
+  - **Esforço de Raciocínio:** `default`, `low`, `medium`, `high`, `extra-high` (injetado via `--effort` no Antigravity e `-c model_reasoning_effort` no Codex).
 - **Perfis rápidos:**
-  - *Econômico:* Gemini Flash / Codex mini com esforço baixo.
-  - *Balanceado:* Configuração padrão de fábrica recomendada.
-  - *Qualidade Máxima:* Gemini Pro / Codex avançado com raciocínio alto.
-- Botão "Restaurar Padrões" para restabelecer os valores de fábrica.
+  - *Econômico:* Antigravity Flash-low / Codex mini / Gemini Flash-Lite.
+  - *Balanceado:* Antigravity Argon-medium / Codex padrão / Gemini Flash.
+  - *Qualidade Máxima:* Antigravity Argon-high / Codex high / Gemini Pro.
+- Botão "Restaurar Padrões" para restabelecer os valores recomendados de fábrica.
 - Persistência das preferências no SQLite (`agent_configs`).
 - Aplicação automática tanto no **Modo Equipe** quanto nos **Terminais Interativos** (`spawnCliPty`).
+
+### 7. Seleção Segura de Projetos (Windows & Linux)
+- Seletor nativo de pastas disparado pelo botão "Procurar..." via backend (`FolderBrowserDialog` no Windows, `zenity`/`kdialog` no Linux).
+- Suporte a caminhos complexos: espaços (`C:\AI DEV WORD`), aspas, barras invertidas ou normais, com resolução canônica via `path.resolve` e `fs.realpathSync.native`.
+- Validação prévia de diretório com botão "Validar": informa se a pasta existe, se é diretório e se possui repositório Git com o nome da branch ativa.
+- Proteção por `ErrorBoundary` no React: impede que qualquer falha localizada em subcomponentes ou incompatibilidade de estado desmonte a interface.
 
 ## Estrutura
 
 ```
 shared/protocol.ts        contrato de tipos WebSocket (mensagens, tarefas, missões, Git, configs)
 server/src/
-  cli/                    detecção e execução dos CLIs (tratamento .cmd Windows e startCli com stdin)
+  cli/                    detecção e execução dos CLIs (agy, codex, gemini com tratamento .cmd e shims)
   agents/registry.ts      fonte da verdade do estado dos agentes
   agents/configStore.ts   persistência SQLite de provedor, modelo e raciocínio por agente
   terminal/               sessões de pseudo-terminal (node-pty) com injeção de modelo/esforço
   projects/store.ts       gerenciamento de projetos autorizados (SQLite)
   tasks/store.ts          persistência de tarefas e missões (SQLite)
   history/store.ts        histórico de atividades e sanitização de segredos (redact)
-  team/runner.ts          orquestrador do Modo Equipe (Gemini -> Codex -> Gemini) com configs dinâmicas
+  team/runner.ts          orquestrador do Modo Equipe (Antigravity -> Codex -> Antigravity/Gemini)
   team/prompts.ts         templates de prompts dos papéis do modo equipe
   git/service.ts          operações Git seguras e não destrutivas
   server.ts               servidor HTTP + WebSocket local
 web/src/
-  net/useServer.ts        conexão reativa com WebSocket
+  net/useServer.ts        conexão reativa com WebSocket e sanitização de snapshot
   net/useGitStatus.ts     polling de alterações do Git e evento push em tempo real
   game/                   escritório Phaser 2D, layout pixel art e atores
-  ui/                     componentes React (ProjectBar, TaskPanel, HistoryPanel, GitPanel, AgentCenter, TerminalView)
+  ui/                     componentes React (ProjectBar, TaskPanel, HistoryPanel, GitPanel, AgentCenter, TerminalView, ErrorBoundary)
 ```
 
 ## Segurança
@@ -145,19 +153,23 @@ web/src/
 - Todo texto que entra no histórico é filtrado pelo sanitizador de credenciais (`redact`).
 - Pushes e comandos com impacto externo exigem confirmação explícita do usuário.
 - CLIs só são executados dentro dos diretórios expressamente autorizados na lista de projetos.
+- Modo headless do Antigravity inspeciona avisos de permissão; nunca utiliza `--dangerously-skip-permissions`.
 
 ## Status das Funcionalidades
 
-| Funcionalidade                     | Status               |
-| ---------------------------------- | -------------------- |
-| Terminais reais por agente         | Concluído            |
-| Detecção de CLIs oficiais          | Concluído            |
-| Gerenciamento de tarefas local     | Concluído            |
-| Histórico de atividades com filtro | Concluído            |
-| Sanitização de segredos em logs    | Concluído            |
-| Modo Equipe com agentes reais      | Concluído            |
-| Aprovação humana no fluxo equipe   | Concluído            |
-| Painel Git permanente inteligente  | Concluído            |
-| Central de Agentes (modelos/esforço) | Concluído          |
-| Estados integrados no mundo 2D     | Concluído            |
-| Empacotamento Desktop (Tauri/Elec) | Pendente para futuro |
+| Funcionalidade                       | Status               |
+| ------------------------------------ | -------------------- |
+| Terminais reais por agente           | Concluído            |
+| Detecção de CLIs (Codex, Gemini, agy)| Concluído            |
+| Provedor Google Antigravity CLI      | Concluído            |
+| Seletor nativo e validação de pastas | Concluído            |
+| Error Boundary e proteção visual     | Concluído            |
+| Gerenciamento de tarefas local       | Concluído            |
+| Histórico de atividades com filtro   | Concluído            |
+| Sanitização de segredos em logs      | Concluído            |
+| Modo Equipe dinâmico (3 provedores)  | Concluído            |
+| Aprovação humana no fluxo equipe     | Concluído            |
+| Painel Git permanente inteligente    | Concluído            |
+| Central de Agentes (modelos/esforço) | Concluído            |
+| Estados integrados no mundo 2D       | Concluído            |
+| Empacotamento Desktop (Tauri/Elec)   | Pendente para futuro |

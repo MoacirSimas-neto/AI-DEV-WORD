@@ -15,9 +15,9 @@ const SCHEMA = `
 export const DEFAULT_CONFIGS: Record<string, Omit<AgentConfig, 'updatedAt'>> = {
   architect: {
     agentId: 'architect',
-    provider: 'gemini',
-    model: 'auto',
-    reasoningEffort: 'default',
+    provider: 'antigravity',
+    model: 'gemini-4-argon-high',
+    reasoningEffort: 'high',
   },
   dev: {
     agentId: 'dev',
@@ -27,9 +27,9 @@ export const DEFAULT_CONFIGS: Record<string, Omit<AgentConfig, 'updatedAt'>> = {
   },
   qa: {
     agentId: 'qa',
-    provider: 'gemini',
-    model: 'gemini-2.5-pro',
-    reasoningEffort: 'default',
+    provider: 'antigravity',
+    model: 'gemini-4-argon-high',
+    reasoningEffort: 'high',
   },
   tutor: {
     agentId: 'tutor',
@@ -41,21 +41,21 @@ export const DEFAULT_CONFIGS: Record<string, Omit<AgentConfig, 'updatedAt'>> = {
 
 export const PROFILES: Record<AgentProfileId, Record<string, { provider: ProviderId; model: string; reasoningEffort: ReasoningEffort }>> = {
   economy: {
-    architect: { provider: 'gemini', model: 'gemini-3.5-flash', reasoningEffort: 'default' },
+    architect: { provider: 'antigravity', model: 'gemini-3.8-flash-low', reasoningEffort: 'low' },
     dev: { provider: 'codex', model: 'default', reasoningEffort: 'low' },
-    qa: { provider: 'gemini', model: 'gemini-3.5-flash', reasoningEffort: 'default' },
+    qa: { provider: 'antigravity', model: 'gemini-3.8-flash-low', reasoningEffort: 'low' },
     tutor: { provider: 'gemini', model: 'gemini-3.1-flash-lite', reasoningEffort: 'default' },
   },
   balanced: {
-    architect: { provider: 'gemini', model: 'auto', reasoningEffort: 'default' },
+    architect: { provider: 'antigravity', model: 'gemini-4-argon-medium', reasoningEffort: 'medium' },
     dev: { provider: 'codex', model: 'default', reasoningEffort: 'medium' },
-    qa: { provider: 'gemini', model: 'auto', reasoningEffort: 'default' },
+    qa: { provider: 'antigravity', model: 'gemini-4-argon-medium', reasoningEffort: 'medium' },
     tutor: { provider: 'gemini', model: 'gemini-3.5-flash', reasoningEffort: 'default' },
   },
   max_quality: {
-    architect: { provider: 'gemini', model: 'gemini-2.5-pro', reasoningEffort: 'default' },
+    architect: { provider: 'antigravity', model: 'gemini-4-argon-high', reasoningEffort: 'high' },
     dev: { provider: 'codex', model: 'default', reasoningEffort: 'high' },
-    qa: { provider: 'gemini', model: 'gemini-2.5-pro', reasoningEffort: 'default' },
+    qa: { provider: 'antigravity', model: 'gemini-4-argon-high', reasoningEffort: 'high' },
     tutor: { provider: 'gemini', model: 'gemini-2.5-pro', reasoningEffort: 'default' },
   },
 }

@@ -24,7 +24,9 @@ test('adicionar a mesma pasta duas vezes não duplica', () => {
   const store = new ProjectStore(':memory:')
   const folder = tempDir()
   store.add(folder)
-  store.add(`"${folder}"`) // caminho colado com aspas, como o Windows copia
+  store.add(`"${folder}"`) // caminho colado com aspas duplas
+  store.add(`'${folder}'`) // caminho colado com aspas simples
+  store.add(`${folder}${path.sep}`) // caminho com barra final
   assert.equal(store.workspace().projects.length, 1)
 })
 

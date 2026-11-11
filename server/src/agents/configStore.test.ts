@@ -35,13 +35,15 @@ test('AgentConfigStore aplica perfis e restaura padrões', () => {
 
   store.applyProfile('economy')
   assert.equal(store.get('dev').reasoningEffort, 'low')
-  assert.equal(store.get('architect').model, 'gemini-3.5-flash')
+  assert.equal(store.get('architect').model, 'gemini-3.8-flash-low')
+  assert.equal(store.get('architect').provider, 'antigravity')
 
   store.applyProfile('max_quality')
   assert.equal(store.get('dev').reasoningEffort, 'high')
-  assert.equal(store.get('architect').model, 'gemini-2.5-pro')
+  assert.equal(store.get('architect').model, 'gemini-4-argon-high')
 
   store.resetDefaults()
   assert.equal(store.get('dev').reasoningEffort, 'high')
-  assert.equal(store.get('architect').model, 'auto')
+  assert.equal(store.get('architect').provider, 'antigravity')
+  assert.equal(store.get('architect').model, 'gemini-4-argon-high')
 })
