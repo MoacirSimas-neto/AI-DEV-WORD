@@ -6,6 +6,8 @@ import type {
   ClientMessage,
   MissionInfo,
   ServerMessage,
+  SkillAgentOverride,
+  SkillInfo,
   SpecializationInfo,
   TaskInfo,
   Workspace,
@@ -34,6 +36,8 @@ export function useServer() {
   const [configs, setConfigs] = useState<AgentConfig[]>([])
   const [allConfigs, setAllConfigs] = useState<AgentConfig[]>([])
   const [specializations, setSpecializations] = useState<SpecializationInfo[]>([])
+  const [skills, setSkills] = useState<SkillInfo[]>([])
+  const [skillOverrides, setSkillOverrides] = useState<SkillAgentOverride[]>([])
   const socketRef = useRef<WebSocket | null>(null)
   const listeners = useRef(new Set<MessageListener>())
 
@@ -56,6 +60,11 @@ export function useServer() {
           setConfigs(Array.isArray(message.configs) ? message.configs : [])
           setAllConfigs(Array.isArray(message.allConfigs) ? message.allConfigs : Array.isArray(message.configs) ? message.configs : [])
           if (Array.isArray(message.specializations)) setSpecializations(message.specializations)
+          setSkills(Array.isArray(message.skills) ? message.skills : [])
+          setSkillOverrides(Array.isArray(message.skillOverrides) ? message.skillOverrides : [])
+        } else if (message.type === 'skills') {
+          setSkills(Array.isArray(message.skills) ? message.skills : [])
+          setSkillOverrides(Array.isArray(message.overrides) ? message.overrides : [])
         } else if (message.type === 'agent') {
           setAgents((prev) =>
             prev.some((a) => a.id === message.agent.id)
@@ -105,5 +114,5 @@ export function useServer() {
     return () => listeners.current.delete(listener)
   }, [])
 
-  return { status, agents, workspace, tasks, missions, history, configs, allConfigs, specializations, send, subscribe }
+  return { status, agents, workspace, tasks, missions, history, configs, allConfigs, specializations, skills, skillOverrides, send, subscribe }
 }

@@ -34,6 +34,8 @@ function App() {
     configs,
     allConfigs,
     specializations,
+    skills,
+    skillOverrides,
     send,
     subscribe,
   } = useServer()
@@ -376,6 +378,8 @@ function App() {
                 configs={configs}
                 allConfigs={allConfigs}
                 specializations={specializations}
+                skills={skills}
+                skillOverrides={skillOverrides}
                 online={online}
                 send={send}
                 subscribe={subscribe}

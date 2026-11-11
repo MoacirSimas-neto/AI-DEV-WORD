@@ -8,12 +8,15 @@ import type {
   ProviderId,
   ReasoningEffort,
   RoleCategory,
+  SkillAgentOverride,
+  SkillInfo,
   SpecializationId,
   SpecializationInfo,
 } from '../../../shared/protocol.ts'
 import { AVATAR_PRESET_OPTIONS } from '../game/agentLooks.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
+import { SkillsPanel } from './SkillsPanel.tsx'
 
 type PortraitAnimMode = 'static' | 'idle' | 'walk' | 'work'
 
@@ -22,6 +25,8 @@ interface Props {
   configs: AgentConfig[]
   allConfigs?: AgentConfig[]
   specializations?: SpecializationInfo[]
+  skills?: SkillInfo[]
+  skillOverrides?: SkillAgentOverride[]
   online: boolean
   send: Send
   subscribe?: Subscribe
@@ -132,6 +137,8 @@ export function AgentCenter({
   configs,
   allConfigs,
   specializations,
+  skills = [],
+  skillOverrides = [],
   online,
   send,
   subscribe,
@@ -363,6 +370,8 @@ export function AgentCenter({
           </button>
         </div>
       )}
+
+      <SkillsPanel skills={skills} overrides={skillOverrides} agents={allConfigs ?? configs} online={online} send={send} />
 
       {/* Barra de Perfis e Filtros */}
       <div className="agent-toolbar-row">
