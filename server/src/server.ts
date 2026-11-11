@@ -29,6 +29,7 @@ import type { GitService } from './git/service.ts'
 import type { HistoryStore } from './history/store.ts'
 import { HUMAN, type MemoryStore } from './memory/store.ts'
 import type { ProjectStore } from './projects/store.ts'
+import type { SkillStore } from './skills/store.ts'
 import type { TaskStore } from './tasks/store.ts'
 import type { TeamRunner } from './team/runner.ts'
 import type { TerminalManager } from './terminal/manager.ts'
@@ -43,6 +44,8 @@ export interface AppServerOptions {
   team: TeamRunner
   agentConfigs: AgentConfigStore
   memory: MemoryStore
+  /** Sem registro de skills, as mensagens de skill são ignoradas. */
+  skills?: SkillStore
   allowedOrigins: string[]
 }
 
@@ -294,6 +297,42 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { type: 'agents-list' }
     case 'specializations-list':
       return { type: 'specializations-list' }
+    case 'skills-list':
+      return { type: 'skills-list' }
+    case 'skill-save': {
+      if (typeof msg.skill !== 'object' || msg.skill === null) return null
+      const s = msg.skill as Record<string, unknown>
+      const optional = (v: unknown, max: number) => v === undefined || (typeof v === 'string' && v.length <= max)
+      if (typeof s.id !== 'string' || s.id.length > 40) return null
+      if (typeof s.name !== 'string' || s.name.length > 200) return null
+      if (typeof s.content !== 'string' || s.content.length > 20_000) return null
+      if (!optional(s.description, 1000) || !optional(s.origin, 1000) || !optional(s.version, 100)) return null
+      if (s.mode !== undefined && s.mode !== 'context' && s.mode !== 'native') return null
+      if (s.enabled !== undefined && typeof s.enabled !== 'boolean') return null
+      return {
+        type: 'skill-save',
+        skill: {
+          id: s.id,
+          name: s.name,
+          content: s.content,
+          description: s.description as string | undefined,
+          origin: s.origin as string | undefined,
+          version: s.version as string | undefined,
+          mode: s.mode,
+          enabled: s.enabled,
+        },
+      }
+    }
+    case 'skill-set-enabled':
+      return typeof msg.id === 'string' && typeof msg.enabled === 'boolean'
+        ? { type: 'skill-set-enabled', id: msg.id, enabled: msg.enabled }
+        : null
+    case 'skill-set-agent':
+      return typeof msg.agentId === 'string' &&
+        typeof msg.skillId === 'string' &&
+        (msg.state === 'inherit' || msg.state === 'on' || msg.state === 'off')
+        ? { type: 'skill-set-agent', agentId: msg.agentId, skillId: msg.skillId, state: msg.state }
+        : null
     default:
       return null
   }
@@ -311,6 +350,7 @@ export function createAppServer({
   team,
   agentConfigs,
   memory,
+  skills,
   allowedOrigins,
 }: AppServerOptions): Server {
   for (const cfg of agentConfigs.list()) {
@@ -708,6 +748,31 @@ export function createAppServer({
           specializations: defaultSpecializations.list(),
         })
         break
+      case 'skills-list':
+        if (skills) send(socket, { type: 'skills', skills: skills.list(), overrides: skills.overrides() })
+        break
+      case 'skill-save':
+      case 'skill-set-enabled':
+      case 'skill-set-agent':
+        // Só a interface muda skills: agentes não têm como registrar nem ativar instruções.
+        if (!skills) break
+        try {
+          if (message.type === 'skill-save') {
+            const saved = skills.save(message.skill)
+            history.add({ kind: 'agent', message: `Skill salva: ${saved.name} (${saved.id}) · versão ${saved.version} · ${saved.hash.slice(0, 12)}` })
+          } else if (message.type === 'skill-set-enabled') {
+            const saved = skills.setEnabled(message.id, message.enabled)
+            history.add({ kind: 'agent', message: `Skill ${saved.name} ${saved.enabled ? 'ativada' : 'desativada'} para todos os agentes.` })
+          } else {
+            if (!agentConfigs.find(message.agentId)) throw new Error(`Agente não encontrado: "${message.agentId}".`)
+            skills.setAgent(message.agentId, message.skillId, message.state)
+            const label = { inherit: 'herda a configuração global', on: 'ativada', off: 'desativada' }[message.state]
+            history.add({ kind: 'agent', message: `Skill ${message.skillId} em ${message.agentId}: ${label}.`, agentId: message.agentId })
+          }
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
     }
   }
 
@@ -722,6 +787,8 @@ export function createAppServer({
       configs: agentConfigs.list(),
       allConfigs: agentConfigs.list({ includeInactive: true }),
       specializations: defaultSpecializations.list(),
+      skills: skills?.list() ?? [],
+      skillOverrides: skills?.overrides() ?? [],
     })
     socket.on('message', (raw) => {
       const message = parseClientMessage(raw.toString())
@@ -744,6 +811,7 @@ export function createAppServer({
       allConfigs: agentConfigs.list({ includeInactive: true }),
     })
   }
+  const onSkills = () => skills && broadcast({ type: 'skills', skills: skills.list(), overrides: skills.overrides() })
   const onMemory = (projectId: number) => broadcast({ type: 'memory-changed', projectId })
   const onMissionOutput = (missionId: number, data: string) => broadcast({ type: 'mission-output', missionId, data })
   const onGitChange = async (event: { agentId?: string; cwd: string; files: string[]; summary: string }) => {
@@ -762,6 +830,7 @@ export function createAppServer({
   history.on('added', onHistory)
   agentConfigs.on('change', onConfigs)
   memory.on('change', onMemory)
+  skills?.on('change', onSkills)
   team.on('output', onMissionOutput)
   team.on('git-change', onGitChange)
 
@@ -775,6 +844,7 @@ export function createAppServer({
     history.off('added', onHistory)
     agentConfigs.off('change', onConfigs)
     memory.off('change', onMemory)
+    skills?.off('change', onSkills)
     team.off('output', onMissionOutput)
     team.off('git-change', onGitChange)
     for (const client of wss.clients) client.terminate()

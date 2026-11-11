@@ -9,6 +9,7 @@ import { HistoryStore } from './history/store.ts'
 import { MemoryStore } from './memory/store.ts'
 import { ProjectStore } from './projects/store.ts'
 import { createAppServer } from './server.ts'
+import { SkillStore } from './skills/store.ts'
 import { TaskStore } from './tasks/store.ts'
 import { agyEffortArgs, TeamRunner } from './team/runner.ts'
 import { TerminalManager } from './terminal/manager.ts'
@@ -20,6 +21,7 @@ const history = new HistoryStore(projects.db)
 const tasks = new TaskStore(projects.db, history)
 const agentConfigs = new AgentConfigStore(projects.db)
 const memory = new MemoryStore(projects.db, history)
+const skills = new SkillStore(projects.db)
 const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
 
 // Sincroniza agentes personalizados e o CLI de cada agente conforme a configuração persistida
@@ -69,6 +71,7 @@ const team = new TeamRunner({
   git,
   configs: agentConfigs,
   memory,
+  skills,
   launch: (cli, args, options) => {
     const executable = findCli(cli)
     if (!executable) throw new Error(`CLI "${cli}" não encontrado no PATH.`)
@@ -88,6 +91,7 @@ const server = createAppServer({
   team,
   agentConfigs,
   memory,
+  skills,
   allowedOrigins: ALLOWED_ORIGINS,
 })
 

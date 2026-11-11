@@ -16,6 +16,7 @@ import { HistoryStore } from './history/store.ts'
 import { MemoryStore } from './memory/store.ts'
 import { ProjectStore } from './projects/store.ts'
 import { createAppServer, parseClientMessage } from './server.ts'
+import { SkillStore } from './skills/store.ts'
 import { TaskStore } from './tasks/store.ts'
 import { TeamRunner } from './team/runner.ts'
 import { TerminalManager } from './terminal/manager.ts'
@@ -28,6 +29,7 @@ const history = new HistoryStore(projects.db)
 const tasks = new TaskStore(projects.db, history)
 const agentConfigs = new AgentConfigStore(projects.db)
 const memory = new MemoryStore(projects.db, history)
+const skills = new SkillStore(projects.db)
 const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: 'fake 1.0', auth: 'ok' }))
 const git = new GitService()
 const team = new TeamRunner({
@@ -68,6 +70,7 @@ const server = createAppServer({
   team,
   agentConfigs,
   memory,
+  skills,
   allowedOrigins: [ORIGIN],
 })
 let port = 0
@@ -477,5 +480,39 @@ test('WebSocket de memória: listar com filtros, aprovar, rejeitar e substituir 
   assert.equal(versionsMsg.versions[0].id, created.id)
   assert.equal(versionsMsg.versions[1].content, 'Arquitetura: monolito modular Node e SQLite local')
 
+  client.socket.close()
+})
+
+test('WebSocket de skills: snapshot, ativação global, ajuste por agente, criação e mensagens inválidas', async () => {
+  const client = await connect()
+  const snapshot = await client.waitFor('snapshot')
+  assert.deepEqual(snapshot.skills!.map((s) => [s.id, s.enabled]), [['ponytail', true], ['caveman-lite', true]])
+  assert.deepEqual(snapshot.skillOverrides, [{ agentId: 'tutor', skillId: 'caveman-lite', state: 'off' }])
+
+  client.send({ type: 'skill-set-enabled', id: 'caveman-lite', enabled: false })
+  assert.equal((await client.waitFor('skills')).skills.find((s) => s.id === 'caveman-lite')!.enabled, false)
+
+  client.send({ type: 'skill-set-agent', agentId: 'qa', skillId: 'caveman-lite', state: 'on' })
+  assert.ok((await client.waitFor('skills')).overrides.some((o) => o.agentId === 'qa' && o.state === 'on'))
+  client.send({ type: 'skill-set-agent', agentId: 'qa', skillId: 'caveman-lite', state: 'inherit' })
+  assert.equal((await client.waitFor('skills')).overrides.some((o) => o.agentId === 'qa'), false)
+
+  client.send({ type: 'skill-save', skill: { id: 'estilo-local', name: 'Estilo local', content: 'Prefira funções puras. token=abcd1234efgh' } })
+  const created = (await client.waitFor('skills')).skills.find((s) => s.id === 'estilo-local')!
+  assert.equal(created.content, 'Prefira funções puras. token=[SEGREDO REMOVIDO]')
+  assert.equal(created.enabled, false)
+
+  // Erros voltam só para quem pediu e não mudam nada.
+  client.send({ type: 'skill-set-agent', agentId: 'fantasma', skillId: 'ponytail', state: 'off' })
+  assert.match((await client.waitFor('notice')).message, /Agente não encontrado/)
+  client.send({ type: 'skill-set-enabled', id: 'nao-existe', enabled: true })
+  assert.match((await client.waitFor('notice')).message, /Skill não encontrada/)
+
+  assert.equal(parseClientMessage(JSON.stringify({ type: 'skill-set-agent', agentId: 'qa', skillId: 'ponytail', state: 'force' })), null)
+  assert.equal(parseClientMessage(JSON.stringify({ type: 'skill-save', skill: { id: 'x1', name: 'X', content: 'a', mode: 'shell' } })), null)
+  assert.equal(parseClientMessage(JSON.stringify({ type: 'skill-save', skill: { id: 'x1', name: 'X', content: 'a'.repeat(20_001) } })), null)
+  assert.equal(parseClientMessage(JSON.stringify({ type: 'skill-set-enabled', id: 'ponytail', enabled: 'yes' })), null)
+
+  skills.setEnabled('caveman-lite', true)
   client.socket.close()
 })

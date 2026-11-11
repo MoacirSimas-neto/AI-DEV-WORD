@@ -15,6 +15,8 @@ export interface PromptSpecializationOptions {
   registry?: SpecializationRegistry
   /** Bloco de memória aprovada do projeto, já selecionado para este agente e tarefa. */
   memory?: string
+  /** Bloco de skills já composto (composeSkills): fica abaixo do papel e acima das instruções personalizadas. */
+  skills?: string
   includeDossier?: boolean
   includeReferences?: boolean
 }
@@ -51,6 +53,7 @@ function buildKnowledgeSection(
       `## Diretrizes e Protocolo da Especialização (${resolved.specialization.name} — ${resolved.specialization.codename})\n\n${resolved.promptBlock}`,
     )
   }
+  if (opts?.skills) parts.push(opts.skills)
   const rawCustom = (opts?.customInstructions ?? '').trim()
   if (rawCustom) {
     const cleanCustom = sanitizeAgentMarkdown(redact(rawCustom)).slice(0, MAX_INSTRUCTIONS_LEN).trim()

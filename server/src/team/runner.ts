@@ -10,6 +10,7 @@ import type {
   MissionSpecialistSelection,
   MissionTeamSelection,
   ProviderId,
+  SkillApplication,
   SpecializationId,
   SpecialistResult,
   TaskInfo,
@@ -24,6 +25,7 @@ import { cleanOutput, type HistoryStore, redact } from '../history/store.ts'
 import { buildMemoryContext } from '../memory/context.ts'
 import type { MemoryStore } from '../memory/store.ts'
 import type { ProjectStore } from '../projects/store.ts'
+import { composeSkills, type SkillStore } from '../skills/store.ts'
 import { OPEN_PHASES, type TaskStore } from '../tasks/store.ts'
 import {
   devPrompt,
@@ -79,6 +81,7 @@ export interface TeamOptions {
   configs?: AgentConfigStore
   specializations?: SpecializationRegistry
   memory?: MemoryStore
+  skills?: SkillStore
   stepTimeoutMs?: number
 }
 
@@ -161,6 +164,7 @@ export class TeamRunner extends EventEmitter {
   private readonly launch: AgentLauncher
   private readonly configs?: AgentConfigStore
   private readonly memory?: MemoryStore
+  private readonly skills?: SkillStore
   private readonly specializations: SpecializationRegistry
   private readonly stepTimeoutMs: number
   private running: Running | null = null
@@ -177,6 +181,7 @@ export class TeamRunner extends EventEmitter {
     this.launch = options.launch
     this.configs = options.configs
     this.memory = options.memory
+    this.skills = options.skills
     this.specializations = options.specializations ?? defaultSpecializations
     this.stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   }
@@ -331,6 +336,7 @@ export class TeamRunner extends EventEmitter {
         customInstructions: cfg?.customInstructions,
         registry: this.specializations,
         memory,
+        skills: this.skillsBlock(missionId, plannerId, 'planning'),
       },
       asked,
       canAsk,
@@ -398,6 +404,7 @@ export class TeamRunner extends EventEmitter {
         customInstructions: sCfg?.customInstructions,
         registry: this.specializations,
         memory: sMemory,
+        skills: this.skillsBlock(missionId, spec.agentId, 'pre-dev'),
       })
 
       const analysis = await this.step(
@@ -467,6 +474,7 @@ export class TeamRunner extends EventEmitter {
           customInstructions: devCfg?.customInstructions,
           registry: this.specializations,
           memory: devMemory,
+          skills: this.skillsBlock(missionId, devId, 'developing'),
         },
         rework,
         preDevContext || undefined,
@@ -533,6 +541,7 @@ export class TeamRunner extends EventEmitter {
           customInstructions: sCfg?.customInstructions,
           registry: this.specializations,
           memory: sMemory,
+          skills: this.skillsBlock(missionId, spec.agentId, 'post-dev'),
         })
 
         const reviewAnalysis = await this.step(
@@ -594,6 +603,7 @@ export class TeamRunner extends EventEmitter {
         customInstructions: qaCfg?.customInstructions,
         registry: this.specializations,
         memory: qaMemory,
+        skills: this.skillsBlock(missionId, qaId, 'reviewing'),
       }
       // shortcut: na linha de comando o parecer anterior vai só com o começo (onde ficam os achados); sem limite quando o agy aceitar prompt por stdin.
       const qaRework = rework && qaConfig.passPromptAsArg ? { ...rework, review: rework.review.slice(0, 8000) } : rework
@@ -751,6 +761,27 @@ export class TeamRunner extends EventEmitter {
     }
   }
 
+  /**
+   * Skills que este agente recebe nesta execução, nas versões congeladas no início da
+   * missão. Grava na missão o estado de cada uma (auditoria). Missões sem snapshot
+   * de skills (anteriores à Etapa 8) seguem sem skills.
+   */
+  private skillsBlock(missionId: number, agentId: string, stage: string): string {
+    const mission = this.requireMission(missionId)
+    const refs = mission.teamSnapshot?.[agentId]?.skills ?? []
+    if (!this.skills || refs.length === 0) return ''
+    const { block, result } = composeSkills(refs, (hash) => this.skills!.content(hash))
+    const at = new Date().toISOString()
+    const applications: SkillApplication[] = result.map((ref) => ({ ...ref, agentId, stage, at }))
+    this.tasks.updateMission(missionId, { skillApplications: [...(mission.skillApplications ?? []), ...applications] })
+    for (const a of applications) {
+      if (a.state === 'failed' || a.state === 'incompatible') {
+        this.log(mission, 'error', `Skill "${a.name}" não aplicada a ${agentId} (${stage}): ${a.reason}`, agentId)
+      }
+    }
+    return block
+  }
+
   private missionTeam(mission: Pick<MissionInfo, 'plannerId' | 'devId' | 'qaId' | 'specialists'>): [string, string, string, MissionSpecialistSelection[]] {
     return [mission.plannerId || 'architect', mission.devId || 'dev', mission.qaId || 'qa', mission.specialists ?? []]
   }
@@ -882,6 +913,7 @@ export class TeamRunner extends EventEmitter {
         reasoningEffort: cfg?.reasoningEffort ?? 'default',
         specializationId: cfg?.specializationId ?? slot.defaultSpec,
         customInstructions: cfg?.customInstructions ? redact(cfg.customInstructions) : '',
+        ...(this.skills ? { skills: this.skills.resolveFor(slot.agentId) } : {}),
       }
     }
 
