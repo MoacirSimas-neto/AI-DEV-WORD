@@ -6,6 +6,7 @@ import type {
   ClientMessage,
   MissionInfo,
   ServerMessage,
+  SpecializationInfo,
   TaskInfo,
   Workspace,
 } from '../../../shared/protocol.ts'
@@ -31,6 +32,8 @@ export function useServer() {
   const [missions, setMissions] = useState<MissionInfo[]>([])
   const [history, setHistory] = useState<ActivityEntry[]>([])
   const [configs, setConfigs] = useState<AgentConfig[]>([])
+  const [allConfigs, setAllConfigs] = useState<AgentConfig[]>([])
+  const [specializations, setSpecializations] = useState<SpecializationInfo[]>([])
   const socketRef = useRef<WebSocket | null>(null)
   const listeners = useRef(new Set<MessageListener>())
 
@@ -51,8 +54,16 @@ export function useServer() {
           setMissions(Array.isArray(message.missions) ? message.missions : [])
           setHistory(Array.isArray(message.history) ? message.history : [])
           setConfigs(Array.isArray(message.configs) ? message.configs : [])
+          setAllConfigs(Array.isArray(message.allConfigs) ? message.allConfigs : Array.isArray(message.configs) ? message.configs : [])
+          if (Array.isArray(message.specializations)) setSpecializations(message.specializations)
         } else if (message.type === 'agent') {
-          setAgents((prev) => prev.map((a) => (a.id === message.agent.id ? message.agent : a)))
+          setAgents((prev) =>
+            prev.some((a) => a.id === message.agent.id)
+              ? prev.map((a) => (a.id === message.agent.id ? message.agent : a))
+              : [...prev, message.agent],
+          )
+        } else if (message.type === 'agents') {
+          setAgents(Array.isArray(message.agents) ? message.agents : [])
         } else if (message.type === 'workspace') {
           setWorkspace(message.workspace ?? EMPTY_WORKSPACE)
         } else if (message.type === 'tasks') {
@@ -63,6 +74,9 @@ export function useServer() {
           setHistory(Array.isArray(message.entries) ? message.entries : [])
         } else if (message.type === 'agent-configs') {
           setConfigs(Array.isArray(message.configs) ? message.configs : [])
+          setAllConfigs(Array.isArray(message.allConfigs) ? message.allConfigs : Array.isArray(message.configs) ? message.configs : [])
+        } else if (message.type === 'specializations') {
+          setSpecializations(Array.isArray(message.specializations) ? message.specializations : [])
         }
         for (const listener of listeners.current) listener(message)
       }
@@ -91,5 +105,5 @@ export function useServer() {
     return () => listeners.current.delete(listener)
   }, [])
 
-  return { status, agents, workspace, tasks, missions, history, configs, send, subscribe }
+  return { status, agents, workspace, tasks, missions, history, configs, allConfigs, specializations, send, subscribe }
 }

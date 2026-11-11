@@ -9,6 +9,8 @@ import type {
   AgentProfileId,
   CliId,
   ClientMessage,
+  CustomAgentInput,
+  CustomAgentPatch,
   ProviderId,
   ReasoningEffort,
   ServerMessage,
@@ -18,6 +20,7 @@ import type {
 } from '../../shared/protocol.ts'
 import type { AgentConfigStore } from './agents/configStore.ts'
 import type { AgentRegistry } from './agents/registry.ts'
+import { defaultSpecializations } from './agents/specializations.ts'
 import type { GitService } from './git/service.ts'
 import type { HistoryStore } from './history/store.ts'
 import type { ProjectStore } from './projects/store.ts'
@@ -163,8 +166,26 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     }
     case 'task-delete':
       return isId(msg.taskId) ? { type: 'task-delete', taskId: msg.taskId } : null
-    case 'mission-start':
-      return isId(msg.taskId) ? { type: 'mission-start', taskId: msg.taskId } : null
+    case 'mission-start': {
+      if (!isId(msg.taskId)) return null
+      if (msg.team !== undefined) {
+        if (typeof msg.team !== 'object' || msg.team === null) return null
+        const tm = msg.team as Record<string, unknown>
+        if (tm.plannerId !== undefined && typeof tm.plannerId !== 'string') return null
+        if (tm.devId !== undefined && typeof tm.devId !== 'string') return null
+        if (tm.qaId !== undefined && typeof tm.qaId !== 'string') return null
+        return {
+          type: 'mission-start',
+          taskId: msg.taskId,
+          team: {
+            ...(tm.plannerId ? { plannerId: tm.plannerId } : {}),
+            ...(tm.devId ? { devId: tm.devId } : {}),
+            ...(tm.qaId ? { qaId: tm.qaId } : {}),
+          },
+        }
+      }
+      return { type: 'mission-start', taskId: msg.taskId }
+    }
     case 'mission-approve':
     case 'mission-cancel':
       return isId(msg.missionId) ? { type: msg.type, missionId: msg.missionId } : null
@@ -190,6 +211,32 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         : null
     case 'agent-config-reset':
       return { type: 'agent-config-reset' }
+    case 'agent-create': {
+      if (typeof msg.agent !== 'object' || msg.agent === null) return null
+      const a = msg.agent as Record<string, unknown>
+      if (
+        typeof a.name !== 'string' ||
+        typeof a.role !== 'string' ||
+        typeof a.roleCategory !== 'string' ||
+        typeof a.specializationId !== 'string' ||
+        typeof a.provider !== 'string'
+      ) {
+        return null
+      }
+      return { type: 'agent-create', agent: a as unknown as CustomAgentInput }
+    }
+    case 'agent-update':
+      return typeof msg.agentId === 'string' && typeof msg.patch === 'object' && msg.patch !== null
+        ? { type: 'agent-update', agentId: msg.agentId, patch: msg.patch as CustomAgentPatch }
+        : null
+    case 'agent-set-active':
+      return typeof msg.agentId === 'string' && typeof msg.active === 'boolean'
+        ? { type: 'agent-set-active', agentId: msg.agentId, active: msg.active }
+        : null
+    case 'agents-list':
+      return { type: 'agents-list' }
+    case 'specializations-list':
+      return { type: 'specializations-list' }
     default:
       return null
   }
@@ -439,7 +486,7 @@ export function createAppServer({
         }
         break
       case 'mission-start':
-        team.start(message.taskId).catch((error) => {
+        team.start(message.taskId, message.team).catch((error) => {
           send(socket, { type: 'notice', message: errorText(error) })
         })
         break
@@ -462,6 +509,7 @@ export function createAppServer({
           history.add({
             kind: 'agent',
             message: `Configuração atualizada (${message.config.agentId}): ${message.config.provider} · ${message.config.model} · esforço ${message.config.reasoningEffort}`,
+            agentId: message.config.agentId,
           })
         } catch (error) {
           send(socket, { type: 'notice', message: errorText(error) })
@@ -495,6 +543,59 @@ export function createAppServer({
           send(socket, { type: 'notice', message: errorText(error) })
         }
         break
+      case 'agent-create':
+        try {
+          const created = agentConfigs.createAgent(message.agent)
+          history.add({
+            kind: 'agent',
+            message: `Agente personalizado criado: ${created.name} (${created.agentId}) · ${created.provider}/${created.model}`,
+            agentId: created.agentId,
+          })
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'agent-update':
+        try {
+          const before = agentConfigs.find(message.agentId)
+          const updated = agentConfigs.updateAgent(message.agentId, message.patch)
+          if (before && before.provider !== updated.provider && updated.active !== false) {
+            registry.setCli(updated.agentId, providerToCli(updated.provider))
+          }
+          history.add({
+            kind: 'agent',
+            message: `Agente atualizado: ${updated.name} (${updated.agentId}) · ${updated.provider}/${updated.model}`,
+            agentId: updated.agentId,
+          })
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'agent-set-active':
+        try {
+          const updated = agentConfigs.setAgentActive(message.agentId, message.active)
+          history.add({
+            kind: 'agent',
+            message: `Agente ${updated.name} (${updated.agentId}) ${updated.active ? 'ativado' : 'desativado'}.`,
+            agentId: updated.agentId,
+          })
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'agents-list':
+        send(socket, {
+          type: 'agent-configs',
+          configs: agentConfigs.list(),
+          allConfigs: agentConfigs.list({ includeInactive: true }),
+        })
+        break
+      case 'specializations-list':
+        send(socket, {
+          type: 'specializations',
+          specializations: defaultSpecializations.list(),
+        })
+        break
     }
   }
 
@@ -507,6 +608,8 @@ export function createAppServer({
       missions: tasks.listMissions(),
       history: history.list(),
       configs: agentConfigs.list(),
+      allConfigs: agentConfigs.list({ includeInactive: true }),
+      specializations: defaultSpecializations.list(),
     })
     socket.on('message', (raw) => {
       const message = parseClientMessage(raw.toString())
@@ -515,12 +618,20 @@ export function createAppServer({
   })
 
   const onAgent = (agent: AgentInfo) => broadcast({ type: 'agent', agent })
+  const onAgentList = (agents: AgentInfo[]) => broadcast({ type: 'agents', agents })
   const onData = (agentId: string, data: string) => broadcast({ type: 'term-data', agentId, data })
   const onExit = (agentId: string, code: number) => broadcast({ type: 'term-exit', agentId, code })
   const onTasks = () => broadcast({ type: 'tasks', tasks: tasks.list() })
   const onMissions = () => broadcast({ type: 'missions', missions: tasks.listMissions() })
   const onHistory = () => broadcast({ type: 'history', entries: history.list() })
-  const onConfigs = (configs: AgentConfig[]) => broadcast({ type: 'agent-configs', configs })
+  const onConfigs = (configs: AgentConfig[]) => {
+    registry.syncFromConfigs(configs)
+    broadcast({
+      type: 'agent-configs',
+      configs,
+      allConfigs: agentConfigs.list({ includeInactive: true }),
+    })
+  }
   const onMissionOutput = (missionId: number, data: string) => broadcast({ type: 'mission-output', missionId, data })
   const onGitChange = async (event: { agentId?: string; cwd: string; files: string[]; summary: string }) => {
     broadcast({ type: 'git-activity', summary: event.summary, files: event.files, agentId: event.agentId })
@@ -530,6 +641,7 @@ export function createAppServer({
   }
 
   registry.on('change', onAgent)
+  registry.on('list', onAgentList)
   terminals.on('data', onData)
   terminals.on('exit', onExit)
   tasks.on('tasks', onTasks)
@@ -541,6 +653,7 @@ export function createAppServer({
 
   server.on('close', () => {
     registry.off('change', onAgent)
+    registry.off('list', onAgentList)
     terminals.off('data', onData)
     terminals.off('exit', onExit)
     tasks.off('tasks', onTasks)

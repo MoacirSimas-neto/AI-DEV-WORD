@@ -1,6 +1,13 @@
 import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
-import type { MissionInfo, MissionPhase, TaskInfo, TaskInput, TaskStatus } from '../../../shared/protocol.ts'
+import type {
+  AgentSnapshotEntry,
+  MissionInfo,
+  MissionPhase,
+  TaskInfo,
+  TaskInput,
+  TaskStatus,
+} from '../../../shared/protocol.ts'
 import type { HistoryStore } from '../history/store.ts'
 
 const SCHEMA = `
@@ -20,10 +27,15 @@ const SCHEMA = `
     task_id INTEGER NOT NULL,
     project_id INTEGER NOT NULL,
     phase TEXT NOT NULL,
+    planner_id TEXT NOT NULL DEFAULT 'architect',
+    dev_id TEXT NOT NULL DEFAULT 'dev',
+    qa_id TEXT NOT NULL DEFAULT 'qa',
     plan TEXT NOT NULL DEFAULT '',
     dev_report TEXT NOT NULL DEFAULT '',
     review TEXT NOT NULL DEFAULT '',
     verdict TEXT,
+    verdict_detail TEXT,
+    team_snapshot TEXT NOT NULL DEFAULT '{}',
     files TEXT NOT NULL DEFAULT '[]',
     error TEXT,
     created_at TEXT NOT NULL,
@@ -33,6 +45,14 @@ const SCHEMA = `
   CREATE UNIQUE INDEX IF NOT EXISTS missions_one_open_per_task ON missions (task_id)
     WHERE phase IN ('planning', 'awaiting_approval', 'developing', 'reviewing');
 `
+
+const EXTRA_MISSION_COLUMNS: [string, string][] = [
+  ['planner_id', "TEXT NOT NULL DEFAULT 'architect'"],
+  ['dev_id', "TEXT NOT NULL DEFAULT 'dev'"],
+  ['qa_id', "TEXT NOT NULL DEFAULT 'qa'"],
+  ['verdict_detail', 'TEXT'],
+  ['team_snapshot', "TEXT NOT NULL DEFAULT '{}'"],
+]
 
 export const OPEN_PHASES: MissionPhase[] = ['planning', 'awaiting_approval', 'developing', 'reviewing']
 /** Fases em que um processo de CLI está rodando (não sobrevivem a um reinício). */
@@ -47,22 +67,79 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const TASK_COLUMNS = `id, project_id AS projectId, title, description, priority, status, agent_id AS agentId,
   created_at AS createdAt, updated_at AS updatedAt`
-const MISSION_COLUMNS = `id, task_id AS taskId, project_id AS projectId, phase, plan, dev_report AS devReport,
-  review, verdict, files, error, created_at AS createdAt, updated_at AS updatedAt`
+const MISSION_COLUMNS = `id, task_id AS taskId, project_id AS projectId, phase,
+  planner_id AS plannerId, dev_id AS devId, qa_id AS qaId,
+  plan, dev_report AS devReport, review, verdict, verdict_detail AS verdictDetail,
+  team_snapshot AS teamSnapshot, files, error, created_at AS createdAt, updated_at AS updatedAt`
 
-type MissionPatch = Partial<Pick<MissionInfo, 'phase' | 'plan' | 'devReport' | 'review' | 'verdict' | 'files' | 'error'>>
+type MissionPatch = Partial<
+  Pick<
+    MissionInfo,
+    | 'phase'
+    | 'plannerId'
+    | 'devId'
+    | 'qaId'
+    | 'plan'
+    | 'devReport'
+    | 'review'
+    | 'verdict'
+    | 'verdictDetail'
+    | 'teamSnapshot'
+    | 'files'
+    | 'error'
+  >
+>
+
 const MISSION_FIELDS: Record<keyof MissionPatch, string> = {
   phase: 'phase',
+  plannerId: 'planner_id',
+  devId: 'dev_id',
+  qaId: 'qa_id',
   plan: 'plan',
   devReport: 'dev_report',
   review: 'review',
   verdict: 'verdict',
+  verdictDetail: 'verdict_detail',
+  teamSnapshot: 'team_snapshot',
   files: 'files',
   error: 'error',
 }
 
-const toMission = (row: Record<string, unknown>): MissionInfo =>
-  ({ ...row, files: JSON.parse(String(row.files)) }) as unknown as MissionInfo
+function parseJsonSafe<T>(raw: unknown, fallback: T): T {
+  if (typeof raw !== 'string' || !raw.trim()) return fallback
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
+const toMission = (row: Record<string, unknown>): MissionInfo => ({
+  id: Number(row.id),
+  taskId: Number(row.taskId),
+  projectId: Number(row.projectId),
+  phase: row.phase as MissionPhase,
+  plannerId: String(row.plannerId || 'architect'),
+  devId: String(row.devId || 'dev'),
+  qaId: String(row.qaId || 'qa'),
+  plan: String(row.plan ?? ''),
+  devReport: String(row.devReport ?? ''),
+  review: String(row.review ?? ''),
+  verdict: (row.verdict as 'approved' | 'changes' | null) ?? null,
+  verdictDetail: (row.verdictDetail as string | null) ?? null,
+  teamSnapshot: parseJsonSafe<Record<string, AgentSnapshotEntry>>(row.teamSnapshot, {}),
+  files: parseJsonSafe<string[]>(row.files, []),
+  error: (row.error as string | null) ?? null,
+  createdAt: String(row.createdAt ?? ''),
+  updatedAt: String(row.updatedAt ?? ''),
+})
+
+export interface CreateMissionOptions {
+  plannerId?: string
+  devId?: string
+  qaId?: string
+  teamSnapshot?: Record<string, AgentSnapshotEntry>
+}
 
 /**
  * Tarefas e missões do modo equipe, no mesmo SQLite dos projetos.
@@ -78,6 +155,26 @@ export class TaskStore extends EventEmitter {
     this.db = db
     this.history = history
     this.db.exec(SCHEMA)
+    this.migrateMissions()
+  }
+
+  /** Migração incremental e idempotente para preservar missões antigas em bancos existentes. */
+  private migrateMissions() {
+    const info = this.db.prepare('PRAGMA table_info(missions)').all() as { name: string }[]
+    const existingCols = new Set(info.map((c) => c.name))
+
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      for (const [col, def] of EXTRA_MISSION_COLUMNS) {
+        if (!existingCols.has(col)) {
+          this.db.exec(`ALTER TABLE missions ADD COLUMN ${col} ${def}`)
+        }
+      }
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
   }
 
   list(): TaskInfo[] {
@@ -162,12 +259,19 @@ export class TaskStore extends EventEmitter {
       .map(toMission)
   }
 
-  createMission(taskId: number, projectId: number): MissionInfo {
+  createMission(taskId: number, projectId: number, options?: CreateMissionOptions): MissionInfo {
     const now = new Date().toISOString()
+    const plannerId = (options?.plannerId ?? 'architect').trim() || 'architect'
+    const devId = (options?.devId ?? 'dev').trim() || 'dev'
+    const qaId = (options?.qaId ?? 'qa').trim() || 'qa'
+    const teamSnapshot = JSON.stringify(options?.teamSnapshot ?? {})
     try {
       const result = this.db
-        .prepare('INSERT INTO missions (task_id, project_id, phase, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-        .run(taskId, projectId, 'planning', now, now)
+        .prepare(
+          `INSERT INTO missions (task_id, project_id, phase, planner_id, dev_id, qa_id, team_snapshot, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(taskId, projectId, 'planning', plannerId, devId, qaId, teamSnapshot, now, now)
       this.emit('missions')
       return this.getMission(Number(result.lastInsertRowid))!
     } catch (error) {
@@ -178,7 +282,11 @@ export class TaskStore extends EventEmitter {
 
   updateMission(missionId: number, patch: MissionPatch): MissionInfo {
     const keys = Object.keys(patch) as (keyof MissionPatch)[]
-    const values = keys.map((k) => (k === 'files' ? JSON.stringify(patch.files) : (patch[k] as string | null)))
+    const values = keys.map((k) => {
+      if (k === 'files') return JSON.stringify(patch.files)
+      if (k === 'teamSnapshot') return JSON.stringify(patch.teamSnapshot)
+      return patch[k] as string | null
+    })
     this.db
       .prepare(`UPDATE missions SET ${keys.map((k) => `${MISSION_FIELDS[k]} = ?`).join(', ')}, updated_at = ? WHERE id = ?`)
       .run(...values, new Date().toISOString(), missionId)

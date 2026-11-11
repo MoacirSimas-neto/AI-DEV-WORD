@@ -18,16 +18,6 @@ interface Props {
   onOpenTasks: () => void
 }
 
-const STAGE_AGENT: Record<string, { id: string; label: string }> = {
-  planning: { id: 'architect', label: 'Arquiteto' },
-  awaiting_approval: { id: 'architect', label: 'Arquiteto (aguardando você)' },
-  developing: { id: 'dev', label: 'Desenvolvedor' },
-  reviewing: { id: 'qa', label: 'QA / Revisor' },
-  done: { id: 'qa', label: 'Equipe completa' },
-  failed: { id: 'dev', label: 'Execução interrompida' },
-  cancelled: { id: 'architect', label: 'Cancelada pelo usuário' },
-}
-
 export function MissionMonitor({
   missions,
   tasks,
@@ -72,9 +62,21 @@ export function MissionMonitor({
 
   const progress = computeMissionProgress(currentMission)
   const linkedTask = currentMission ? tasks.find((t) => t.id === currentMission.taskId) : null
-  const activeAgentMeta = currentMission ? STAGE_AGENT[currentMission.phase] : null
-  const activeAgent = activeAgentMeta ? agents.find((a) => a.id === activeAgentMeta.id) : null
-  const activeConfig = activeAgentMeta ? configs.find((c) => c.agentId === activeAgentMeta.id) : null
+  const stageAgentId = currentMission
+    ? (progress.activeAgentId ??
+      (currentMission.phase === 'done'
+        ? (currentMission.qaId || 'qa')
+        : currentMission.phase === 'failed'
+          ? (currentMission.devId || 'dev')
+          : (currentMission.plannerId || 'architect')))
+    : null
+  const snapEntry = stageAgentId ? currentMission?.teamSnapshot?.[stageAgentId] : undefined
+  const activeAgent = stageAgentId ? agents.find((a) => a.id === stageAgentId) : null
+  const activeConfig = stageAgentId ? configs.find((c) => c.agentId === stageAgentId) : null
+  const displayAgentName = snapEntry?.name ?? activeAgent?.name ?? stageAgentId
+  const displayAgentRole = snapEntry?.role ?? activeAgent?.role ?? ''
+  const displayProvider = snapEntry?.provider ?? activeConfig?.provider
+  const displayModel = snapEntry?.model ?? activeConfig?.model
 
   if (collapsed) {
     return (
@@ -157,14 +159,14 @@ export function MissionMonitor({
             )}
 
             {/* Agente responsável na etapa atual */}
-            {activeAgent && (
+            {displayAgentName && (
               <div className="mission-agent-meta">
                 <span>
-                  Agente: <strong>{activeAgent.name}</strong> ({activeAgent.role})
+                  Agente: <strong>{displayAgentName}</strong> {displayAgentRole ? `(${displayAgentRole})` : ''}
                 </span>
-                {activeConfig && (
-                  <span className="mission-model-badge" title="Modelo configurado na Central de Agentes">
-                    Config: {activeConfig.provider} / {activeConfig.model}
+                {displayProvider && displayModel && (
+                  <span className="mission-model-badge" title="Modelo configurado para a missão">
+                    Config: {displayProvider} / {displayModel}
                   </span>
                 )}
               </div>

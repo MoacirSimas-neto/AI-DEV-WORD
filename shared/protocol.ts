@@ -5,12 +5,84 @@ export type CliId = 'codex' | 'gemini' | 'agy'
 export type ProviderId = 'codex' | 'gemini' | 'antigravity'
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'extra-high' | 'default'
 
+export type SpecializationId = 'tech-lead' | 'developer' | 'qa-tester' | 'tutor'
+export type RoleCategory = 'planning' | 'developing' | 'reviewing' | 'teaching'
+export type KnowledgeDocKind = 'agent' | 'principios' | 'dossie' | 'referencias'
+export type AvatarPreset = 'architect' | 'dev' | 'qa' | 'tutor'
+
+export interface SpecializationInfo {
+  id: SpecializationId
+  name: string
+  codename: string
+  roleCategory: RoleCategory
+  description: string
+  defaultAgentId: string
+  knowledgeDir: string | null
+  availableDocs: KnowledgeDocKind[]
+}
+
+export interface MissionTeamSelection {
+  plannerId: string
+  devId: string
+  qaId: string
+}
+
+export interface AgentSnapshotEntry {
+  agentId: string
+  name: string
+  role: string
+  provider: ProviderId
+  model: string
+  reasoningEffort?: ReasoningEffort
+  specializationId: SpecializationId
+  customInstructions?: string
+}
+
 export interface AgentConfig {
   agentId: string
+  name?: string
+  role?: string
+  description?: string
+  roleCategory?: RoleCategory
+  specializationId?: SpecializationId
   provider: ProviderId
   model: string
   reasoningEffort: ReasoningEffort
+  customInstructions?: string
+  avatarPreset?: AvatarPreset
+  active?: boolean
+  isBuiltin?: boolean
+  createdAt?: string
   updatedAt: string
+}
+
+export interface CustomAgentInput {
+  id?: string
+  name: string
+  role: string
+  description?: string
+  roleCategory: RoleCategory
+  specializationId: SpecializationId
+  provider: ProviderId
+  model?: string
+  reasoningEffort?: ReasoningEffort
+  customInstructions?: string
+  avatarPreset?: AvatarPreset
+  active?: boolean
+}
+
+export interface CustomAgentPatch {
+  name?: string
+  role?: string
+  description?: string
+  roleCategory?: RoleCategory
+  specializationId?: SpecializationId
+  provider?: ProviderId
+  model?: string
+  reasoningEffort?: ReasoningEffort
+  customInstructions?: string
+  avatarPreset?: AvatarPreset
+  active?: boolean
 }
 
 export type AgentProfileId = 'economy' | 'balanced' | 'max_quality'
@@ -142,6 +214,12 @@ export interface MissionInfo {
   taskId: number
   projectId: number
   phase: MissionPhase
+  /** Agente responsável pelo planejamento (padrão: 'architect'). */
+  plannerId?: string
+  /** Agente responsável pela implementação (padrão: 'dev'). */
+  devId?: string
+  /** Agente responsável pela revisão QA (padrão: 'qa'). */
+  qaId?: string
   /** Plano do Arquiteto (Gemini). */
   plan: string
   /** Resposta final do Dev (Codex). */
@@ -150,6 +228,10 @@ export interface MissionInfo {
   review: string
   /** Veredito do QA; null se ele não deu um. */
   verdict: 'approved' | 'changes' | null
+  /** Classificação detalhada do QA (ex.: 'APROVADO COM RESSALVAS'). */
+  verdictDetail?: string | null
+  /** Snapshot sem credenciais dos agentes participantes no momento da missão. */
+  teamSnapshot?: Record<string, AgentSnapshotEntry>
   /** Arquivos com alterações depois que o Dev terminou. */
   files: string[]
   error: string | null
@@ -180,8 +262,11 @@ export type ServerMessage =
       missions: MissionInfo[]
       history: ActivityEntry[]
       configs: AgentConfig[]
+      allConfigs?: AgentConfig[]
+      specializations?: SpecializationInfo[]
     }
   | { type: 'agent'; agent: AgentInfo }
+  | { type: 'agents'; agents: AgentInfo[] }
   | { type: 'workspace'; workspace: Workspace }
   /** Erro de uma ação pedida por este cliente (ex.: pasta inválida). */
   | { type: 'notice'; message: string }
@@ -201,7 +286,8 @@ export type ServerMessage =
   | { type: 'tasks'; tasks: TaskInfo[] }
   | { type: 'missions'; missions: MissionInfo[] }
   | { type: 'history'; entries: ActivityEntry[] }
-  | { type: 'agent-configs'; configs: AgentConfig[] }
+  | { type: 'agent-configs'; configs: AgentConfig[]; allConfigs?: AgentConfig[] }
+  | { type: 'specializations'; specializations: SpecializationInfo[] }
   /** Saída ao vivo do CLI que está trabalhando na missão. */
   | { type: 'mission-output'; missionId: number; data: string }
   | {
@@ -239,13 +325,13 @@ export type ClientMessage =
   | { type: 'task-create'; projectId: number; task: TaskInput }
   | { type: 'task-update'; taskId: number; task: TaskInput }
   | { type: 'task-delete'; taskId: number }
-  /** Modo equipe: o Arquiteto começa a planejar a tarefa. */
-  | { type: 'mission-start'; taskId: number }
+  /** Modo equipe: o planejador começa a planejar a tarefa (com equipe padrão ou personalizada). */
+  | { type: 'mission-start'; taskId: number; team?: Partial<MissionTeamSelection> }
   /** Aprova o plano e libera o Dev. */
   | { type: 'mission-approve'; missionId: number }
   /** Rejeita o plano ou interrompe a missão. */
   | { type: 'mission-cancel'; missionId: number }
-  /** Central de Agentes: configuração individual, perfis e restauração */
+  /** Central de Agentes: configuração individual, perfis, restauração e agentes personalizados */
   | {
       type: 'agent-config-set'
       config: {
@@ -257,3 +343,8 @@ export type ClientMessage =
     }
   | { type: 'agent-config-profile'; profile: AgentProfileId }
   | { type: 'agent-config-reset' }
+  | { type: 'agent-create'; agent: CustomAgentInput }
+  | { type: 'agent-update'; agentId: string; patch: CustomAgentPatch }
+  | { type: 'agent-set-active'; agentId: string; active: boolean }
+  | { type: 'agents-list' }
+  | { type: 'specializations-list' }

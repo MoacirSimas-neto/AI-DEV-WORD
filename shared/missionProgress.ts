@@ -5,7 +5,7 @@ export type StageStatus = 'pending' | 'running' | 'awaiting_approval' | 'complet
 export interface MissionStageInfo {
   id: 'planning' | 'developing' | 'reviewing' | 'delivery'
   label: string
-  agentId: 'architect' | 'dev' | 'qa' | null
+  agentId: string | null
   agentRole: string
   status: StageStatus
   summary: string
@@ -20,7 +20,7 @@ export interface MissionProgressInfo {
   isRunning: boolean
   needsApproval: boolean
   isInterrupted: boolean
-  activeAgentId: 'architect' | 'dev' | 'qa' | null
+  activeAgentId: string | null
   statusLabel: string
   stages: MissionStageInfo[]
 }
@@ -60,6 +60,14 @@ export function computeMissionProgress(mission: MissionInfo | null | undefined):
   }
 
   const { phase } = mission
+  const plannerId = mission.plannerId || 'architect'
+  const devId = mission.devId || 'dev'
+  const qaId = mission.qaId || 'qa'
+  const snap = mission.teamSnapshot ?? {}
+  const plannerRole = snap[plannerId]?.name || 'Arquiteto'
+  const devRole = snap[devId]?.name || 'Desenvolvedor'
+  const qaRole = snap[qaId]?.name || 'QA Reviewer'
+
   const hasPlan = Boolean(mission.plan && mission.plan.trim().length > 0)
   const hasDev = Boolean(mission.devReport && mission.devReport.trim().length > 0)
 
@@ -68,36 +76,36 @@ export function computeMissionProgress(mission: MissionInfo | null | undefined):
   let devStatus: StageStatus = 'pending'
   let qaStatus: StageStatus = 'pending'
   let deliveryStatus: StageStatus = 'pending'
-  let activeAgentId: 'architect' | 'dev' | 'qa' | null = null
+  let activeAgentId: string | null = null
   let statusLabel = ''
 
   switch (phase) {
     case 'planning':
       completedSteps = 0
       planningStatus = 'running'
-      activeAgentId = 'architect'
-      statusLabel = 'Etapa 1/3 · Arquiteto elaborando plano'
+      activeAgentId = plannerId
+      statusLabel = `Etapa 1/3 · ${plannerRole} elaborando plano`
       break
     case 'awaiting_approval':
       completedSteps = 1
       planningStatus = 'awaiting_approval'
-      activeAgentId = 'architect'
+      activeAgentId = plannerId
       statusLabel = 'Aguardando aprovação humana do plano (1/3 concluída)'
       break
     case 'developing':
       completedSteps = 1
       planningStatus = 'completed'
       devStatus = 'running'
-      activeAgentId = 'dev'
-      statusLabel = 'Etapa 2/3 · Desenvolvedor implementando código'
+      activeAgentId = devId
+      statusLabel = `Etapa 2/3 · ${devRole} implementando código`
       break
     case 'reviewing':
       completedSteps = 2
       planningStatus = 'completed'
       devStatus = 'completed'
       qaStatus = 'running'
-      activeAgentId = 'qa'
-      statusLabel = 'Etapa 3/3 · QA revisando alterações e testes'
+      activeAgentId = qaId
+      statusLabel = `Etapa 3/3 · ${qaRole} revisando alterações e testes`
       break
     case 'done':
       completedSteps = 3
@@ -137,8 +145,8 @@ export function computeMissionProgress(mission: MissionInfo | null | undefined):
     {
       id: 'planning',
       label: 'Planejamento',
-      agentId: 'architect',
-      agentRole: 'Arquiteto',
+      agentId: plannerId,
+      agentRole: plannerRole,
       status: planningStatus,
       summary:
         planningStatus === 'running'
@@ -154,8 +162,8 @@ export function computeMissionProgress(mission: MissionInfo | null | undefined):
     {
       id: 'developing',
       label: 'Desenvolvimento',
-      agentId: 'dev',
-      agentRole: 'Desenvolvedor',
+      agentId: devId,
+      agentRole: devRole,
       status: devStatus,
       summary:
         devStatus === 'running'
@@ -173,18 +181,20 @@ export function computeMissionProgress(mission: MissionInfo | null | undefined):
     {
       id: 'reviewing',
       label: 'Revisão QA',
-      agentId: 'qa',
-      agentRole: 'QA Reviewer',
+      agentId: qaId,
+      agentRole: qaRole,
       status: qaStatus,
       summary:
         qaStatus === 'running'
           ? 'Auditando diff, requisitos, segurança e testes...'
           : qaStatus === 'completed'
-            ? mission.verdict === 'approved'
-              ? 'Veredito QA: APROVADO.'
-              : mission.verdict === 'changes'
-                ? 'Veredito QA: REPROVADO (requer ajustes).'
-                : 'Parecer técnico concluído.'
+            ? mission.verdictDetail
+              ? `Veredito QA: ${mission.verdictDetail}.`
+              : mission.verdict === 'approved'
+                ? 'Veredito QA: APROVADO.'
+                : mission.verdict === 'changes'
+                  ? 'Veredito QA: REPROVADO (requer ajustes).'
+                  : 'Parecer técnico concluído.'
             : qaStatus === 'failed'
               ? 'Falha durante a revisão de QA.'
               : qaStatus === 'cancelled'

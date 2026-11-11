@@ -20,7 +20,8 @@ const tasks = new TaskStore(projects.db, history)
 const agentConfigs = new AgentConfigStore(projects.db)
 const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
 
-// Sincroniza o CLI de cada agente conforme a configuração persistida
+// Sincroniza agentes personalizados e o CLI de cada agente conforme a configuração persistida
+registry.syncFromConfigs(agentConfigs.list())
 for (const cfg of agentConfigs.list()) {
   const cli = cfg.provider === 'antigravity' ? 'agy' : cfg.provider
   registry.setCli(cfg.agentId, cli)

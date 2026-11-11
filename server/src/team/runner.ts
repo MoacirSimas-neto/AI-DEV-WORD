@@ -1,13 +1,25 @@
 import { EventEmitter } from 'node:events'
-import type { ActivityKind, AgentConfig, CliId, GitFile, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
+import type {
+  ActivityKind,
+  AgentConfig,
+  AgentSnapshotEntry,
+  CliId,
+  GitFile,
+  MissionInfo,
+  MissionTeamSelection,
+  ProviderId,
+  SpecializationId,
+  TaskInfo,
+} from '../../../shared/protocol.ts'
 import type { AgentConfigStore } from '../agents/configStore.ts'
 import type { AgentRegistry } from '../agents/registry.ts'
+import { defaultSpecializations, type SpecializationRegistry } from '../agents/specializations.ts'
 import type { CliResult, RunningCli, StartOptions } from '../cli/run.ts'
 import type { GitService } from '../git/service.ts'
 import { cleanOutput, type HistoryStore, redact } from '../history/store.ts'
 import type { ProjectStore } from '../projects/store.ts'
 import { OPEN_PHASES, type TaskStore } from '../tasks/store.ts'
-import { devPrompt, parseVerdict, planPrompt, reviewPrompt } from './prompts.ts'
+import { devPrompt, parseDetailedVerdict, parseVerdict, planPrompt, reviewPrompt } from './prompts.ts'
 
 /** Inicia um CLI oficial sem terminal. Em produção é o startCli; nos testes, um falso. */
 export type AgentLauncher = (cli: CliId, args: string[], options: StartOptions) => RunningCli
@@ -21,6 +33,7 @@ export const GEMINI_ARGS = ['--approval-mode', 'default']
 export const CODEX_ARGS = ['exec', '--sandbox', 'workspace-write', '-']
 
 const TEAM = ['architect', 'dev', 'qa']
+const VALID_PROVIDERS = new Set<ProviderId>(['antigravity', 'codex', 'gemini'])
 const DEFAULT_STEP_TIMEOUT_MS = 20 * 60_000
 const MAX_TEXT = 100_000
 const MAX_DIFF = 60_000
@@ -36,6 +49,7 @@ export interface TeamOptions {
   git: GitService
   launch: AgentLauncher
   configs?: AgentConfigStore
+  specializations?: SpecializationRegistry
   stepTimeoutMs?: number
 }
 
@@ -109,6 +123,7 @@ export class TeamRunner extends EventEmitter {
   private readonly git: GitService
   private readonly launch: AgentLauncher
   private readonly configs?: AgentConfigStore
+  private readonly specializations: SpecializationRegistry
   private readonly stepTimeoutMs: number
   private running: Running | null = null
   /** true enquanto start/approve consultam o Git (é assíncrono). */
@@ -123,6 +138,7 @@ export class TeamRunner extends EventEmitter {
     this.git = options.git
     this.launch = options.launch
     this.configs = options.configs
+    this.specializations = options.specializations ?? defaultSpecializations
     this.stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   }
 
@@ -132,16 +148,18 @@ export class TeamRunner extends EventEmitter {
       if (this.tasks.get(mission.taskId)) this.tasks.setStatus(mission.taskId, 'todo')
       this.log(mission, 'error', `Missão #${mission.id} interrompida: o app foi fechado durante a execução.`)
     }
-    if (this.tasks.openMissions().some((m) => m.phase === 'awaiting_approval')) {
-      this.registry.setMissionState('architect', 'approval', 'Plano pronto: aguardando sua aprovação')
+    for (const m of this.tasks.openMissions()) {
+      if (m.phase === 'awaiting_approval') {
+        this.registry.setMissionState(m.plannerId || 'architect', 'approval', 'Plano pronto: aguardando sua aprovação')
+      }
     }
   }
 
-  /** Etapa 1: o Arquiteto planeja. Devolve a missão criada. */
-  async start(taskId: number): Promise<MissionInfo> {
+  /** Etapa 1: o planejador (padrão: 'architect') planeja. Devolve a missão criada. */
+  async start(taskId: number, team?: Partial<MissionTeamSelection>): Promise<MissionInfo> {
     this.assertTeamFree()
     const { task, cwd } = this.context(taskId)
-    this.assertAgentsAvailable()
+    const { plannerId, devId, qaId, teamSnapshot } = this.validateAndBuildTeam(team)
     this.preparing = true
     try {
       await this.requireCleanRepo(cwd)
@@ -151,13 +169,19 @@ export class TeamRunner extends EventEmitter {
     // O mundo pode ter mudado durante a consulta ao Git.
     this.assertTeamFree()
     this.context(taskId)
+    this.validateAndBuildTeam(team)
 
-    const mission = this.tasks.createMission(task.id, task.projectId)
+    const mission = this.tasks.createMission(task.id, task.projectId, {
+      plannerId,
+      devId,
+      qaId,
+      teamSnapshot,
+    })
     this.running = { missionId: mission.id, cancelled: false }
     this.tasks.setStatus(task.id, 'doing')
-    this.log(mission, 'mission', `Missão #${mission.id} iniciada: "${task.title}"`)
-    for (const id of TEAM) this.registry.setMissionState(id, null)
-    this.registry.setMissionState('architect', 'planning', `Planejando a missão #${mission.id}`)
+    this.log(mission, 'mission', `Missão #${mission.id} iniciada: "${task.title}" (${plannerId} → ${devId} → ${qaId})`)
+    for (const id of new Set([...TEAM, plannerId, devId, qaId])) this.registry.setMissionState(id, null)
+    this.registry.setMissionState(plannerId, 'planning', `Planejando a missão #${mission.id}`)
     void this.runPlanning(mission.id, task, cwd)
     return mission
   }
@@ -169,7 +193,8 @@ export class TeamRunner extends EventEmitter {
       throw new Error('Esta missão não está aguardando aprovação.')
     }
     const { task, cwd } = this.context(mission.taskId)
-    this.assertAgentsAvailable()
+    const [plannerId, devId, qaId] = this.missionTeam(mission)
+    this.assertAgentsAvailable([plannerId, devId, qaId])
     this.preparing = true
     try {
       await this.requireCleanRepo(cwd)
@@ -184,8 +209,8 @@ export class TeamRunner extends EventEmitter {
     this.tasks.updateMission(missionId, { phase: 'developing' })
     this.running = { missionId, cancelled: false }
     this.log(mission, 'mission', `Plano da missão #${missionId} aprovado pelo usuário.`)
-    this.registry.setMissionState('architect', 'done', 'Plano aprovado')
-    this.registry.setMissionState('dev', 'working', `Implementando a missão #${missionId}`)
+    this.registry.setMissionState(plannerId, 'done', 'Plano aprovado')
+    this.registry.setMissionState(devId, 'working', `Implementando a missão #${missionId}`)
     void this.runDevelopment(missionId, task, mission.plan, cwd)
   }
 
@@ -207,7 +232,9 @@ export class TeamRunner extends EventEmitter {
         ? `Plano da missão #${missionId} rejeitado pelo usuário.`
         : `Missão #${missionId} cancelada pelo usuário.`,
     )
-    for (const id of TEAM) this.registry.setMissionState(id, null)
+    for (const id of new Set([...TEAM, ...this.missionTeam(mission)])) {
+      this.registry.setMissionState(id, null)
+    }
   }
 
   /** Ao fechar o app: não deixar CLIs órfãos. */
@@ -216,14 +243,23 @@ export class TeamRunner extends EventEmitter {
   }
 
   private async runPlanning(missionId: number, task: TaskInfo, cwd: string) {
-    const stepConfig = getStepCliAndArgs('planning', this.configs?.get('architect'))
+    const current = this.requireMission(missionId)
+    const [plannerId] = this.missionTeam(current)
+    const cfg = this.resolveMissionAgentConfig(current, plannerId, 'tech-lead')
+    const stepConfig = getStepCliAndArgs('planning', cfg)
+    const prompt = planPrompt(task, {
+      agentName: cfg?.name,
+      specializationId: cfg?.specializationId ?? 'tech-lead',
+      customInstructions: cfg?.customInstructions,
+      registry: this.specializations,
+    })
     const plan = await this.step(
       missionId,
-      'architect',
+      plannerId,
       stepConfig.cli,
       stepConfig.args,
       cwd,
-      planPrompt(task),
+      prompt,
       stepConfig.model,
       stepConfig.effort,
       stepConfig.passPromptAsArg,
@@ -231,20 +267,29 @@ export class TeamRunner extends EventEmitter {
     if (plan === null) return
     const mission = this.tasks.updateMission(missionId, { phase: 'awaiting_approval', plan })
     this.running = null
-    this.log(mission, 'mission', `Plano da missão #${missionId} pronto. Aguardando aprovação do usuário.`, 'architect')
-    this.registry.setMissionState('architect', 'approval', `Plano da missão #${missionId} pronto: aguardando sua aprovação`)
+    this.log(mission, 'mission', `Plano da missão #${missionId} pronto. Aguardando aprovação do usuário.`, plannerId)
+    this.registry.setMissionState(plannerId, 'approval', `Plano da missão #${missionId} pronto: aguardando sua aprovação`)
   }
 
   private async runDevelopment(missionId: number, task: TaskInfo, plan: string, cwd: string) {
     const run = this.running!
-    const devConfig = getStepCliAndArgs('developing', this.configs?.get('dev'))
+    const current = this.requireMission(missionId)
+    const [, devId, qaId] = this.missionTeam(current)
+    const devCfg = this.resolveMissionAgentConfig(current, devId, 'developer')
+    const devConfig = getStepCliAndArgs('developing', devCfg)
+    const devPromptText = devPrompt(task, plan, {
+      agentName: devCfg?.name,
+      specializationId: devCfg?.specializationId ?? 'developer',
+      customInstructions: devCfg?.customInstructions,
+      registry: this.specializations,
+    })
     const report = await this.step(
       missionId,
-      'dev',
+      devId,
       devConfig.cli,
       devConfig.args,
       cwd,
-      devPrompt(task, plan),
+      devPromptText,
       devConfig.model,
       devConfig.effort,
       devConfig.passPromptAsArg,
@@ -255,53 +300,69 @@ export class TeamRunner extends EventEmitter {
     try {
       changed = (await this.git.status(cwd)).files
     } catch (error) {
-      if (!run.cancelled) this.fail(missionId, 'dev', `Não foi possível ler o Git depois do Dev: ${errorText(error)}`)
+      if (!run.cancelled) this.fail(missionId, devId, `Não foi possível ler o Git depois do Dev: ${errorText(error)}`)
       return
     }
     if (run.cancelled) return
     const files = changed.map((f) => f.path)
     const mission = this.tasks.updateMission(missionId, { phase: 'reviewing', devReport: report, files })
+    const devLabel = devCfg?.name || devId
     this.log(
       mission,
       'files',
-      files.length ? `Arquivos alterados pelo Dev: ${files.join(', ')}` : 'O Dev não alterou nenhum arquivo.',
-      'dev',
+      files.length ? `Arquivos alterados por ${devLabel}: ${files.join(', ')}` : `O ${devLabel} não alterou nenhum arquivo.`,
+      devId,
     )
+    const cliActor = devConfig.cli === 'codex' ? 'Codex' : devLabel
     this.emit('git-change', {
-      agentId: 'dev',
+      agentId: devId,
       cwd,
       files,
       summary:
         files.length > 0
-          ? `Codex concluiu a implementação — novas alterações detectadas (${files.length} arquivo(s)).`
-          : 'Codex concluiu a implementação — nenhuma alteração detectada.',
+          ? `${cliActor} concluiu a implementação — novas alterações detectadas (${files.length} arquivo(s)).`
+          : `${cliActor} concluiu a implementação — nenhuma alteração detectada.`,
     })
-    this.registry.setMissionState('dev', 'done', 'Implementação entregue ao QA')
-    this.registry.setMissionState('qa', 'reviewing', `Revisando a missão #${missionId}`)
+    this.registry.setMissionState(devId, 'done', 'Implementação entregue ao QA')
+    this.registry.setMissionState(qaId, 'reviewing', `Revisando a missão #${missionId}`)
 
     const diff = await this.collectDiff(cwd, changed)
-    const qaConfig = getStepCliAndArgs('reviewing', this.configs?.get('qa'))
+    const qaCfg = this.resolveMissionAgentConfig(current, qaId, 'qa-tester')
+    const qaConfig = getStepCliAndArgs('reviewing', qaCfg)
+    const qaPromptText = reviewPrompt(task, plan, report, files, diff, {
+      agentName: qaCfg?.name,
+      specializationId: qaCfg?.specializationId ?? 'qa-tester',
+      customInstructions: qaCfg?.customInstructions,
+      registry: this.specializations,
+    })
     const review = await this.step(
       missionId,
-      'qa',
+      qaId,
       qaConfig.cli,
       qaConfig.args,
       cwd,
-      reviewPrompt(task, plan, report, files, diff),
+      qaPromptText,
       qaConfig.model,
       qaConfig.effort,
       qaConfig.passPromptAsArg,
     )
     if (review === null) return
 
+    const verdictDetail = parseDetailedVerdict(review)
     const verdict = parseVerdict(review)
-    const done = this.tasks.updateMission(missionId, { phase: 'done', review, verdict })
+    const done = this.tasks.updateMission(missionId, { phase: 'done', review, verdict, verdictDetail })
     this.running = null
     this.tasks.setStatus(task.id, 'review')
-    const label = verdict === 'approved' ? 'aprovado' : verdict === 'changes' ? 'reprovado, pede mudanças' : 'sem veredito claro'
-    this.log(done, 'review', `Revisão do QA na missão #${missionId}: ${label}.`, 'qa')
+    const detailSuffix = verdictDetail ? ` (${verdictDetail})` : ''
+    const label =
+      verdict === 'approved'
+        ? `aprovado${detailSuffix}`
+        : verdict === 'changes'
+          ? `reprovado, pede mudanças${detailSuffix}`
+          : 'sem veredito claro'
+    this.log(done, 'review', `Revisão do QA na missão #${missionId}: ${label}.`, qaId)
     this.log(done, 'mission', `Missão #${missionId} concluída. Revise as alterações e faça o commit no painel Alterações.`)
-    this.registry.setMissionState('qa', 'done', `Revisão: ${label}`)
+    this.registry.setMissionState(qaId, 'done', `Revisão: ${verdictDetail ?? label}`)
   }
 
   /** Roda um CLI com o prompt e devolve a resposta, ou null se falhou ou foi cancelado. */
@@ -318,8 +379,9 @@ export class TeamRunner extends EventEmitter {
   ) {
     const run = this.running
     if (!run || run.missionId !== missionId || run.cancelled) return null
-    const name = this.registry.get(agentId)?.name ?? agentId
     const mission = this.requireMission(missionId)
+    const snapName = mission.teamSnapshot?.[agentId]?.name
+    const name = snapName ?? this.registry.get(agentId)?.name ?? agentId
     const modelInfo = model && model !== 'default' ? `, modelo: ${model}` : ''
     const effortInfo = effort && effort !== 'default' ? `, esforço: ${effort}` : ''
     this.log(mission, 'agent', `${name} (${cli}${modelInfo}${effortInfo}) começou a trabalhar na missão #${missionId}.`, agentId)
@@ -366,8 +428,104 @@ export class TeamRunner extends EventEmitter {
     this.running = null
     if (this.tasks.get(mission.taskId)) this.tasks.setStatus(mission.taskId, 'todo')
     this.log(mission, 'error', message, agentId)
-    for (const id of TEAM) if (id !== agentId) this.registry.setMissionState(id, null)
+    for (const id of new Set([...TEAM, ...this.missionTeam(mission)])) {
+      if (id !== agentId) this.registry.setMissionState(id, null)
+    }
     this.registry.setMissionState(agentId, 'error', message.split('\n')[0])
+  }
+
+  private missionTeam(mission: Pick<MissionInfo, 'plannerId' | 'devId' | 'qaId'>): [string, string, string] {
+    return [mission.plannerId || 'architect', mission.devId || 'dev', mission.qaId || 'qa']
+  }
+
+  private resolveMissionAgentConfig(
+    mission: MissionInfo,
+    agentId: string,
+    defaultSpec: SpecializationId,
+  ): AgentConfig | undefined {
+    const snap = mission.teamSnapshot?.[agentId]
+    if (snap && snap.provider) {
+      return {
+        agentId: snap.agentId,
+        name: snap.name,
+        role: snap.role,
+        provider: snap.provider,
+        model: snap.model || 'default',
+        reasoningEffort: snap.reasoningEffort ?? 'default',
+        specializationId: snap.specializationId ?? defaultSpec,
+        customInstructions: snap.customInstructions ?? '',
+        updatedAt: mission.createdAt,
+      }
+    }
+    return this.configs?.get(agentId)
+  }
+
+  private validateAndBuildTeam(team?: Partial<MissionTeamSelection>): {
+    plannerId: string
+    devId: string
+    qaId: string
+    teamSnapshot: Record<string, AgentSnapshotEntry>
+  } {
+    const plannerId = (team?.plannerId ?? 'architect').trim() || 'architect'
+    const devId = (team?.devId ?? 'dev').trim() || 'dev'
+    const qaId = (team?.qaId ?? 'qa').trim() || 'qa'
+
+    const slots: {
+      agentId: string
+      expectedCategory: 'planning' | 'developing' | 'reviewing'
+      defaultSpec: SpecializationId
+      stageLabel: string
+    }[] = [
+      { agentId: plannerId, expectedCategory: 'planning', defaultSpec: 'tech-lead', stageLabel: 'planejamento' },
+      { agentId: devId, expectedCategory: 'developing', defaultSpec: 'developer', stageLabel: 'desenvolvimento' },
+      { agentId: qaId, expectedCategory: 'reviewing', defaultSpec: 'qa-tester', stageLabel: 'revisão QA' },
+    ]
+
+    const teamSnapshot: Record<string, AgentSnapshotEntry> = {}
+
+    for (const slot of slots) {
+      const cfg = this.configs?.find(slot.agentId)
+      if (this.configs) {
+        if (!cfg) {
+          throw new Error(`Agente "${slot.agentId}" não encontrado no cadastro.`)
+        }
+        if (cfg.active === false) {
+          throw new Error(`O agente "${cfg.name || slot.agentId}" está inativo e não pode participar de missões.`)
+        }
+        if (cfg.roleCategory && cfg.roleCategory !== slot.expectedCategory) {
+          throw new Error(
+            `O agente "${cfg.name || slot.agentId}" possui categoria "${cfg.roleCategory}", incompatível com a etapa de ${slot.stageLabel} (requer "${slot.expectedCategory}").`,
+          )
+        }
+        if (!VALID_PROVIDERS.has(cfg.provider)) {
+          throw new Error(`O agente "${cfg.name || slot.agentId}" possui provedor CLI inválido ("${String(cfg.provider)}").`)
+        }
+        if (!cfg.model || typeof cfg.model !== 'string' || !cfg.model.trim()) {
+          throw new Error(`O agente "${cfg.name || slot.agentId}" não possui um modelo válido configurado.`)
+        }
+      }
+
+      const regAgent = this.registry.get(slot.agentId)
+      if (!regAgent || regAgent.state === 'offline') {
+        throw new Error(`${regAgent?.name ?? cfg?.name ?? slot.agentId}: CLI indisponível. Use "Verificar CLI" na janela do agente.`)
+      }
+
+      const fallbackProvider: ProviderId =
+        regAgent.cli === 'agy' ? 'antigravity' : regAgent.cli === 'codex' ? 'codex' : 'gemini'
+
+      teamSnapshot[slot.agentId] = {
+        agentId: slot.agentId,
+        name: cfg?.name || regAgent.name || slot.agentId,
+        role: cfg?.role || regAgent.role || '',
+        provider: cfg?.provider ?? fallbackProvider,
+        model: cfg?.model || 'default',
+        reasoningEffort: cfg?.reasoningEffort ?? 'default',
+        specializationId: cfg?.specializationId ?? slot.defaultSpec,
+        customInstructions: cfg?.customInstructions ? redact(cfg.customInstructions) : '',
+      }
+    }
+
+    return { plannerId, devId, qaId, teamSnapshot }
   }
 
   /** Diferenças entregues ao QA. Nunca falha: sem diff, o QA ainda lê os arquivos. */
@@ -411,8 +569,8 @@ export class TeamRunner extends EventEmitter {
     }
   }
 
-  private assertAgentsAvailable() {
-    for (const id of TEAM) {
+  private assertAgentsAvailable(agentIds: string[] = TEAM) {
+    for (const id of new Set(agentIds)) {
       const agent = this.registry.get(id)
       if (!agent || agent.state === 'offline') {
         throw new Error(`${agent?.name ?? id}: CLI indisponível. Use "Verificar CLI" na janela do agente.`)

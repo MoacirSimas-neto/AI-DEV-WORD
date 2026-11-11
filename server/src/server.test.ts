@@ -238,3 +238,84 @@ test('configuração dos agentes pode ser atualizada, aplicar perfis e restaurar
 
   client.socket.close()
 })
+
+test('criar, atualizar, ativar e desativar agentes personalizados e consultar especializações via WebSocket', async () => {
+  const client = await connect()
+  const snapshot = await client.waitFor('snapshot')
+  assert.ok(Array.isArray(snapshot.specializations))
+  assert.equal(snapshot.specializations?.length, 4)
+
+  // Cria um agente personalizado via WebSocket
+  client.send({
+    type: 'agent-create',
+    agent: {
+      id: 'ws-dev-custom',
+      name: 'Dev WebSocket',
+      role: 'Especialista API',
+      roleCategory: 'developing',
+      specializationId: 'developer',
+      provider: 'codex',
+      model: 'gpt-5',
+      reasoningEffort: 'high',
+      customInstructions: 'Seguir convenções REST.',
+    },
+  })
+  const afterCreate = await client.waitFor('agent-configs')
+  const created = afterCreate.configs.find((c) => c.agentId === 'ws-dev-custom')
+  assert.ok(created)
+  assert.equal(created.name, 'Dev WebSocket')
+  assert.equal(created.roleCategory, 'developing')
+  assert.equal(registry.get('ws-dev-custom')?.name, 'Dev WebSocket')
+
+  // Atualiza o agente personalizado via WebSocket
+  client.send({
+    type: 'agent-update',
+    agentId: 'ws-dev-custom',
+    patch: {
+      name: 'Dev WebSocket v2',
+      model: 'gpt-5-mini',
+      reasoningEffort: 'medium',
+    },
+  })
+  const afterUpdate = await client.waitFor('agent-configs')
+  const updated = afterUpdate.configs.find((c) => c.agentId === 'ws-dev-custom')
+  assert.equal(updated?.name, 'Dev WebSocket v2')
+  assert.equal(updated?.model, 'gpt-5-mini')
+
+  // Desativa o agente personalizado via WebSocket
+  client.send({
+    type: 'agent-set-active',
+    agentId: 'ws-dev-custom',
+    active: false,
+  })
+  const afterDeactivate = await client.waitFor('agent-configs')
+  assert.ok(!afterDeactivate.configs.some((c) => c.agentId === 'ws-dev-custom'))
+  assert.ok(afterDeactivate.allConfigs?.some((c) => c.agentId === 'ws-dev-custom' && c.active === false))
+  assert.equal(registry.get('ws-dev-custom'), undefined)
+
+  // Reativa o agente personalizado via WebSocket
+  client.send({
+    type: 'agent-set-active',
+    agentId: 'ws-dev-custom',
+    active: true,
+  })
+  const afterReactivate = await client.waitFor('agent-configs')
+  assert.ok(afterReactivate.configs.some((c) => c.agentId === 'ws-dev-custom' && c.active === true))
+  assert.equal(registry.get('ws-dev-custom')?.name, 'Dev WebSocket v2')
+
+  // Impede desativar agente padrão via WebSocket
+  client.send({
+    type: 'agent-set-active',
+    agentId: 'architect',
+    active: false,
+  })
+  const notice = await client.waitFor('notice')
+  assert.match(notice.message, /Agentes padrão não podem ser desativados/)
+
+  // Consulta especializações explicitamente
+  client.send({ type: 'specializations-list' })
+  const specsMsg = await client.waitFor('specializations')
+  assert.equal(specsMsg.specializations.length, 4)
+
+  client.socket.close()
+})

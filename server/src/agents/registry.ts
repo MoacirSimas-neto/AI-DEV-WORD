@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import type { AgentInfo, CliId } from '../../../shared/protocol.ts'
+import type { AgentConfig, AgentInfo, CliId } from '../../../shared/protocol.ts'
 import type { CliProbe } from '../cli/probe.ts'
 
 export interface AgentDefinition {
@@ -16,6 +16,8 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
   { id: 'qa', name: 'QA', role: 'Revisa e testa', cli: 'gemini' },
   { id: 'tutor', name: 'Tutor', role: 'Explica e ensina', cli: 'gemini' },
 ]
+
+const BUILTIN_IDS = new Set(DEFAULT_AGENTS.map((d) => d.id))
 
 /**
  * Fonte da verdade do estado dos agentes. Emite 'change' (AgentInfo) a cada
@@ -56,6 +58,70 @@ export class AgentRegistry extends EventEmitter {
 
   get(agentId: string): AgentInfo | undefined {
     return this.agents.get(agentId)
+  }
+
+  /** Registra ou atualiza os metadados de um agente sem iniciar processos CLI automaticamente. */
+  registerAgent(def: AgentDefinition): AgentInfo {
+    const existing = this.agents.get(def.id)
+    if (existing) {
+      const cliChanged = existing.cli !== def.cli
+      const patch: Partial<AgentInfo> = {
+        name: def.name,
+        role: def.role,
+        cli: def.cli,
+        ...(cliChanged ? { cliVersion: null, auth: 'unknown', message: 'Configuração atualizada.' } : {}),
+      }
+      const updated = this.update(def.id, patch)
+      this.emit('list', this.list())
+      return updated
+    }
+
+    const created: AgentInfo = {
+      ...def,
+      state: 'offline',
+      checking: false,
+      session: false,
+      cliVersion: null,
+      auth: 'unknown',
+      message: 'Ainda não verificado.',
+      checkedAt: null,
+    }
+    this.agents.set(def.id, created)
+    this.emit('change', created)
+    this.emit('list', this.list())
+    return created
+  }
+
+  /** Remove um agente personalizado do registro ativo (nunca remove os 4 agentes padrão). */
+  unregisterAgent(agentId: string): boolean {
+    if (BUILTIN_IDS.has(agentId) || !this.agents.has(agentId) || this.isBusy(agentId)) return false
+    this.agents.delete(agentId)
+    this.inSession.delete(agentId)
+    this.inMission.delete(agentId)
+    this.missionResult.delete(agentId)
+    this.emit('list', this.list())
+    return true
+  }
+
+  /** Sincroniza os agentes ativos do banco de configurações sem disparar processos em segundo plano. */
+  syncFromConfigs(configs: AgentConfig[]) {
+    const activeIds = new Set<string>()
+    for (const cfg of configs) {
+      if (cfg.active === false) continue
+      activeIds.add(cfg.agentId)
+      const cli: CliId = cfg.provider === 'antigravity' ? 'agy' : cfg.provider
+      this.registerAgent({
+        id: cfg.agentId,
+        name: cfg.name || cfg.agentId,
+        role: cfg.role || 'Agente personalizado',
+        cli,
+      })
+    }
+    for (const id of [...this.agents.keys()]) {
+      if (!BUILTIN_IDS.has(id) && !activeIds.has(id)) {
+        this.unregisterAgent(id)
+      }
+    }
   }
 
   /** Atualiza o CLI do agente caso o usuário mude o provedor na Central de Agentes. */

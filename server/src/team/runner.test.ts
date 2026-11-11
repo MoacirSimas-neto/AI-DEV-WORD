@@ -281,3 +281,390 @@ test('computeMissionProgress calcula 0%, 33%, 67%, 100% apenas por etapas verifi
   assert.notEqual(failedDuringDev.percent, 100)
 })
 
+function setupCleanGitRepo(prefix: string) {
+  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), prefix)))
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp })
+  writeFileSync(path.join(tmp, 'init.txt'), 'init')
+  execFileSync('git', ['add', '.'], { cwd: tmp })
+  execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp })
+  return tmp
+}
+
+test('TeamRunner executa missão com equipe personalizada, carrega especializações, instruções seguras e grava teamSnapshot sem credenciais', async () => {
+  const tmp = setupCleanGitRepo('aidw-dyn-team-')
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const activeProj = projects.active()!
+
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const configs = new AgentConfigStore(projects.db)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+
+  const planner = configs.createAgent({
+    id: 'lead-custom',
+    name: 'Arquiteta Sênior',
+    role: 'Arquitetura Distribuída',
+    roleCategory: 'planning',
+    specializationId: 'tech-lead',
+    provider: 'gemini',
+    model: 'gemini-2.5-pro',
+    reasoningEffort: 'high',
+    customInstructions: 'Priorize contratos explícitos. Token sk-secret1234567890abcdefghijklmnop jamais deve vazar.',
+  })
+  const dev = configs.createAgent({
+    id: 'dev-backend',
+    name: 'Dev Rust/TS',
+    role: 'Engenheiro Backend',
+    roleCategory: 'developing',
+    specializationId: 'developer',
+    provider: 'codex',
+    model: 'gpt-5',
+    reasoningEffort: 'high',
+    customInstructions: 'Escreva código conciso e testável.',
+  })
+  const qa = configs.createAgent({
+    id: 'qa-sec',
+    name: 'QA Segurança',
+    role: 'Auditor de Qualidade',
+    roleCategory: 'reviewing',
+    specializationId: 'qa-tester',
+    provider: 'antigravity',
+    model: 'gemini-4-argon-high',
+    reasoningEffort: 'high',
+    customInstructions: 'Valide bordas de entrada e regressões.',
+  })
+
+  registry.syncFromConfigs(configs.list())
+  for (const a of registry.list()) await registry.check(a.id)
+
+  const capturedPrompts: { cli: string; args: string[]; prompt: string }[] = []
+
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    git: new GitService(),
+    configs,
+    launch: (cli, args, options) => {
+      const prompt = options.input ?? args.at(-1) ?? ''
+      capturedPrompts.push({ cli, args, prompt })
+      if (cli === 'codex') {
+        writeFileSync(path.join(tmp, 'feature.ts'), 'export const ok = true;\n')
+      }
+      const isQa = cli === 'agy'
+      return {
+        done: Promise.resolve({
+          code: 0,
+          stdout: isQa
+            ? 'Auditoria concluída com ressalvas menores.\nVEREDITO: APROVADO COM RESSALVAS'
+            : 'Etapa personalizada concluída.',
+          stderr: '',
+          timedOut: false,
+        }),
+        kill: () => {},
+      }
+    },
+  })
+
+  const task = tasks.create(activeProj.id, {
+    title: 'Implementar feature segura',
+    description: 'Módulo de validação de contratos',
+    priority: 'high',
+    status: 'todo',
+    agentId: planner.agentId,
+  })
+
+  const mission = await runner.start(task.id, {
+    plannerId: planner.agentId,
+    devId: dev.agentId,
+    qaId: qa.agentId,
+  })
+
+  assert.equal(mission.plannerId, 'lead-custom')
+  assert.equal(mission.devId, 'dev-backend')
+  assert.equal(mission.qaId, 'qa-sec')
+  assert.equal(registry.get('lead-custom')?.state, 'planning')
+
+  // Snapshot gravado na missão não contém a chave secreta
+  const snapJson = JSON.stringify(mission.teamSnapshot)
+  assert.ok(!snapJson.includes('sk-secret1234567890'))
+  assert.equal(mission.teamSnapshot?.['lead-custom']?.specializationId, 'tech-lead')
+  assert.equal(mission.teamSnapshot?.['dev-backend']?.specializationId, 'developer')
+  assert.equal(mission.teamSnapshot?.['qa-sec']?.specializationId, 'qa-tester')
+
+  for (let i = 0; i < 50; i++) {
+    if (tasks.getMission(mission.id)!.phase === 'awaiting_approval') break
+    await new Promise((r) => setTimeout(r, 20))
+  }
+
+  assert.equal(registry.get('lead-custom')?.state, 'approval')
+
+  // Edita a configuração do dev durante awaiting_approval: não deve corromper o snapshot nem a execução da missão em andamento
+  configs.updateAgent('dev-backend', { model: 'modelo-alterado-depois', customInstructions: 'Instrução alterada depois' })
+
+  await runner.approve(mission.id)
+
+  for (let i = 0; i < 50; i++) {
+    if (tasks.getMission(mission.id)!.phase === 'done') break
+    await new Promise((r) => setTimeout(r, 20))
+  }
+
+  const finished = tasks.getMission(mission.id)!
+  assert.equal(finished.phase, 'done')
+  assert.equal(finished.verdict, 'approved')
+  assert.equal(finished.verdictDetail, 'APROVADO COM RESSALVAS')
+  assert.equal(finished.teamSnapshot?.['dev-backend']?.model, 'gpt-5')
+
+  // Verifica prompts e especializações de cada etapa
+  assert.equal(capturedPrompts.length, 3)
+  // 1) Planner
+  assert.ok(capturedPrompts[0].prompt.includes('Regras obrigatórias de segurança e escopo'))
+  assert.ok(capturedPrompts[0].prompt.includes('Arquiteta Sênior'))
+  assert.ok(capturedPrompts[0].prompt.includes('Tech Lead'))
+  assert.ok(capturedPrompts[0].prompt.includes('Instruções Personalizadas do Agente (subordinadas às regras obrigatórias de segurança acima)'))
+  assert.ok(capturedPrompts[0].prompt.includes('Priorize contratos explícitos.'))
+  assert.ok(!capturedPrompts[0].prompt.includes('sk-secret1234567890'))
+  // 2) Dev (usou o modelo gpt-5 do snapshot, não o alterado depois)
+  assert.ok(capturedPrompts[1].args.includes('gpt-5'))
+  assert.ok(capturedPrompts[1].prompt.includes('Dev Rust/TS'))
+  assert.ok(capturedPrompts[1].prompt.includes('O Programador Pragmático'))
+  assert.ok(capturedPrompts[1].prompt.includes('Escreva código conciso e testável.'))
+  // 3) QA
+  assert.ok(capturedPrompts[2].prompt.includes('QA Segurança'))
+  assert.ok(capturedPrompts[2].prompt.includes('O Investigador'))
+  assert.ok(capturedPrompts[2].prompt.includes('Valide bordas de entrada e regressões.'))
+})
+
+test('TeamRunner valida existência, status ativo, compatibilidade de categoria e disponibilidade de CLI antes de iniciar missão', async () => {
+  const tmp = setupCleanGitRepo('aidw-val-team-')
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const activeProj = projects.active()!
+
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const configs = new AgentConfigStore(projects.db)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+
+  configs.createAgent({
+    id: 'inactive-planner',
+    name: 'Planejador Inativo',
+    role: 'Arquiteto',
+    roleCategory: 'planning',
+    specializationId: 'tech-lead',
+    provider: 'gemini',
+    active: false,
+  })
+  configs.createAgent({
+    id: 'offline-dev',
+    name: 'Dev Offline',
+    role: 'Desenvolvedor',
+    roleCategory: 'developing',
+    specializationId: 'developer',
+    provider: 'codex',
+    active: true,
+  })
+
+  registry.syncFromConfigs(configs.list())
+  // Verifica apenas os 4 agentes padrão; 'offline-dev' permanece offline
+  for (const a of DEFAULT_AGENTS) await registry.check(a.id)
+
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    git: new GitService(),
+    configs,
+    launch: () => ({
+      done: Promise.resolve({ code: 0, stdout: 'ok', stderr: '', timedOut: false }),
+      kill: () => {},
+    }),
+  })
+
+  const task = tasks.create(activeProj.id, {
+    title: 'Validar equipe',
+    description: 'Teste de validação',
+    priority: 'medium',
+    status: 'todo',
+    agentId: null,
+  })
+
+  // 1. Agente inexistente em plannerId, devId e qaId
+  await assert.rejects(
+    () => runner.start(task.id, { plannerId: 'nao-existe', devId: 'dev', qaId: 'qa' }),
+    /não encontrado/,
+  )
+  await assert.rejects(
+    () => runner.start(task.id, { plannerId: 'architect', devId: 'nao-existe', qaId: 'qa' }),
+    /não encontrado/,
+  )
+  await assert.rejects(
+    () => runner.start(task.id, { plannerId: 'architect', devId: 'dev', qaId: 'nao-existe' }),
+    /não encontrado/,
+  )
+
+  // 2. Agente inativo
+  await assert.rejects(
+    () => runner.start(task.id, { plannerId: 'inactive-planner', devId: 'dev', qaId: 'qa' }),
+    /inativo/,
+  )
+
+  // 3. Categoria incompatível (ex.: dev como planner, tutor como qa, qa como dev)
+  await assert.rejects(
+    () => runner.start(task.id, { plannerId: 'dev', devId: 'dev', qaId: 'qa' }),
+    /incompatível com a etapa de planejamento/,
+  )
+  await assert.rejects(
+    () => runner.start(task.id, { plannerId: 'architect', devId: 'qa', qaId: 'qa' }),
+    /incompatível com a etapa de desenvolvimento/,
+  )
+  await assert.rejects(
+    () => runner.start(task.id, { plannerId: 'architect', devId: 'dev', qaId: 'tutor' }),
+    /incompatível com a etapa de revisão QA/,
+  )
+
+  // 4. Agente com CLI indisponível (offline)
+  await assert.rejects(
+    () => runner.start(task.id, { plannerId: 'architect', devId: 'offline-dev', qaId: 'qa' }),
+    /CLI indisponível/,
+  )
+})
+
+test('TeamRunner persiste verdictDetail e verdict corretamente para todas as 7 classificações do QA', async () => {
+  const tmp = setupCleanGitRepo('aidw-verdicts-')
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const activeProj = projects.active()!
+
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const configs = new AgentConfigStore(projects.db)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+  for (const a of registry.list()) await registry.check(a.id)
+
+  const cases: { line: string; expectedDetail: string; expectedBinary: 'approved' | 'changes' }[] = [
+    { line: 'VEREDITO: APROVADO', expectedDetail: 'APROVADO', expectedBinary: 'approved' },
+    { line: 'VEREDITO: APROVADO PARA O ESCOPO', expectedDetail: 'APROVADO PARA O ESCOPO', expectedBinary: 'approved' },
+    { line: 'VEREDITO: APROVADO COM RESSALVAS', expectedDetail: 'APROVADO COM RESSALVAS', expectedBinary: 'approved' },
+    { line: 'VEREDITO: REPROVADO', expectedDetail: 'REPROVADO', expectedBinary: 'changes' },
+    { line: 'VEREDITO: BLOQUEADO', expectedDetail: 'BLOQUEADO', expectedBinary: 'changes' },
+    { line: 'VEREDITO: NÃO VERIFICADO', expectedDetail: 'NÃO VERIFICADO', expectedBinary: 'changes' },
+    { line: 'VEREDITO: INCONCLUSIVO', expectedDetail: 'INCONCLUSIVO', expectedBinary: 'changes' },
+  ]
+
+  let currentVerdictLine = 'VEREDITO: APROVADO'
+  let stepCounter = 0
+
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    git: new GitService(),
+    configs,
+    launch: (_cli, _args, _options) => {
+      stepCounter++
+      const isQa = stepCounter % 3 === 0
+      return {
+        done: Promise.resolve({
+          code: 0,
+          stdout: isQa ? `Relatório QA.\n${currentVerdictLine}` : 'Ok',
+          stderr: '',
+          timedOut: false,
+        }),
+        kill: () => {},
+      }
+    },
+  })
+
+  for (const c of cases) {
+    currentVerdictLine = c.line
+    const t = tasks.create(activeProj.id, {
+      title: `Teste ${c.expectedDetail}`,
+      description: '',
+      priority: 'low',
+      status: 'todo',
+      agentId: null,
+    })
+    const m = await runner.start(t.id)
+    for (let i = 0; i < 50; i++) {
+      if (tasks.getMission(m.id)!.phase === 'awaiting_approval') break
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    await runner.approve(m.id)
+    for (let i = 0; i < 50; i++) {
+      if (tasks.getMission(m.id)!.phase === 'done') break
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    const done = tasks.getMission(m.id)!
+    assert.equal(done.verdictDetail, c.expectedDetail)
+    assert.equal(done.verdict, c.expectedBinary)
+  }
+})
+
+test('TeamRunner cancelamento e recuperação funcionam com equipes personalizadas', async () => {
+  const tmp = setupCleanGitRepo('aidw-cancel-rec-')
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const activeProj = projects.active()!
+
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const configs = new AgentConfigStore(projects.db)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+
+  configs.createAgent({
+    id: 'custom-planner',
+    name: 'Planejador Custom',
+    role: 'Arquiteto',
+    roleCategory: 'planning',
+    specializationId: 'tech-lead',
+    provider: 'gemini',
+  })
+  registry.syncFromConfigs(configs.list())
+  for (const a of registry.list()) await registry.check(a.id)
+
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    git: new GitService(),
+    configs,
+    launch: () => ({
+      done: Promise.resolve({ code: 0, stdout: 'Plano pronto', stderr: '', timedOut: false }),
+      kill: () => {},
+    }),
+  })
+
+  const task = tasks.create(activeProj.id, {
+    title: 'Tarefa cancelável',
+    description: '',
+    priority: 'medium',
+    status: 'todo',
+    agentId: 'custom-planner',
+  })
+
+  const m = await runner.start(task.id, { plannerId: 'custom-planner', devId: 'dev', qaId: 'qa' })
+  for (let i = 0; i < 50; i++) {
+    if (tasks.getMission(m.id)!.phase === 'awaiting_approval') break
+    await new Promise((r) => setTimeout(r, 15))
+  }
+  assert.equal(registry.get('custom-planner')?.state, 'approval')
+
+  // Simula recover() com missão aguardando aprovação de planejador personalizado
+  registry.setMissionState('custom-planner', null)
+  assert.equal(registry.get('custom-planner')?.state, 'idle')
+  runner.recover()
+  assert.equal(registry.get('custom-planner')?.state, 'approval')
+
+  // Cancela a missão e verifica que o agente personalizado volta para idle
+  runner.cancel(m.id)
+  assert.equal(tasks.getMission(m.id)?.phase, 'cancelled')
+  assert.equal(registry.get('custom-planner')?.state, 'idle')
+})
+
+
