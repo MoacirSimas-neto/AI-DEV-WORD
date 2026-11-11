@@ -4,7 +4,7 @@ import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { GitService, parseStatus } from './service.ts'
+import { GitService, parseRemotes, parseStatus, sanitizeRemoteUrl } from './service.ts'
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' })
 const tempDir = (name: string) => realpathSync.native(mkdtempSync(path.join(tmpdir(), `aidw-${name}-`)))
@@ -108,3 +108,30 @@ test('push exige a prévia, vale uma vez e é invalidado se o repositório mudar
   await assert.rejects(service.push(repo, preview.token), /expirou/) // uso único
   await assert.rejects(service.previewPush(repo), /Nada para enviar/)
 })
+
+test('parseRemotes distingue configurado, sem remote e sanitiza credenciais na URL', () => {
+  assert.deepEqual(parseRemotes({ code: 0, stdout: '' }), {
+    remoteState: 'none',
+    remoteName: null,
+    remoteUrl: null,
+  })
+
+  assert.deepEqual(parseRemotes({ code: 128, stdout: '' }), {
+    remoteState: 'unknown',
+    remoteName: null,
+    remoteUrl: null,
+  })
+
+  const configured = parseRemotes({
+    code: 0,
+    stdout:
+      'origin\thttps://user:ghp_secretToken123@github.com/org/repo.git (fetch)\norigin\thttps://user:ghp_secretToken123@github.com/org/repo.git (push)\n',
+  })
+  assert.equal(configured.remoteState, 'configured')
+  assert.equal(configured.remoteName, 'origin')
+  assert.equal(configured.remoteUrl, 'https://github.com/org/repo.git')
+  assert.ok(!configured.remoteUrl?.includes('ghp_secretToken123'))
+
+  assert.equal(sanitizeRemoteUrl('git@github.com:org/repo.git'), 'git@github.com:org/repo.git')
+})
+

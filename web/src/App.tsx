@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { PhaserGame } from './game/PhaserGame.tsx'
+import type { WorldAction } from './game/WorldBridge.ts'
 import { useGitStatus } from './net/useGitStatus.ts'
 import { type ConnectionStatus, useServer } from './net/useServer.ts'
 import { AgentCenter } from './ui/AgentCenter.tsx'
@@ -7,6 +8,8 @@ import { AgentWindow } from './ui/AgentWindow.tsx'
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
 import { GitPanel } from './ui/GitPanel.tsx'
 import { HistoryPanel } from './ui/HistoryPanel.tsx'
+import { HomeView } from './ui/HomeView.tsx'
+import { MissionMonitor } from './ui/MissionMonitor.tsx'
 import { ProjectBar } from './ui/ProjectBar.tsx'
 import { TaskPanel } from './ui/TaskPanel.tsx'
 import { TeamRoster } from './ui/TeamRoster.tsx'
@@ -17,12 +20,21 @@ const STATUS: Record<ConnectionStatus, { label: string; tone: string }> = {
   offline: { label: 'Backend desconectado', tone: 'error' },
 }
 
-/** O que ocupa a janela auxiliar: a janela de um agente, Tarefas, Histórico ou Central de Agentes. */
-type Panel = { agentId: string } | 'tasks' | 'history' | 'agent-center' | null
+export type NavTab = 'home' | 'office' | 'tasks' | 'history' | 'agents'
 
 function App() {
   const { status, agents, workspace, tasks, missions, history, configs, send, subscribe } = useServer()
-  const [panel, setPanel] = useState<Panel>(null)
+  const [activeTab, setActiveTab] = useState<NavTab>('home')
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+
+  const [missionOpen, setMissionOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('aidw_mission_panel_open') !== 'false'
+    } catch {
+      return true
+    }
+  })
+
   const [gitOpen, setGitOpen] = useState<boolean>(() => {
     try {
       return localStorage.getItem('aidw_git_panel_open') !== 'false'
@@ -34,10 +46,33 @@ function App() {
   const online = status === 'online'
   const gitStatus = useGitStatus(send, subscribe, online, workspace.activeProjectId)
 
-  const selectedId = panel && typeof panel === 'object' ? panel.agentId : null
-  const selected = agents.find((a) => a.id === selectedId) ?? null
-  const selectAgent = useCallback((agentId: string) => setPanel({ agentId }), [])
-  const close = () => setPanel(null)
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null
+  const selectedAgentConfig = configs.find((c) => c.agentId === selectedAgentId)
+
+  const selectAgent = useCallback((agentId: string) => {
+    setSelectedAgentId(agentId)
+    setActiveTab('office')
+  }, [])
+
+  const handleWorldAction = useCallback((action: WorldAction) => {
+    if (action === 'tasks') setActiveTab('tasks')
+    else if (action === 'history') setActiveTab('history')
+    else if (action === 'agents') setActiveTab('agents')
+    else if (action === 'mission') {
+      setMissionOpen(true)
+      setActiveTab('office')
+    }
+  }, [])
+
+  const toggleMission = () => {
+    setMissionOpen((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('aidw_mission_panel_open', String(next))
+      } catch {}
+      return next
+    })
+  }
 
   const toggleGit = () => {
     setGitOpen((prev) => {
@@ -49,21 +84,84 @@ function App() {
     })
   }
 
+  const isImmersive = !missionOpen && !gitOpen
+  const toggleImmersive = () => {
+    const nextOpen = isImmersive
+    setMissionOpen(nextOpen)
+    setGitOpen(nextOpen)
+    try {
+      localStorage.setItem('aidw_mission_panel_open', String(nextOpen))
+      localStorage.setItem('aidw_git_panel_open', String(nextOpen))
+    } catch {}
+  }
+
   const activeProject = workspace.projects?.find((p) => p.id === workspace.activeProjectId)
   const projectTasks =
     workspace.activeProjectId && Array.isArray(tasks)
       ? tasks.filter((t) => t.projectId === workspace.activeProjectId)
       : []
+  const activeMissionsCount = Array.isArray(missions)
+    ? missions.filter((m) =>
+        ['planning', 'awaiting_approval', 'developing', 'reviewing'].includes(m.phase),
+      ).length
+    : 0
 
   return (
     <ErrorBoundary fallbackTitle="Falha geral na interface do AI Dev World">
       <div className="app">
+        {/* Barra Superior de Navegação e Status Global */}
         <header className="topbar">
-          <div>
-            <h1>AI Dev World</h1>
-            <p className="tagline">Seu escritório de agentes, rodando na sua máquina</p>
+          <div className="topbar-brand" onClick={() => setActiveTab('home')} role="button" tabIndex={0}>
+            <div className="brand-badge">AI</div>
+            <div>
+              <h1>AI Dev World</h1>
+              <p className="tagline">Command Center & Living Pixel Art Office</p>
+            </div>
           </div>
-          <span className={`lamp lamp-${STATUS[status].tone}`}>{STATUS[status].label}</span>
+
+          <nav className="main-nav" aria-label="Navegação principal">
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'home' ? 'nav-tab-active' : ''}`}
+              onClick={() => setActiveTab('home')}
+            >
+              Home
+            </button>
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'office' ? 'nav-tab-active' : ''}`}
+              onClick={() => setActiveTab('office')}
+            >
+              Escritório 2D
+              {activeMissionsCount > 0 && <span className="nav-pill nav-pill-cyan">{activeMissionsCount}</span>}
+            </button>
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'tasks' ? 'nav-tab-active' : ''}`}
+              onClick={() => setActiveTab('tasks')}
+            >
+              Projetos e Tarefas
+              {projectTasks.length > 0 && <span className="nav-pill">{projectTasks.length}</span>}
+            </button>
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'history' ? 'nav-tab-active' : ''}`}
+              onClick={() => setActiveTab('history')}
+            >
+              Histórico
+            </button>
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'agents' ? 'nav-tab-active' : ''}`}
+              onClick={() => setActiveTab('agents')}
+            >
+              Central de Agentes
+            </button>
+          </nav>
+
+          <div className="topbar-status">
+            <span className={`lamp lamp-${STATUS[status].tone}`}>{STATUS[status].label}</span>
+          </div>
         </header>
 
         {status === 'offline' && (
@@ -72,6 +170,7 @@ function App() {
           </p>
         )}
 
+        {/* Seletor de Projeto Ativo (sempre acessível no topo) */}
         <ErrorBoundary fallbackTitle="Falha na barra de projetos">
           <ProjectBar
             workspace={workspace}
@@ -79,70 +178,133 @@ function App() {
             changes={gitStatus?.isRepo ? gitStatus.files.length : null}
             taskCount={projectTasks.length}
             gitOpen={gitOpen}
-            onToggleGit={toggleGit}
-            onOpenTasks={() => setPanel('tasks')}
-            onOpenHistory={() => setPanel('history')}
-            onOpenAgentCenter={() => setPanel('agent-center')}
+            onToggleGit={() => {
+              if (activeTab !== 'office') setActiveTab('office')
+              toggleGit()
+            }}
+            onOpenTasks={() => setActiveTab('tasks')}
+            onOpenHistory={() => setActiveTab('history')}
+            onOpenAgentCenter={() => setActiveTab('agents')}
             send={send}
             subscribe={subscribe}
           />
         </ErrorBoundary>
 
-        <div className={`workspace-layout ${gitOpen ? 'git-open' : 'git-closed'}`}>
-          <div className="workspace-main">
-            <main className={selected || panel !== null ? 'stage stage-split' : 'stage'}>
+        {/* ABA 1: HOME (COMMAND CENTER) */}
+        {activeTab === 'home' && (
+          <ErrorBoundary fallbackTitle="Falha na Home Command Center">
+            <HomeView
+              workspace={workspace}
+              agents={agents}
+              configs={configs}
+              tasks={tasks}
+              missions={missions}
+              history={history}
+              gitStatus={gitStatus}
+              online={online}
+              send={send}
+              onNavigateOffice={() => setActiveTab('office')}
+              onSelectAgentInOffice={selectAgent}
+              onNavigateTasks={() => setActiveTab('tasks')}
+              onNavigateHistory={() => setActiveTab('history')}
+              onNavigateAgents={() => setActiveTab('agents')}
+            />
+          </ErrorBoundary>
+        )}
+
+        {/* ABA 2: ESCRITÓRIO 2D (3 COLUNAS) — mantido montado no DOM para preservar o canvas Phaser e sessões */}
+        <div
+          className={`office-tri-layout ${activeTab !== 'office' ? 'view-hidden' : ''} ${missionOpen ? 'mission-open' : 'mission-closed'} ${gitOpen ? 'git-open' : 'git-closed'}`}
+        >
+          {/* Coluna Esquerda: Monitor de Missão */}
+          <div className="office-left-sidebar">
+            <ErrorBoundary fallbackTitle="Falha no Monitor de Missão">
+              <MissionMonitor
+                missions={missions}
+                tasks={tasks}
+                agents={agents}
+                configs={configs}
+                activeProjectId={workspace.activeProjectId}
+                projectName={activeProject?.name}
+                online={online}
+                send={send}
+                subscribe={subscribe}
+                collapsed={!missionOpen}
+                onToggleCollapse={toggleMission}
+                onOpenTasks={() => setActiveTab('tasks')}
+              />
+            </ErrorBoundary>
+          </div>
+
+          {/* Coluna Central: Living Agent World + Roster + Terminal do Agente */}
+          <div className="office-center-stage">
+            <div className="office-stage-toolbar">
+              <div className="office-stage-title">
+                <span className="stage-live-dot" />
+                <strong>Living Agent Office</strong>
+                <span className="stage-hint">
+                  Clique em um agente, mesa, quadro Kanban ou rack de servidores para interagir
+                </span>
+              </div>
+              <div className="office-stage-controls">
+                <button
+                  type="button"
+                  className="btn-quiet btn-xs"
+                  onClick={toggleMission}
+                  title="Alternar barra lateral esquerda (Monitor de Missão)"
+                >
+                  {missionOpen ? 'Ocultar Missão' : 'Mostrar Missão'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-quiet btn-xs"
+                  onClick={toggleImmersive}
+                  title="Recolher ou expandir ambas as barras laterais para maximizar o escritório"
+                >
+                  {isImmersive ? 'Restaurar Painéis' : '⛶ Modo Imersivo'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-quiet btn-xs"
+                  onClick={toggleGit}
+                  title="Alternar barra lateral direita (Git Control)"
+                >
+                  {gitOpen ? 'Ocultar Git' : 'Mostrar Git'}
+                </button>
+              </div>
+            </div>
+
+            <main className={selectedAgent ? 'stage stage-split' : 'stage'}>
               <div className="stage-world">
                 <ErrorBoundary fallbackTitle="Falha na visualização do escritório 2D">
-                  <PhaserGame agents={agents} selectedId={selectedId} onSelect={selectAgent} />
-                  <TeamRoster agents={agents} selectedId={selectedId} onSelect={selectAgent} />
+                  <PhaserGame
+                    agents={agents}
+                    selectedId={selectedAgentId}
+                    onSelect={selectAgent}
+                    onAction={handleWorldAction}
+                  />
+                  <TeamRoster agents={agents} selectedId={selectedAgentId} onSelect={selectAgent} />
                 </ErrorBoundary>
               </div>
-              {selected && (
+
+              {selectedAgent && (
                 <ErrorBoundary fallbackTitle="Falha na janela do agente">
                   <AgentWindow
-                    agent={selected}
+                    agent={selectedAgent}
+                    config={selectedAgentConfig}
                     online={online}
                     hasProject={workspace.activeProjectId !== null}
                     send={send}
                     subscribe={subscribe}
-                    onClose={close}
-                  />
-                </ErrorBoundary>
-              )}
-              {panel === 'tasks' && (
-                <ErrorBoundary fallbackTitle="Falha no painel de tarefas">
-                  <TaskPanel
-                    tasks={tasks}
-                    missions={missions}
-                    agents={agents}
-                    activeProjectId={workspace.activeProjectId}
-                    online={online}
-                    send={send}
-                    subscribe={subscribe}
-                    onClose={close}
-                  />
-                </ErrorBoundary>
-              )}
-              {panel === 'history' && (
-                <ErrorBoundary fallbackTitle="Falha no painel de histórico">
-                  <HistoryPanel history={history} onClose={close} />
-                </ErrorBoundary>
-              )}
-              {panel === 'agent-center' && (
-                <ErrorBoundary fallbackTitle="Falha na Central de Agentes">
-                  <AgentCenter
-                    agents={agents}
-                    configs={configs}
-                    online={online}
-                    send={send}
-                    onClose={close}
+                    onClose={() => setSelectedAgentId(null)}
                   />
                 </ErrorBoundary>
               )}
             </main>
           </div>
 
-          <aside className="workspace-git-sidebar">
+          {/* Coluna Direita: Git Control Permanente */}
+          <div className="office-right-sidebar">
             <ErrorBoundary fallbackTitle="Falha no painel Git">
               <GitPanel
                 status={gitStatus}
@@ -154,8 +316,50 @@ function App() {
                 onToggleCollapse={toggleGit}
               />
             </ErrorBoundary>
-          </aside>
+          </div>
         </div>
+
+        {/* ABA 3: PROJETOS E TAREFAS */}
+        {activeTab === 'tasks' && (
+          <div className="full-view-container">
+            <ErrorBoundary fallbackTitle="Falha no painel de tarefas">
+              <TaskPanel
+                tasks={tasks}
+                missions={missions}
+                agents={agents}
+                activeProjectId={workspace.activeProjectId}
+                online={online}
+                send={send}
+                subscribe={subscribe}
+                onClose={() => setActiveTab('office')}
+              />
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {/* ABA 4: HISTÓRICO */}
+        {activeTab === 'history' && (
+          <div className="full-view-container">
+            <ErrorBoundary fallbackTitle="Falha no painel de histórico">
+              <HistoryPanel history={history} onClose={() => setActiveTab('office')} />
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {/* ABA 5: CENTRAL DE AGENTES */}
+        {activeTab === 'agents' && (
+          <div className="full-view-container">
+            <ErrorBoundary fallbackTitle="Falha na Central de Agentes">
+              <AgentCenter
+                agents={agents}
+                configs={configs}
+                online={online}
+                send={send}
+                onClose={() => setActiveTab('office')}
+              />
+            </ErrorBoundary>
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   )

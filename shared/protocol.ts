@@ -77,6 +77,8 @@ export interface GitFile {
   unstaged: boolean
 }
 
+export type GitRemoteState = 'configured' | 'none' | 'unknown'
+
 export interface GitStatus {
   isRepo: boolean
   branch: string | null
@@ -86,6 +88,11 @@ export interface GitStatus {
   files: GitFile[]
   /** true se a lista foi cortada por ter arquivos demais. */
   truncated: boolean
+  /** Estado do repositório remoto associado ao projeto local. */
+  remoteState?: GitRemoteState
+  remoteName?: string | null
+  remoteUrl?: string | null
+  lastCommit?: string | null
 }
 
 /** O que um push faria. `token` autoriza exatamente esse push, uma única vez. */

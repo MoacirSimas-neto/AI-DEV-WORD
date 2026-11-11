@@ -4,6 +4,8 @@ import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { computeMissionProgress } from '../../../shared/missionProgress.ts'
+import type { MissionInfo } from '../../../shared/protocol.ts'
 import { AgentConfigStore } from '../agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from '../agents/registry.ts'
 import { GitService } from '../git/service.ts'
@@ -225,3 +227,57 @@ test('getStepCliAndArgs configura Antigravity CLI com --model, --effort e modo c
   assert.ok(devStep.args.includes('accept-edits'))
   assert.ok(devStep.args.includes('-p'))
 })
+
+test('computeMissionProgress calcula 0%, 33%, 67%, 100% apenas por etapas verificadas e nunca 100% em falha', () => {
+  const baseMission = (overrides: Partial<MissionInfo>): MissionInfo => ({
+    id: 1,
+    projectId: 1,
+    taskId: 1,
+    phase: 'planning',
+    plan: '',
+    devReport: '',
+    review: '',
+    verdict: null,
+    files: [],
+    error: null,
+    createdAt: '',
+    updatedAt: '',
+    ...overrides,
+  })
+
+  const planning = computeMissionProgress(baseMission({ phase: 'planning' }))
+  assert.equal(planning.percent, 0)
+  assert.equal(planning.completedSteps, 0)
+  assert.equal(planning.isRunning, true)
+
+  const awaiting = computeMissionProgress(baseMission({ phase: 'awaiting_approval', plan: 'Plano pronto' }))
+  assert.equal(awaiting.percent, 33)
+  assert.equal(awaiting.completedSteps, 1)
+  assert.equal(awaiting.needsApproval, true)
+
+  const developing = computeMissionProgress(baseMission({ phase: 'developing', plan: 'Plano pronto' }))
+  assert.equal(developing.percent, 33)
+  assert.equal(developing.completedSteps, 1)
+  assert.equal(developing.isRunning, true)
+
+  const reviewing = computeMissionProgress(
+    baseMission({ phase: 'reviewing', plan: 'Plano pronto', devReport: 'Código implementado' }),
+  )
+  assert.equal(reviewing.percent, 67)
+  assert.equal(reviewing.completedSteps, 2)
+  assert.equal(reviewing.isRunning, true)
+
+  const done = computeMissionProgress(
+    baseMission({ phase: 'done', plan: 'Plano', devReport: 'Dev', review: 'QA ok', verdict: 'approved' }),
+  )
+  assert.equal(done.percent, 100)
+  assert.equal(done.completedSteps, 3)
+
+  const failedDuringDev = computeMissionProgress(
+    baseMission({ phase: 'failed', plan: 'Plano', error: 'Falha no CLI' }),
+  )
+  assert.equal(failedDuringDev.percent, 33)
+  assert.equal(failedDuringDev.isInterrupted, true)
+  assert.notEqual(failedDuringDev.percent, 100)
+})
+

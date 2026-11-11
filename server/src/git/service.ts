@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import type { GitFile, GitStatus, PushPreview } from '../../../shared/protocol.ts'
+import type { GitFile, GitRemoteState, GitStatus, PushPreview } from '../../../shared/protocol.ts'
 import { resolveCommand } from '../cli/resolve.ts'
 import { runCli } from '../cli/run.ts'
 
@@ -16,6 +16,45 @@ const NOT_A_REPO: GitStatus = {
   behind: 0,
   files: [],
   truncated: false,
+  remoteState: 'none',
+  remoteName: null,
+  remoteUrl: null,
+  lastCommit: null,
+}
+
+/** Remove credenciais embutidas em URLs HTTP/HTTPS de remote Git. */
+export function sanitizeRemoteUrl(url: string): string {
+  return url.replace(/\/\/([^/@:]+)(?::[^/@]+)?@/, '//')
+}
+
+/** Interpreta a saída de `git remote -v` para classificar o estado remoto. */
+export function parseRemotes(res: { code: number; stdout: string }): {
+  remoteState: GitRemoteState
+  remoteName: string | null
+  remoteUrl: string | null
+} {
+  if (res.code !== 0) {
+    return { remoteState: 'unknown', remoteName: null, remoteUrl: null }
+  }
+  const lines = res.stdout.split(/\r?\n/).filter(Boolean)
+  if (lines.length === 0) {
+    return { remoteState: 'none', remoteName: null, remoteUrl: null }
+  }
+  const parsed = lines
+    .map((line) => {
+      const match = /^(\S+)\s+(\S+)/.exec(line)
+      return match ? { name: match[1], url: sanitizeRemoteUrl(match[2]) } : null
+    })
+    .filter((r): r is { name: string; url: string } => r !== null)
+  if (parsed.length === 0) {
+    return { remoteState: 'none', remoteName: null, remoteUrl: null }
+  }
+  const preferred = parsed.find((r) => r.name === 'origin') ?? parsed[0]
+  return {
+    remoteState: 'configured',
+    remoteName: preferred.name,
+    remoteUrl: preferred.url,
+  }
 }
 
 /** Interpreta a saída de `git status --porcelain=v1 -z --branch`. */
@@ -74,8 +113,18 @@ export class GitService {
   async status(cwd: string): Promise<GitStatus> {
     const inside = await this.run(cwd, ['rev-parse', '--is-inside-work-tree'], { allowFailure: true })
     if (inside.code !== 0) return NOT_A_REPO
-    const result = await this.run(cwd, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all'])
-    return parseStatus(result.stdout)
+    const [result, remoteRes, logRes] = await Promise.all([
+      this.run(cwd, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all']),
+      this.run(cwd, ['remote', '-v'], { allowFailure: true }),
+      this.run(cwd, ['log', '-1', '--format=%h %s'], { allowFailure: true }),
+    ])
+    const parsed = parseStatus(result.stdout)
+    const remoteInfo = parseRemotes(remoteRes)
+    return {
+      ...parsed,
+      ...remoteInfo,
+      lastCommit: logRes.code === 0 ? logRes.stdout.trim() || null : null,
+    }
   }
 
   async diff(cwd: string, file: string, staged: boolean): Promise<string> {

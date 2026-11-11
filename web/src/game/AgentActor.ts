@@ -4,33 +4,36 @@ import { characterRows, type Frame, lookFor, paletteFor } from './agentLooks.ts'
 import { FONT, type Station, U } from './officeLayout.ts'
 import { makePixelTexture } from './pixelArt.ts'
 
-const WALK_SPEED = 90 // pixels do mundo por segundo
-const BUBBLE_TEXT: Record<AgentState, string> = {
-  idle: '',
-  waiting: '?',
-  working: '...',
-  planning: '💡',
-  approval: '✋',
-  reviewing: '🔍',
-  done: '✔',
-  offline: 'zzz',
-  error: '!',
+const WALK_SPEED = 96 // pixels do mundo por segundo
+
+const BUBBLE_STYLE: Record<AgentState, { text: string; bg: string; fg: string }> = {
+  idle: { text: '', bg: '#0f172a', fg: '#f8fafc' },
+  waiting: { text: 'ESPERA', bg: '#f59e0b', fg: '#0f172a' },
+  working: { text: 'EXEC', bg: '#10b981', fg: '#052e16' },
+  planning: { text: 'PLAN', bg: '#38bdf8', fg: '#082f49' },
+  approval: { text: 'APROVAR', bg: '#f59e0b', fg: '#0f172a' },
+  reviewing: { text: 'QA REV', bg: '#a855f7', fg: '#faf5ff' },
+  done: { text: 'PRONTO', bg: '#22c55e', fg: '#052e16' },
+  offline: { text: 'OFF', bg: '#334155', fg: '#cbd5e1' },
+  error: { text: 'ERRO', bg: '#ef4444', fg: '#fef2f2' },
 }
+
 const LED_COLOR: Partial<Record<AgentState, number>> = {
-  waiting: 0xf0bd5e,
-  working: 0x7fe08a,
-  planning: 0x6fb4d8,
-  approval: 0xf0bd5e,
-  reviewing: 0x6fb4d8,
-  done: 0x5fae6e,
-  error: 0xd8644f,
+  waiting: 0xf59e0b,
+  working: 0x34d399,
+  planning: 0x38bdf8,
+  approval: 0xf59e0b,
+  reviewing: 0xa855f7,
+  done: 0x22c55e,
+  error: 0xef4444,
 }
-const LED_OFF = 0x2a2e38
+const LED_OFF = 0x222630
 
 /**
  * Um personagem no mundo. O comportamento é função do estado real do agente:
- * working -> digita na mesa; waiting -> parado na mesa esperando você;
- * idle -> passeia; offline -> dorme; error -> alerta.
+ * working/planning/reviewing -> trabalha na mesa com animação dedicada;
+ * waiting/approval/done -> na mesa aguardando;
+ * idle -> passeia pelo corredor; offline -> descansa; error -> alerta.
  */
 export class AgentActor {
   readonly id: string
@@ -55,44 +58,55 @@ export class AgentActor {
     this.id = agent.id
 
     const look = lookFor(agent.id)
-    for (const frame of ['stand', 'step', 'blink'] as Frame[]) {
+    for (const frame of ['stand', 'step', 'stepAlt', 'blink', 'work1', 'work2'] as Frame[]) {
       makePixelTexture(scene, this.key(frame), characterRows(look, frame), paletteFor(look))
     }
     if (!scene.anims.exists(this.key('walk'))) {
       scene.anims.create({
         key: this.key('walk'),
-        frames: [{ key: this.key('step') }, { key: this.key('stand') }],
-        frameRate: 6,
+        frames: [
+          { key: this.key('step') },
+          { key: this.key('stand') },
+          { key: this.key('stepAlt') },
+          { key: this.key('stand') },
+        ],
+        frameRate: 7,
+        repeat: -1,
+      })
+    }
+    if (!scene.anims.exists(this.key('work'))) {
+      scene.anims.create({
+        key: this.key('work'),
+        frames: [{ key: this.key('work1') }, { key: this.key('work2') }],
+        frameRate: 4,
         repeat: -1,
       })
     }
 
-    this.ring = scene.add.ellipse(0, -2, 46, 14).setStrokeStyle(3, 0xfff3c4).setVisible(false)
-    const shadow = scene.add.ellipse(0, -1, 36, 9, 0x000000, 0.2)
+    this.ring = scene.add.ellipse(0, -2, 48, 15).setStrokeStyle(3, 0x38bdf8).setVisible(false)
+    const shadow = scene.add.ellipse(0, -1, 38, 10, 0x000000, 0.28)
     this.sprite = scene.add.sprite(0, 0, this.key('stand')).setOrigin(0.5, 1).setScale(U)
     this.sprite.setInteractive({ useHandCursor: true })
     this.sprite.on('pointerdown', () => onSelect(agent.id))
 
     this.label = scene.add
-      .text(0, 3, agent.name, { fontFamily: FONT, fontSize: '14px', color: '#fff8e7' })
+      .text(0, 3, agent.name, { fontFamily: FONT, fontSize: '13px', color: '#f8fafc' })
       .setOrigin(0.5, 0)
-      .setStroke('#3a2a2e', 4)
+      .setStroke('#0f172a', 4)
     this.bubble = scene.add
-      .text(0, -66, '', {
+      .text(0, -68, '', {
         fontFamily: FONT,
-        fontSize: '14px',
-        color: '#3a2a2e',
-        backgroundColor: '#fff8e7',
-        padding: { x: 6, y: 1 },
+        fontSize: '11px',
+        color: '#0f172a',
+        backgroundColor: '#38bdf8',
+        padding: { x: 5, y: 2 },
       })
       .setOrigin(0.5, 1)
 
     this.root = scene.add.container(station.rest.x, station.rest.y, [this.ring, shadow, this.sprite])
     this.root.setDepth(this.root.y)
-    // Nome e balão ficam numa camada acima de tudo, para nunca serem cobertos por móveis.
     this.overlay = scene.add.container(this.root.x, this.root.y, [this.label, this.bubble]).setDepth(10_000)
 
-    // Piscar os olhos de vez em quando, só quando parado.
     this.blinkTimer = scene.time.addEvent({
       delay: Phaser.Math.Between(2600, 4800),
       loop: true,
@@ -117,8 +131,17 @@ export class AgentActor {
     this.state = state
     this.stopActivity()
 
-    this.bubble.setText(BUBBLE_TEXT[state]).setVisible(state !== 'idle')
-    // Sentado, a plaquinha da mesa já diz quem é.
+    const badge = BUBBLE_STYLE[state]
+    this.bubble
+      .setText(badge.text)
+      .setStyle({
+        fontFamily: FONT,
+        fontSize: '11px',
+        color: badge.fg,
+        backgroundColor: badge.bg,
+      })
+      .setVisible(state !== 'idle')
+
     this.label.setVisible(state === 'idle' || state === 'offline' || state === 'error')
     if (state === 'offline') this.sprite.setTint(0x8a8fa0)
     else this.sprite.clearTint()
@@ -168,37 +191,59 @@ export class AgentActor {
     this.sprite.y = 0
   }
 
-  private walkTo(x: number, y: number, onArrive?: () => void) {
-    const distance = Phaser.Math.Distance.Between(this.root.x, this.root.y, x, y)
-    if (distance < 2) {
+  private walkTo(targetX: number, targetY: number, onArrive?: () => void) {
+    const { corridorY } = this.station
+    const waypoints: { x: number; y: number }[] = []
+
+    // Se precisa cruzar entre a mesa (y < corridorY) e outro eixo X, usa o corredor principal
+    if (Math.abs(targetX - this.root.x) > 18 * U && (this.root.y < corridorY || targetY < corridorY)) {
+      if (Math.abs(this.root.y - corridorY) > 4) {
+        waypoints.push({ x: this.root.x, y: corridorY })
+      }
+      waypoints.push({ x: targetX, y: corridorY })
+    }
+    waypoints.push({ x: targetX, y: targetY })
+
+    this.followWaypoints(waypoints, onArrive)
+  }
+
+  private followWaypoints(points: { x: number; y: number }[], onArrive?: () => void) {
+    const next = points.shift()
+    if (!next) {
+      this.sprite.stop()
+      this.sprite.setTexture(this.key('stand'))
+      this.sprite.setFlipX(false)
       onArrive?.()
       return
     }
-    this.sprite.setFlipX(x < this.root.x)
-    this.sprite.play(this.key('walk'))
+    const distance = Phaser.Math.Distance.Between(this.root.x, this.root.y, next.x, next.y)
+    if (distance < 2) {
+      this.followWaypoints(points, onArrive)
+      return
+    }
+    this.sprite.setFlipX(next.x < this.root.x)
+    if (!this.sprite.anims.isPlaying || this.sprite.anims.currentAnim?.key !== this.key('walk')) {
+      this.sprite.play(this.key('walk'))
+    }
     this.walkTween = this.scene.tweens.add({
       targets: this.root,
-      x,
-      y,
+      x: next.x,
+      y: next.y,
       duration: (distance / WALK_SPEED) * 1000,
       onUpdate: () => {
         this.root.setDepth(this.root.y)
         this.overlay.setPosition(this.root.x, this.root.y)
       },
-      onComplete: () => {
-        this.sprite.stop()
-        this.sprite.setTexture(this.key('stand'))
-        this.sprite.setFlipX(false)
-        onArrive?.()
-      },
+      onComplete: () => this.followWaypoints(points, onArrive),
     })
   }
 
   private startTyping() {
+    this.sprite.play(this.key('work'))
     this.typingTween = this.scene.tweens.add({
       targets: this.sprite,
       y: -U,
-      duration: 150,
+      duration: 180,
       yoyo: true,
       repeat: -1,
       ease: 'Stepped',
@@ -206,7 +251,7 @@ export class AgentActor {
   }
 
   private wanderSoon() {
-    this.wanderTimer = this.scene.time.delayedCall(Phaser.Math.Between(1200, 4200), () => {
+    this.wanderTimer = this.scene.time.delayedCall(Phaser.Math.Between(1400, 4200), () => {
       const area = this.station.wander
       const x = area.x + Math.random() * area.width
       const y = area.y + Math.random() * area.height

@@ -1,4 +1,4 @@
-import type { AgentInfo, AuthState } from '../../../shared/protocol.ts'
+import type { AgentConfig, AgentInfo, AuthState } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
 import { stateOf } from './agentText.ts'
@@ -12,6 +12,7 @@ const AUTH_LABEL: Record<AuthState, string> = {
 
 interface Props {
   agent: AgentInfo
+  config?: AgentConfig
   online: boolean
   hasProject: boolean
   send: Send
@@ -19,8 +20,8 @@ interface Props {
   onClose: () => void
 }
 
-/** Janela individual do agente: quem ele é, em que estado está e o seu terminal. */
-export function AgentWindow({ agent, online, hasProject, send, subscribe, onClose }: Props) {
+/** Janela individual do agente: quem ele é, modelo configurado, estado e terminal. */
+export function AgentWindow({ agent, config, online, hasProject, send, subscribe, onClose }: Props) {
   const sessionActive = agent.session
   const cliReady = agent.state !== 'offline'
   const state = stateOf(agent)
@@ -42,6 +43,12 @@ export function AgentWindow({ agent, online, hasProject, send, subscribe, onClos
       <div className="window-facts">
         <span className={`lamp lamp-${state.tone}`}>{state.label}</span>
         <span className="tag">{version ? `${agent.cli} ${version}` : agent.cli}</span>
+        {config && (
+          <span className="tag tag-model" title="Provedor e modelo configurados na Central de Agentes">
+            Config: {config.provider} · {config.model}
+            {config.reasoningEffort !== 'default' ? ` (${config.reasoningEffort})` : ''}
+          </span>
+        )}
         <span className={`tag tag-auth-${agent.auth}`}>{AUTH_LABEL[agent.auth]}</span>
         <button
           type="button"
