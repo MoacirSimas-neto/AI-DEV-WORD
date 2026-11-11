@@ -109,7 +109,7 @@ const ROLE_FOCUS: Record<SpecializationId, string> = {
 const MAX_SECTION_CHARS = 1200
 
 /** Radicais (6 letras, sem acento) das palavras com 5+ letras: "testes" e "testar" casam. */
-function stems(text: string): Set<string> {
+export function stems(text: string): Set<string> {
   const plain = text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
   return new Set((plain.match(/[a-z]{5,}/g) ?? []).map((w) => w.slice(0, 6)))
 }

@@ -18,9 +18,19 @@ import { defaultSpecializations, type SpecializationRegistry } from '../agents/s
 import type { CliResult, RunningCli, StartOptions } from '../cli/run.ts'
 import type { GitService } from '../git/service.ts'
 import { cleanOutput, type HistoryStore, redact } from '../history/store.ts'
+import { buildMemoryContext } from '../memory/context.ts'
+import type { MemoryStore } from '../memory/store.ts'
 import type { ProjectStore } from '../projects/store.ts'
 import { OPEN_PHASES, type TaskStore } from '../tasks/store.ts'
-import { devPrompt, parseDetailedVerdict, parseVerdict, planPrompt, type ReworkContext, reviewPrompt } from './prompts.ts'
+import {
+  devPrompt,
+  parseClarificationRequest,
+  parseDetailedVerdict,
+  parseVerdict,
+  planPrompt,
+  type ReworkContext,
+  reviewPrompt,
+} from './prompts.ts'
 
 /** Inicia um CLI oficial sem terminal. Em produção é o startCli; nos testes, um falso. */
 export type AgentLauncher = (cli: CliId, args: string[], options: StartOptions) => RunningCli
@@ -40,6 +50,8 @@ const MAX_TEXT = 100_000
 const MAX_DIFF = 60_000
 /** Rodadas Dev -> QA por missão: impede retrabalho infinito. */
 export const MAX_ATTEMPTS = 3
+/** Quantas vezes o planejador pode perguntar ao usuário antes de ter de planejar com o que há. */
+export const MAX_CLARIFICATION_ROUNDS = 2
 // O Windows limita a linha de comando a ~32 mil caracteres (o agy recebe o prompt como argumento).
 const MAX_ARG_PROMPT = 26_000
 const LIMIT_PATTERN = /rate.?limit|quota|usage limit|too many requests|\b429\b|resource.?exhausted/i
@@ -61,6 +73,7 @@ export interface TeamOptions {
   launch: AgentLauncher
   configs?: AgentConfigStore
   specializations?: SpecializationRegistry
+  memory?: MemoryStore
   stepTimeoutMs?: number
 }
 
@@ -142,6 +155,7 @@ export class TeamRunner extends EventEmitter {
   private readonly git: GitService
   private readonly launch: AgentLauncher
   private readonly configs?: AgentConfigStore
+  private readonly memory?: MemoryStore
   private readonly specializations: SpecializationRegistry
   private readonly stepTimeoutMs: number
   private running: Running | null = null
@@ -157,6 +171,7 @@ export class TeamRunner extends EventEmitter {
     this.git = options.git
     this.launch = options.launch
     this.configs = options.configs
+    this.memory = options.memory
     this.specializations = options.specializations ?? defaultSpecializations
     this.stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   }
@@ -170,6 +185,9 @@ export class TeamRunner extends EventEmitter {
     for (const m of this.tasks.openMissions()) {
       if (m.phase === 'awaiting_approval') {
         this.registry.setMissionState(m.plannerId || 'architect', 'approval', 'Plano pronto: aguardando sua aprovação')
+      }
+      if (m.phase === 'awaiting_clarification') {
+        this.registry.setMissionState(m.plannerId || 'architect', 'approval', `Missão #${m.id}: aguardando a sua resposta`)
       }
     }
   }
@@ -233,6 +251,29 @@ export class TeamRunner extends EventEmitter {
     void this.runDevelopment(missionId, task, mission.plan, cwd)
   }
 
+  /** O usuário respondeu à pergunta do planejador: o planejamento recomeça com a resposta. */
+  async clarify(missionId: number, answer: string) {
+    const mission = this.requireMission(missionId)
+    if (mission.phase !== 'awaiting_clarification' || this.running || this.preparing) {
+      throw new Error('Esta missão não está aguardando esclarecimento.')
+    }
+    const text = redact(answer.trim()).slice(0, 5000)
+    if (!text) throw new Error('Escreva a resposta antes de retomar a missão.')
+    const { task, cwd } = this.context(mission.taskId)
+    const [plannerId] = this.missionTeam(mission)
+    this.assertAgentsAvailable([plannerId])
+
+    const clarifications = [...(mission.clarifications ?? [])]
+    const last = clarifications.at(-1)
+    if (!last || last.answer !== null) throw new Error('Não há pergunta pendente nesta missão.')
+    clarifications[clarifications.length - 1] = { ...last, answer: text, answeredAt: new Date().toISOString() }
+    const resumed = this.tasks.updateMission(missionId, { phase: 'planning', clarifications })
+    this.running = { missionId, cancelled: false }
+    this.log(resumed, 'mission', `Usuário respondeu ao esclarecimento da missão #${missionId}: "${text.slice(0, 300)}"`)
+    this.registry.setMissionState(plannerId, 'planning', `Planejando a missão #${missionId} com a sua resposta`)
+    void this.runPlanning(missionId, task, cwd)
+  }
+
   /** Rejeita o plano ou interrompe a missão, encerrando o CLI que estiver rodando. */
   cancel(missionId: number) {
     const mission = this.requireMission(missionId)
@@ -247,7 +288,9 @@ export class TeamRunner extends EventEmitter {
     this.log(
       mission,
       'mission',
-      mission.phase === 'awaiting_approval'
+      mission.phase === 'awaiting_clarification'
+        ? `Missão #${missionId} cancelada pelo usuário sem responder ao esclarecimento.`
+        : mission.phase === 'awaiting_approval'
         ? `Plano da missão #${missionId} rejeitado pelo usuário.`
         : `Missão #${missionId} cancelada pelo usuário.`,
     )
@@ -266,12 +309,22 @@ export class TeamRunner extends EventEmitter {
     const [plannerId] = this.missionTeam(current)
     const cfg = this.resolveMissionAgentConfig(current, plannerId, 'tech-lead')
     const stepConfig = getStepCliAndArgs('planning', cfg)
-    const prompt = planPrompt(task, {
-      agentName: cfg?.name,
-      specializationId: cfg?.specializationId ?? 'tech-lead',
-      customInstructions: cfg?.customInstructions,
-      registry: this.specializations,
-    })
+    const memory = this.memoryBlock(current, 'planning', plannerId, task)
+    if (memory === null) return
+    const asked = current.clarifications ?? []
+    const canAsk = asked.length < MAX_CLARIFICATION_ROUNDS
+    const prompt = planPrompt(
+      task,
+      {
+        agentName: cfg?.name,
+        specializationId: cfg?.specializationId ?? 'tech-lead',
+        customInstructions: cfg?.customInstructions,
+        registry: this.specializations,
+        memory,
+      },
+      asked,
+      canAsk,
+    )
     const plan = await this.step(
       missionId,
       plannerId,
@@ -284,7 +337,20 @@ export class TeamRunner extends EventEmitter {
       stepConfig.passPromptAsArg,
     )
     if (plan === null) return
+    const question = canAsk ? parseClarificationRequest(plan) : ''
+    if (question) {
+      // Falta informação essencial: a missão espera o usuário em vez de inventar requisitos.
+      const waiting = this.tasks.updateMission(missionId, {
+        phase: 'awaiting_clarification',
+        clarifications: [...asked, { agentId: plannerId, question, answer: null, askedAt: new Date().toISOString(), answeredAt: null }],
+      })
+      this.running = null
+      this.log(waiting, 'mission', `Missão #${missionId} aguardando esclarecimento do usuário: ${question}`, plannerId)
+      this.registry.setMissionState(plannerId, 'approval', `Missão #${missionId}: preciso de uma resposta sua para planejar`)
+      return
+    }
     const mission = this.tasks.updateMission(missionId, { phase: 'awaiting_approval', plan })
+    this.memory?.proposeFromMission(mission)
     this.running = null
     this.log(mission, 'mission', `Plano da missão #${missionId} pronto. Aguardando aprovação do usuário.`, plannerId)
     this.registry.setMissionState(plannerId, 'approval', `Plano da missão #${missionId} pronto: aguardando sua aprovação`)
@@ -304,6 +370,9 @@ export class TeamRunner extends EventEmitter {
 
     // Rodadas Dev -> QA: o QA devolve ao Dev o que reprovar, até MAX_ATTEMPTS.
     for (let attempt = 1; ; attempt++) {
+      const devMemory = this.memoryBlock(current, 'developing', devId, task)
+      const qaMemory = devMemory === null ? null : this.memoryBlock(current, 'reviewing', qaId, task)
+      if (devMemory === null || qaMemory === null) return
       const devPromptText = devPrompt(
         task,
         plan,
@@ -312,6 +381,7 @@ export class TeamRunner extends EventEmitter {
           specializationId: devCfg?.specializationId ?? 'developer',
           customInstructions: devCfg?.customInstructions,
           registry: this.specializations,
+          memory: devMemory,
         },
         rework,
       )
@@ -362,6 +432,7 @@ export class TeamRunner extends EventEmitter {
         specializationId: qaCfg?.specializationId ?? ('qa-tester' as const),
         customInstructions: qaCfg?.customInstructions,
         registry: this.specializations,
+        memory: qaMemory,
       }
       let diff = await this.collectDiff(cwd, changed)
       // shortcut: na linha de comando o parecer anterior vai só com o começo (onde ficam os achados); sem limite quando o agy aceitar prompt por stdin.
@@ -389,6 +460,7 @@ export class TeamRunner extends EventEmitter {
       const verdict = parseVerdict(review)
       attempts.push({ attempt, devReport: report, files, review, verdictDetail })
       const reviewed = this.tasks.updateMission(missionId, { review, verdict, verdictDetail, attempts })
+      this.memory?.proposeFromMission(reviewed)
       const label = verdictDetail ?? 'sem veredito claro'
       this.log(reviewed, 'review', `Revisão do QA na missão #${missionId} (tentativa ${attempt}/${MAX_ATTEMPTS}): ${label}.`, qaId)
 
@@ -494,6 +566,29 @@ export class TeamRunner extends EventEmitter {
       if (id !== agentId) this.registry.setMissionState(id, null)
     }
     this.registry.setMissionState(agentId, 'error', message.split('\n')[0])
+  }
+
+  /**
+   * Memória aprovada que este agente recebe nesta etapa. Grava na missão o que foi
+   * escolhido e descartado (auditoria). null = a missão falhou porque o contexto
+   * obrigatório não coube.
+   */
+  private memoryBlock(mission: MissionInfo, stage: 'planning' | 'developing' | 'reviewing', agentId: string, task: TaskInfo): string | null {
+    if (!this.memory) return ''
+    try {
+      const { block, record } = buildMemoryContext({
+        entries: this.memory.currentFor(mission.projectId, agentId),
+        task,
+        stage,
+        pastMissions: this.tasks.finishedMissionsOfTask(task.id),
+      })
+      const all = this.requireMission(mission.id).memoryContext ?? {}
+      this.tasks.updateMission(mission.id, { memoryContext: { ...all, [stage]: { agentId, ...record } } })
+      return block
+    } catch (error) {
+      this.fail(mission.id, agentId, errorText(error))
+      return null
+    }
   }
 
   private missionTeam(mission: Pick<MissionInfo, 'plannerId' | 'devId' | 'qaId'>): [string, string, string] {

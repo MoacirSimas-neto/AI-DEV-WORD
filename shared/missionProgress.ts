@@ -92,6 +92,12 @@ export function computeMissionProgress(mission: MissionInfo | null | undefined):
       activeAgentId = plannerId
       statusLabel = 'Aguardando aprovação humana do plano (1/3 concluída)'
       break
+    case 'awaiting_clarification':
+      completedSteps = 0
+      planningStatus = 'awaiting_approval'
+      activeAgentId = plannerId
+      statusLabel = `Aguardando esclarecimento: ${plannerRole} precisa da sua resposta`
+      break
     case 'developing':
       completedSteps = 1
       planningStatus = 'completed'
@@ -221,7 +227,7 @@ export function computeMissionProgress(mission: MissionInfo | null | undefined):
     totalSteps: 3,
     percent: STEP_PERCENTS[completedSteps],
     isRunning: phase === 'planning' || phase === 'developing' || phase === 'reviewing',
-    needsApproval: phase === 'awaiting_approval',
+    needsApproval: phase === 'awaiting_approval' || phase === 'awaiting_clarification',
     isInterrupted: phase === 'failed' || phase === 'cancelled',
     activeAgentId,
     statusLabel,

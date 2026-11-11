@@ -114,7 +114,7 @@ function App() {
       : []
   const activeMissionsCount = Array.isArray(missions)
     ? missions.filter((m) =>
-        ['planning', 'awaiting_approval', 'developing', 'reviewing'].includes(m.phase),
+        ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
       ).length
     : 0
 

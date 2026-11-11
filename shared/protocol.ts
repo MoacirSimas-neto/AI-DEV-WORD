@@ -217,6 +217,8 @@ export interface TaskInfo extends TaskInput {
 export type MissionPhase =
   | 'planning'
   | 'awaiting_approval'
+  /** O planejador precisa de uma resposta do usuário antes de planejar. */
+  | 'awaiting_clarification'
   | 'developing'
   | 'reviewing'
   | 'done'
@@ -230,6 +232,23 @@ export interface MissionAttempt {
   files: string[]
   review: string
   verdictDetail: string | null
+}
+
+/** Uma pergunta do planejador ao usuário e a resposta dada (null enquanto espera). */
+export interface MissionClarification {
+  agentId: string
+  question: string
+  answer: string | null
+  askedAt: string
+  answeredAt: string | null
+}
+
+/** O que foi lembrado a um agente numa etapa: ids e motivos, sem copiar o conteúdo. */
+export interface MemoryContextRecord {
+  agentId?: string
+  chars: number
+  selected: { id: number | null; category: MemoryCategory; reason: string }[]
+  dropped: { id: number | null; category: MemoryCategory; reason: string }[]
 }
 
 export interface MissionInfo {
@@ -255,6 +274,10 @@ export interface MissionInfo {
   verdictDetail?: string | null
   /** Rodadas Dev -> QA já encerradas, da mais antiga para a mais recente. */
   attempts?: MissionAttempt[]
+  /** Perguntas do planejador e respostas do usuário, em ordem. */
+  clarifications?: MissionClarification[]
+  /** Memórias entregues a cada etapa (planning, developing, reviewing) na última execução dela. */
+  memoryContext?: Record<string, MemoryContextRecord>
   /** Snapshot sem credenciais dos agentes participantes no momento da missão. */
   teamSnapshot?: Record<string, AgentSnapshotEntry>
   /** Arquivos com alterações depois que o Dev terminou. */
@@ -407,6 +430,8 @@ export type ClientMessage =
   | { type: 'mission-approve'; missionId: number }
   /** Rejeita o plano ou interrompe a missão. */
   | { type: 'mission-cancel'; missionId: number }
+  /** Responde à pergunta do planejador e retoma o planejamento. */
+  | { type: 'mission-clarify'; missionId: number; answer: string }
   /** Memória: toda aprovação, rejeição e substituição é uma ação humana vinda daqui. */
   | { type: 'memory-list'; projectId: number; filter?: MemoryFilter }
   | { type: 'memory-create'; projectId: number; entry: MemoryInput }

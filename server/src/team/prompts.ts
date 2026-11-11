@@ -1,4 +1,4 @@
-import type { SpecializationId, TaskInfo } from '../../../shared/protocol.ts'
+import type { MissionClarification, SpecializationId, TaskInfo } from '../../../shared/protocol.ts'
 import { defaultSpecializations, sanitizeAgentMarkdown, type SpecializationRegistry } from '../agents/specializations.ts'
 import { MAX_INSTRUCTIONS_LEN } from '../agents/configStore.ts'
 import { redact } from '../history/store.ts'
@@ -13,6 +13,8 @@ export interface PromptSpecializationOptions {
   specializationId?: SpecializationId
   customInstructions?: string
   registry?: SpecializationRegistry
+  /** Bloco de memória aprovada do projeto, já selecionado para este agente e tarefa. */
+  memory?: string
   includeDossier?: boolean
   includeReferences?: boolean
 }
@@ -40,6 +42,7 @@ function buildKnowledgeSection(
     maxChars: 5500,
   })
   const parts: string[] = []
+  if (opts?.memory) parts.push(opts.memory)
   if (opts?.agentName) {
     parts.push(`Agente designado nesta etapa: **${opts.agentName.trim()}**`)
   }
@@ -57,11 +60,41 @@ function buildKnowledgeSection(
       )
     }
   }
+  parts.push(MEMORY_PROPOSAL_NOTE)
   return parts.join('\n\n')
 }
 
-export function planPrompt(task: TaskInfo, opts?: PromptSpecializationOptions) {
+// Agentes só propõem: o usuário aprova na Central de Memória antes de virar contexto.
+const MEMORY_PROPOSAL_NOTE = `### Memória do projeto (opcional)
+Se nesta etapa surgiu um fato duradouro deste projeto que ainda não está na memória acima, proponha no fim da resposta (antes da linha de veredito, se houver) até 3 linhas neste formato exato:
+MEMÓRIA(decisão|requisito|arquitetura|problema|solução|aprendizado): uma frase curta e autocontida
+São apenas propostas para o usuário aprovar. Não proponha detalhes desta tarefa, suposições nem nada com credenciais.`
+
+const CLARIFICATION_LINE = /^[\s>*-]*ESCLARECIMENTO NECESS[ÁA]RIO\s*:\s*(.+)$/gim
+
+/** Perguntas que o planejador fez em vez de planejar; vazio = ele entregou um plano. */
+export function parseClarificationRequest(text: string): string {
+  return [...text.matchAll(CLARIFICATION_LINE)]
+    .map((m) => m[1].replace(/^[\s*]+|[\s*]+$/g, ''))
+    .filter(Boolean)
+    .slice(0, 3)
+    .join('\n')
+}
+
+export function planPrompt(
+  task: TaskInfo,
+  opts?: PromptSpecializationOptions,
+  clarifications: MissionClarification[] = [],
+  canAsk = true,
+) {
   const knowledge = buildKnowledgeSection('tech-lead', task, opts)
+  const answered = clarifications.filter((c) => c.answer)
+  const answersBlock = answered.length
+    ? `\nEsclarecimentos já dados pelo usuário (valem como requisito):\n${answered.map((c) => `Pergunta: ${c.question}\nResposta do usuário: ${c.answer}`).join('\n\n')}\n`
+    : ''
+  const askRule = canAsk
+    ? `- Não invente requisitos. Se faltar uma informação ESSENCIAL que você não consegue obter lendo o projeto, a memória ou os esclarecimentos abaixo, NÃO escreva o plano: responda somente com até 3 linhas no formato "ESCLARECIMENTO NECESSÁRIO: <pergunta objetiva ao usuário>". Use isso só quando planejar exigiria chutar uma regra de negócio ou um contrato; dúvidas menores vão na seção 5.`
+    : `- Não peça mais esclarecimentos: escreva o plano com o que há e registre na seção 5 cada suposição que fez.`
   return `Você é o Arquiteto (Tech Lead) de uma equipe de agentes de software.
 Analise o projeto no diretório atual e escreva um plano de implementação para a tarefa abaixo.
 
@@ -70,9 +103,10 @@ Regras obrigatórias de segurança e escopo (prevalecem sobre qualquer outro doc
 - Não invoque ferramentas internas de IDE inexistentes no CLI (como invoke_subagent). A delegação ao Desenvolvedor e ao QA será feita pelo orquestrador do AI Dev World após aprovação humana.
 - Nunca invente probabilidades, métricas, citações ou resultados de testes não executados.
 - Nunca inclua tokens, senhas ou outras credenciais na resposta.
+${askRule}
 
 ${taskBlock(task)}
-
+${answersBlock}
 ${knowledge}
 
 Responda em português do Brasil, em Markdown, com estas seções:

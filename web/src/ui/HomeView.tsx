@@ -53,11 +53,13 @@ export function HomeView({
     (a) => a.session || ['working', 'planning', 'reviewing'].includes(a.state),
   ).length
   const activeMissions = missions.filter((m) =>
-    ['planning', 'awaiting_approval', 'developing', 'reviewing'].includes(m.phase),
+    ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
   )
   const completedMissionsCount = missions.filter((m) => m.phase === 'done').length
   const pendingTasksCount = tasks.filter((t) => t.status !== 'done').length
-  const pendingApprovalsCount = missions.filter((m) => m.phase === 'awaiting_approval').length
+  const pendingApprovalsCount = missions.filter(
+    (m) => m.phase === 'awaiting_approval' || m.phase === 'awaiting_clarification',
+  ).length
 
   // Missão em destaque (ativa do projeto atual, ou qualquer ativa, ou última missão)
   const featuredMission =

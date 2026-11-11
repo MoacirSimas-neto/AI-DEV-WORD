@@ -193,6 +193,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case 'mission-approve':
     case 'mission-cancel':
       return isId(msg.missionId) ? { type: msg.type, missionId: msg.missionId } : null
+    case 'mission-clarify':
+      return isId(msg.missionId) && typeof msg.answer === 'string' && msg.answer.length <= 5000
+        ? { type: 'mission-clarify', missionId: msg.missionId, answer: msg.answer }
+        : null
     case 'memory-list': {
       if (!isId(msg.projectId)) return null
       const filter: Record<string, string> = {}
@@ -539,6 +543,11 @@ export function createAppServer({
         break
       case 'mission-approve':
         team.approve(message.missionId).catch((error) => {
+          send(socket, { type: 'notice', message: errorText(error) })
+        })
+        break
+      case 'mission-clarify':
+        team.clarify(message.missionId, message.answer).catch((error) => {
           send(socket, { type: 'notice', message: errorText(error) })
         })
         break

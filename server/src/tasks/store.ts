@@ -2,7 +2,9 @@ import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
 import type {
   AgentSnapshotEntry,
+  MemoryContextRecord,
   MissionAttempt,
+  MissionClarification,
   MissionInfo,
   MissionPhase,
   TaskInfo,
@@ -39,13 +41,19 @@ const SCHEMA = `
     team_snapshot TEXT NOT NULL DEFAULT '{}',
     files TEXT NOT NULL DEFAULT '[]',
     attempts TEXT NOT NULL DEFAULT '[]',
+    clarifications TEXT NOT NULL DEFAULT '[]',
+    memory_context TEXT NOT NULL DEFAULT '{}',
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
-  -- O próprio banco impede duas missões abertas para a mesma tarefa.
-  CREATE UNIQUE INDEX IF NOT EXISTS missions_one_open_per_task ON missions (task_id)
-    WHERE phase IN ('planning', 'awaiting_approval', 'developing', 'reviewing');
+`
+// O próprio banco impede duas missões abertas para a mesma tarefa. Recriado a cada
+// início porque a lista de fases abertas cresce (CREATE IF NOT EXISTS não atualiza).
+const OPEN_INDEX = `
+  DROP INDEX IF EXISTS missions_one_open_per_task;
+  CREATE UNIQUE INDEX missions_one_open_per_task ON missions (task_id)
+    WHERE phase IN ('planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing');
 `
 
 const EXTRA_MISSION_COLUMNS: [string, string][] = [
@@ -55,9 +63,11 @@ const EXTRA_MISSION_COLUMNS: [string, string][] = [
   ['verdict_detail', 'TEXT'],
   ['team_snapshot', "TEXT NOT NULL DEFAULT '{}'"],
   ['attempts', "TEXT NOT NULL DEFAULT '[]'"],
+  ['clarifications', "TEXT NOT NULL DEFAULT '[]'"],
+  ['memory_context', "TEXT NOT NULL DEFAULT '{}'"],
 ]
 
-export const OPEN_PHASES: MissionPhase[] = ['planning', 'awaiting_approval', 'developing', 'reviewing']
+export const OPEN_PHASES: MissionPhase[] = ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing']
 /** Fases em que um processo de CLI está rodando (não sobrevivem a um reinício). */
 const RUNNING_PHASES = "('planning', 'developing', 'reviewing')"
 
@@ -73,7 +83,7 @@ const TASK_COLUMNS = `id, project_id AS projectId, title, description, priority,
 const MISSION_COLUMNS = `id, task_id AS taskId, project_id AS projectId, phase,
   planner_id AS plannerId, dev_id AS devId, qa_id AS qaId,
   plan, dev_report AS devReport, review, verdict, verdict_detail AS verdictDetail,
-  team_snapshot AS teamSnapshot, files, attempts, error, created_at AS createdAt, updated_at AS updatedAt`
+  team_snapshot AS teamSnapshot, files, attempts, clarifications, memory_context AS memoryContext, error, created_at AS createdAt, updated_at AS updatedAt`
 
 type MissionPatch = Partial<
   Pick<
@@ -90,6 +100,8 @@ type MissionPatch = Partial<
     | 'teamSnapshot'
     | 'files'
     | 'attempts'
+    | 'clarifications'
+    | 'memoryContext'
     | 'error'
   >
 >
@@ -107,6 +119,8 @@ const MISSION_FIELDS: Record<keyof MissionPatch, string> = {
   teamSnapshot: 'team_snapshot',
   files: 'files',
   attempts: 'attempts',
+  clarifications: 'clarifications',
+  memoryContext: 'memory_context',
   error: 'error',
 }
 
@@ -135,6 +149,8 @@ const toMission = (row: Record<string, unknown>): MissionInfo => ({
   teamSnapshot: parseJsonSafe<Record<string, AgentSnapshotEntry>>(row.teamSnapshot, {}),
   files: parseJsonSafe<string[]>(row.files, []),
   attempts: parseJsonSafe<MissionAttempt[]>(row.attempts, []),
+  clarifications: parseJsonSafe<MissionClarification[]>(row.clarifications, []),
+  memoryContext: parseJsonSafe<Record<string, MemoryContextRecord>>(row.memoryContext, {}),
   error: (row.error as string | null) ?? null,
   createdAt: String(row.createdAt ?? ''),
   updatedAt: String(row.updatedAt ?? ''),
@@ -176,6 +192,7 @@ export class TaskStore extends EventEmitter {
           this.db.exec(`ALTER TABLE missions ADD COLUMN ${col} ${def}`)
         }
       }
+      this.db.exec(OPEN_INDEX)
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
@@ -258,6 +275,14 @@ export class TaskStore extends EventEmitter {
     return row ? toMission(row) : null
   }
 
+  /** Missões já encerradas de uma tarefa, mais recentes primeiro (histórico para a memória). */
+  finishedMissionsOfTask(taskId: number, limit = 5): MissionInfo[] {
+    return this.db
+      .prepare(`SELECT ${MISSION_COLUMNS} FROM missions WHERE task_id = ? AND phase IN ('done', 'failed', 'cancelled') ORDER BY id DESC LIMIT ?`)
+      .all(taskId, limit)
+      .map(toMission)
+  }
+
   openMissions(): MissionInfo[] {
     return this.db
       .prepare(`SELECT ${MISSION_COLUMNS} FROM missions WHERE phase IN (${OPEN_PHASES.map(() => '?').join(', ')})`)
@@ -290,7 +315,7 @@ export class TaskStore extends EventEmitter {
     const keys = Object.keys(patch) as (keyof MissionPatch)[]
     const values = keys.map((k) => {
       if (k === 'files') return JSON.stringify(patch.files)
-      if (k === 'attempts') return JSON.stringify(patch.attempts)
+      if (k === 'attempts' || k === 'clarifications' || k === 'memoryContext') return JSON.stringify(patch[k])
       if (k === 'teamSnapshot') return JSON.stringify(patch.teamSnapshot)
       return patch[k] as string | null
     })

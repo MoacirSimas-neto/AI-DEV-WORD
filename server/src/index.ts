@@ -68,6 +68,7 @@ const team = new TeamRunner({
   registry,
   git,
   configs: agentConfigs,
+  memory,
   launch: (cli, args, options) => {
     const executable = findCli(cli)
     if (!executable) throw new Error(`CLI "${cli}" não encontrado no PATH.`)

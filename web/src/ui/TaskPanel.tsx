@@ -11,6 +11,7 @@ import type {
 } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
+import { ClarificationBox } from './ClarificationBox.tsx'
 
 interface Props {
   tasks: TaskInfo[]
@@ -75,7 +76,7 @@ export function TaskPanel({
   const activeMission = missions.find(
     (m) =>
       m.projectId === activeProjectId &&
-      ['planning', 'awaiting_approval', 'developing', 'reviewing'].includes(m.phase),
+      ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
   )
 
   const planners = agents.filter(
@@ -233,6 +234,9 @@ export function TaskPanel({
             </span>
           </div>
 
+          {/* Pergunta do planejador ao usuário */}
+          <ClarificationBox mission={activeMission} online={online} send={send} />
+
           {activeMission.phase === 'awaiting_approval' && (
             <div className="mission-approval">
               <p>
@@ -264,7 +268,7 @@ export function TaskPanel({
             </div>
           )}
 
-          {activeMission.phase !== 'awaiting_approval' && (
+          {activeMission.phase !== 'awaiting_approval' && activeMission.phase !== 'awaiting_clarification' && (
             <div className="mission-running">
               <p className="mission-step-desc">{stepDescription(activeMission)}</p>
               {liveOutput?.missionId === activeMission.id && (
@@ -495,6 +499,8 @@ function phaseLabel(mission: MissionInfo) {
   switch (mission.phase) {
     case 'planning':
       return `Planejando (${plannerName})`
+    case 'awaiting_clarification':
+      return `Aguardando esclarecimento (${plannerName})`
     case 'awaiting_approval':
       return 'Aguardando aprovação'
     case 'developing':

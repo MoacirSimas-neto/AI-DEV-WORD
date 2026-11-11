@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { computeMissionProgress } from '../../../shared/missionProgress.ts'
 import type { AgentConfig, AgentInfo, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
+import { ClarificationBox } from './ClarificationBox.tsx'
 
 interface Props {
   missions: MissionInfo[]
@@ -51,7 +52,7 @@ export function MissionMonitor({
     : missions
 
   const runningMission = projectMissions.find((m) =>
-    ['planning', 'awaiting_approval', 'developing', 'reviewing'].includes(m.phase),
+    ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
   )
 
   const currentMission =
@@ -240,6 +241,9 @@ export function MissionMonitor({
               ))}
             </ol>
           </section>
+
+          {/* Pergunta do planejador ao usuário */}
+          <ClarificationBox mission={currentMission} online={online} send={send} />
 
           {/* Aprovação do Plano (quando em awaiting_approval) */}
           {currentMission.phase === 'awaiting_approval' && (

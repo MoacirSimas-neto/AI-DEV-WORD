@@ -10,6 +10,7 @@ import { AgentConfigStore } from '../agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from '../agents/registry.ts'
 import { GitService } from '../git/service.ts'
 import { HistoryStore } from '../history/store.ts'
+import { HUMAN, MemoryStore } from '../memory/store.ts'
 import { ProjectStore } from '../projects/store.ts'
 import { TaskStore } from '../tasks/store.ts'
 import { MAX_ATTEMPTS, TeamRunner, getStepCliAndArgs } from './runner.ts'
@@ -873,4 +874,148 @@ test('TeamRunner: prompt do Antigravity perto do limite do Windows cede o diff e
   assert.equal(tooBig.mission.phase, 'failed')
   assert.match(tooBig.mission.error ?? '', /não cabe na linha de comando/)
   assert.equal(tooBig.qaArgs.length, 0)
+})
+
+
+test('TeamRunner com memória: pergunta ao usuário, retoma com a resposta e Dev/QA recebem a memória aprovada', async () => {
+  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-mem-')))
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp })
+  writeFileSync(path.join(tmp, 'init.txt'), 'init')
+  execFileSync('git', ['add', '.'], { cwd: tmp })
+  execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp })
+
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const projectId = projects.active()!.id
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const memory = new MemoryStore(projects.db, history)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+  for (const a of registry.list()) await registry.check(a.id)
+
+  const old = memory.createApproved({ projectId, scope: 'team', category: 'decision', content: 'Moeda: sempre em centavos inteiros (int)' })
+  memory.supersede(old.id, 'Moeda: sempre em centavos inteiros (bigint)', HUMAN)
+  memory.createApproved({ projectId, scope: 'agent', agentId: 'qa', category: 'learning', content: 'Desconto: conferir arredondamento de centavos' })
+  memory.propose({ projectId, scope: 'team', category: 'decision', content: 'Proposta pendente que não pode vazar', author: 'dev' })
+
+  const plans: string[] = []
+  const devPrompts: string[] = []
+  const qaPrompts: string[] = []
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    memory,
+    git: new GitService(),
+    launch: (cli, _args, options) => {
+      const prompt = options.input ?? ''
+      let stdout: string
+      if (cli === 'codex') {
+        devPrompts.push(prompt)
+        writeFileSync(path.join(tmp, 'desconto.js'), `// versão ${devPrompts.length}`)
+        stdout = `Relatório ${devPrompts.length}\nMEMÓRIA(solução): Desconto calculado em centavos antes de formatar`
+      } else if (prompt.includes('Você é o QA Engineer')) {
+        qaPrompts.push(prompt)
+        stdout = qaPrompts.length === 1 ? 'Arredondamento errado.\nVEREDITO: REPROVADO' : 'Ok.\nVEREDITO: APROVADO'
+      } else {
+        plans.push(prompt)
+        stdout = plans.length === 1
+          ? 'ESCLARECIMENTO NECESSÁRIO: O desconto vale para frete também?'
+          : 'Plano com a resposta.\nMEMÓRIA(requisito): Desconto não se aplica ao frete'
+      }
+      return { done: Promise.resolve({ code: 0, stdout, stderr: '', timedOut: false }), kill: () => {} }
+    },
+  })
+  const wait = async (phase: string) => {
+    for (let i = 0; i < 150 && tasks.getMission(mission.id)!.phase !== phase; i++) await new Promise((r) => setTimeout(r, 20))
+    assert.equal(tasks.getMission(mission.id)!.phase, phase)
+  }
+
+  const task = tasks.create(projectId, { title: 'Aplicar desconto', description: 'Desconto de 10% no carrinho', priority: 'high', status: 'todo', agentId: null })
+  const mission = await runner.start(task.id)
+  await wait('awaiting_clarification')
+
+  // Só memória aprovada e atual chega ao planejador; a individual do QA não.
+  assert.ok(plans[0].includes('centavos inteiros (bigint)'))
+  assert.ok(!plans[0].includes('(int)'))
+  assert.ok(!plans[0].includes('Proposta pendente'))
+  assert.ok(!plans[0].includes('arredondamento de centavos'))
+  assert.equal(tasks.getMission(mission.id)!.clarifications![0].question, 'O desconto vale para frete também?')
+  // A espera sobrevive a um reinício do app.
+  runner.recover()
+  assert.equal(tasks.getMission(mission.id)!.phase, 'awaiting_clarification')
+  await assert.rejects(runner.approve(mission.id), /não está aguardando aprovação/)
+
+  await runner.clarify(mission.id, 'Não, só nos produtos.')
+  await wait('awaiting_approval')
+  assert.ok(plans[1].includes('Resposta do usuário: Não, só nos produtos.'))
+  const planned = tasks.getMission(mission.id)!
+  assert.deepEqual(planned.clarifications!.map((c) => c.answer), ['Não, só nos produtos.'])
+  assert.ok(planned.memoryContext!.planning.selected.length >= 1)
+  // A proposta do plano espera aprovação humana e ainda não vale.
+  const proposal = memory.list(projectId, { status: 'proposed', category: 'requirement' })[0]
+  assert.equal(proposal.sourceMissionId, mission.id)
+  memory.approve(proposal.id, HUMAN)
+
+  await runner.approve(mission.id)
+  await wait('done')
+  // Dev e QA trabalharam com a decisão atual e o requisito recém-aprovado.
+  for (const p of [...devPrompts, ...qaPrompts]) {
+    assert.ok(p.includes('centavos inteiros (bigint)'))
+    assert.ok(p.includes('Desconto não se aplica ao frete'))
+  }
+  // Memória individual: só o QA recebe.
+  assert.ok(qaPrompts.every((p) => p.includes('sua memória individual] Desconto: conferir arredondamento')))
+  assert.ok(devPrompts.every((p) => !p.includes('conferir arredondamento')))
+  // Retrabalho Dev -> QA aconteceu com a memória presente nas duas rodadas.
+  assert.equal(devPrompts.length, 2)
+  const done = tasks.getMission(mission.id)!
+  assert.deepEqual(Object.keys(done.memoryContext!).sort(), ['developing', 'planning', 'reviewing'])
+  assert.equal(memory.list(projectId, { status: 'proposed', category: 'solution' }).length, 1)
+})
+
+test('TeamRunner limita as perguntas: depois de 2 rodadas o planejador precisa planejar com suposições', async () => {
+  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-ask-')))
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp })
+  writeFileSync(path.join(tmp, 'init.txt'), 'init')
+  execFileSync('git', ['add', '.'], { cwd: tmp })
+  execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp })
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+  for (const a of registry.list()) await registry.check(a.id)
+  const plans: string[] = []
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    git: new GitService(),
+    launch: (_cli, _args, options) => {
+      plans.push(options.input ?? '')
+      return { done: Promise.resolve({ code: 0, stdout: 'ESCLARECIMENTO NECESSÁRIO: e agora?', stderr: '', timedOut: false }), kill: () => {} }
+    },
+  })
+  const task = tasks.create(projects.active()!.id, { title: 'T', description: '', priority: 'low', status: 'todo', agentId: null })
+  const mission = await runner.start(task.id)
+  const until = async (phase: string) => {
+    for (let i = 0; i < 100 && tasks.getMission(mission.id)!.phase !== phase; i++) await new Promise((r) => setTimeout(r, 20))
+  }
+  await until('awaiting_clarification')
+  await assert.rejects(runner.clarify(mission.id, '   '), /Escreva a resposta/)
+  await runner.clarify(mission.id, 'resposta 1')
+  await new Promise((r) => setTimeout(r, 20))
+  await until('awaiting_clarification')
+  await runner.clarify(mission.id, 'resposta 2')
+  await until('awaiting_approval')
+
+  assert.equal(plans.length, 3)
+  assert.match(plans[2], /Não peça mais esclarecimentos/)
+  const m = tasks.getMission(mission.id)!
+  assert.equal(m.phase, 'awaiting_approval')
+  assert.equal(m.clarifications!.length, 2)
+  assert.equal(m.plan, 'ESCLARECIMENTO NECESSÁRIO: e agora?')
 })
