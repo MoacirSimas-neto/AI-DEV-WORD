@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
+import { openDatabase } from '../db/database.ts'
 import type { ProjectInfo, Workspace } from '../../../shared/protocol.ts'
 
 const SCHEMA = `
@@ -26,7 +27,7 @@ export class ProjectStore {
 
   /** Use ':memory:' nos testes. */
   constructor(file: string) {
-    this.db = new DatabaseSync(file)
+    this.db = openDatabase(file)
     this.db.exec(SCHEMA)
   }
 

@@ -201,11 +201,11 @@ export class AgentConfigStore extends EventEmitter {
 
   /** Migração incremental e idempotente para bancos existentes sem perda de dados. */
   private migrate() {
-    const info = this.db.prepare('PRAGMA table_info(agent_configs)').all() as { name: string }[]
-    const existingCols = new Set(info.map((c) => c.name))
-
     this.db.exec('BEGIN IMMEDIATE')
     try {
+      // Lido dentro da transação de escrita: outra conexão não altera a tabela entre a leitura e o ALTER.
+      const info = this.db.prepare('PRAGMA table_info(agent_configs)').all() as { name: string }[]
+      const existingCols = new Set(info.map((c) => c.name))
       for (const [col, def] of EXTRA_COLUMNS) {
         if (!existingCols.has(col)) {
           this.db.exec(`ALTER TABLE agent_configs ADD COLUMN ${col} ${def}`)

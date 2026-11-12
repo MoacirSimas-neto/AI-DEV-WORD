@@ -3,7 +3,8 @@ import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { findCli, probeCli } from './cli/probe.ts'
 import { startCli } from './cli/run.ts'
-import { ALLOWED_ORIGINS, DATA_DIR, DATABASE_FILE, HOST, PORT } from './config.ts'
+import { ALLOWED_ORIGINS, DATA_DIR, DATABASE_FILE, HOST, LOCK_FILE, PORT } from './config.ts'
+import { acquireInstanceLock, type InstanceLock } from './db/database.ts'
 import { GitService } from './git/service.ts'
 import { HistoryStore } from './history/store.ts'
 import { MemoryStore } from './memory/store.ts'
@@ -18,6 +19,16 @@ import { TerminalManager } from './terminal/manager.ts'
 import { spawnCliPty } from './terminal/spawnPty.ts'
 
 mkdirSync(DATA_DIR, { recursive: true })
+// A trava vem antes de abrir o banco: uma segunda instância não pode migrar o
+// esquema nem rodar a recuperação de missões sobre os dados da primeira.
+let instanceLock: InstanceLock
+try {
+  instanceLock = acquireInstanceLock(LOCK_FILE)
+} catch (error) {
+  console.error(`Não foi possível iniciar o backend: ${error instanceof Error ? error.message : String(error)}`)
+  process.exit(1)
+}
+process.on('exit', () => instanceLock.release())
 const projects = new ProjectStore(DATABASE_FILE)
 const history = new HistoryStore(projects.db)
 const tasks = new TaskStore(projects.db, history)

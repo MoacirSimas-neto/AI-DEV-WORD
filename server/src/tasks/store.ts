@@ -236,11 +236,11 @@ export class TaskStore extends EventEmitter {
 
   /** Migração incremental e idempotente para preservar missões antigas em bancos existentes. */
   private migrateMissions() {
-    const info = this.db.prepare('PRAGMA table_info(missions)').all() as { name: string }[]
-    const existingCols = new Set(info.map((c) => c.name))
-
     this.db.exec('BEGIN IMMEDIATE')
     try {
+      // Lido dentro da transação de escrita: outra conexão não altera a tabela entre a leitura e o ALTER.
+      const info = this.db.prepare('PRAGMA table_info(missions)').all() as { name: string }[]
+      const existingCols = new Set(info.map((c) => c.name))
       for (const [col, def] of EXTRA_MISSION_COLUMNS) {
         if (!existingCols.has(col)) {
           this.db.exec(`ALTER TABLE missions ADD COLUMN ${col} ${def}`)

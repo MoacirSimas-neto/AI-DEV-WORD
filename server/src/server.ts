@@ -3,6 +3,7 @@ import { realpathSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import path from 'node:path'
 import { WebSocket, WebSocketServer } from 'ws'
+import { describeDatabaseError } from './db/database.ts'
 import type {
   AgentConfig,
   AgentInfo,
@@ -401,7 +402,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
   }
 }
 
-const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const errorText = (error: unknown) => describeDatabaseError(error) ?? (error instanceof Error ? error.message : String(error))
 
 export function createAppServer({
   registry,

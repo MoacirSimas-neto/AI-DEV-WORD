@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
+import { inTransaction } from '../db/database.ts'
 import type {
   DynamicProposal,
   DynamicProposalInput,
@@ -128,13 +129,16 @@ export class PlanStore extends EventEmitter {
     this.db = db
     this.tasks = tasks
     this.db.exec(SCHEMA)
-    for (const [table, columns] of [['mission_proposals', EXTRA_PROPOSAL_COLUMNS], ['mission_steps', EXTRA_STEP_COLUMNS]] as const) {
-      const existing = new Set((this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name))
-      for (const [column, definition] of columns) {
-        if (!existing.has(column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN "${column}" ${definition}`)
+    // Migração atômica: ou todas as colunas e o índice entram, ou nada muda.
+    inTransaction(this.db, () => {
+      for (const [table, columns] of [['mission_proposals', EXTRA_PROPOSAL_COLUMNS], ['mission_steps', EXTRA_STEP_COLUMNS]] as const) {
+        const existing = new Set((this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name))
+        for (const [column, definition] of columns) {
+          if (!existing.has(column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN "${column}" ${definition}`)
+        }
       }
-    }
-    this.db.exec(STEP_INDEX)
+      this.db.exec(STEP_INDEX)
+    })
   }
 
   /** Em ordem de revisão. */
