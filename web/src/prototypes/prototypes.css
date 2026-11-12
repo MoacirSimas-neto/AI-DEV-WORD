@@ -3093,7 +3093,7 @@
   background: #090e1a;
 }
 
-/* Área do Mundo do Escritório (Phaser) */
+/* Área do Mundo do Escritório (Phaser) com Escala Estável e Anti-Zoom Glitch */
 .office-world-viewport {
   position: relative;
   flex: 1;
@@ -3105,116 +3105,96 @@
   background: radial-gradient(circle at 50% 50%, #0d1527 0%, #060911 100%);
 }
 
-.office-world-viewport canvas {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.office-canvas-hint {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(13, 20, 36, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 4px 14px;
-  border-radius: 20px;
-  font-size: 11px;
-  color: #94a3b8;
-  backdrop-filter: blur(8px);
-  pointer-events: none;
-  z-index: 20;
-}
-
-/* Dock Flutuante Inferior (Roster dos Agentes) */
-.office-bottom-dock {
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(13, 20, 36, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
-  backdrop-filter: blur(16px);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
-  z-index: 30;
-  padding: 8px 12px;
+.office-world-viewport .world-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 90%;
-  transition: all 0.25s ease;
-}
-
-.office-bottom-dock.is-collapsed {
-  padding: 4px 12px;
-}
-
-.dock-header {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
 }
 
-.dock-title {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: #94a3b8;
-  letter-spacing: 0.05em;
+.office-world-viewport .world {
+  width: auto;
+  height: auto;
+  max-height: calc(100vh - 150px);
+  max-width: calc((100vh - 150px) * 720 / 396);
+  aspect-ratio: 720 / 396;
+  border: 3px solid #1e293b;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.85);
+  background: #0f172a;
+  overflow: hidden;
 }
 
-.btn-dock-toggle {
-  background: transparent;
-  border: none;
-  color: #64748b;
-  font-size: 10px;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 4px;
+.office-world-viewport canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+  display: block;
 }
 
-.btn-dock-toggle:hover {
-  color: #f1f5f9;
-  background: rgba(255, 255, 255, 0.06);
+/* Dock Flutuante Inferior Slim & Escalável (Mostra Nome + Função dos Agentes) */
+.office-bottom-dock {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 15, 28, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+  z-index: 30;
+  padding: 4px 6px;
+  max-width: 90%;
+  overflow: hidden;
 }
 
 .dock-cards {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
   overflow-x: auto;
+  scrollbar-width: none;
 }
 
-.dock-agent-card {
+.dock-cards::-webkit-scrollbar {
+  display: none;
+}
+
+.dock-agent-pill {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 4px 10px;
   background: #111827;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.15s ease;
-  min-width: 140px;
+  white-space: nowrap;
 }
 
-.dock-agent-card:hover {
+.dock-agent-pill:hover {
   background: #1e293b;
   border-color: rgba(56, 189, 248, 0.3);
+  transform: translateY(-1px);
 }
 
-.dock-agent-card.is-selected {
+.dock-agent-pill.is-selected {
   background: #1e293b;
   border-color: #38bdf8;
-  box-shadow: 0 0 14px rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
 }
 
-.dock-portrait {
+.dock-mini-portrait {
   position: relative;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3223,48 +3203,56 @@
   overflow: hidden;
 }
 
-.status-indicator {
+.status-mini-dot {
   position: absolute;
   bottom: 0;
   right: 0;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   border: 1px solid #0f172a;
 }
 
-.status-indicator.state-working {
+.status-mini-dot.state-working {
   background: #10b981;
   box-shadow: 0 0 6px #10b981;
 }
 
-.status-indicator.state-idle {
+.status-mini-dot.state-idle {
   background: #38bdf8;
 }
 
-.status-indicator.state-waiting {
+.status-mini-dot.state-waiting {
   background: #f59e0b;
 }
 
-.dock-meta {
+.dock-pill-info {
   display: flex;
   flex-direction: column;
+  text-align: left;
+  line-height: 1.15;
 }
 
-.dock-meta strong {
-  font-size: 12px;
-  color: #f8fafc;
+.pill-name-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.dock-meta span {
-  font-size: 10px;
+.dock-pill-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.dock-pill-role {
+  font-size: 9.5px;
   color: #94a3b8;
 }
 
-.dock-activity-pulse {
-  font-size: 13px;
-  margin-left: auto;
-  animation: char-bounce 1s infinite alternate;
+.dock-sparkle {
+  font-size: 10px;
+  animation: char-bounce 0.8s infinite alternate;
 }
 
 /* Botões da Topbar */

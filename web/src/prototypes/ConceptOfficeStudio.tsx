@@ -423,7 +423,13 @@ export function ConceptOfficeStudio() {
           <button
             type="button"
             className="btn-topbar-toggle"
-            onClick={() => setSidePanelOpen(!sidePanelOpen)}
+            onClick={() => {
+              setSidePanelOpen(prev => {
+                const next = !prev
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 60)
+                return next
+              })
+            }}
             title="Alternar painel lateral"
           >
             {sidePanelOpen ? '⛶ Maximizar Escritório' : '☰ Abrir Painel'}
@@ -441,32 +447,36 @@ export function ConceptOfficeStudio() {
             onSelect={handleSelectAgent}
           />
 
-          {/* Dock Flutuante Inferior (Roster dos Agentes) */}
+          {/* Dock Flutuante Inferior Slim & Escalável (Mostra Nome + Função) */}
           <div className="office-bottom-dock">
             <div className="dock-cards">
               {AGENTS_LIST.map((ag) => {
                 const isSelected = selectedAgentId === ag.id
-                const detail = AGENTS_DETAILS[ag.id]
+                const meta = ag.id === 'lead' ? { name: 'Ada', role: 'Arquiteta' }
+                  : ag.id === 'dev' ? { name: 'Linus', role: 'Desenvolvedor' }
+                  : ag.id === 'sec' ? { name: 'Bruce', role: 'Segurança' }
+                  : { name: 'Margaret', role: 'QA' }
+
                 return (
-                  <div
+                  <button
                     key={ag.id}
-                    className={`dock-agent-card ${isSelected ? 'is-selected' : ''} state-${ag.state}`}
+                    type="button"
+                    className={`dock-agent-pill ${isSelected ? 'is-selected' : ''} state-${ag.state}`}
                     onClick={() => handleSelectAgent(ag.id)}
+                    title={`${meta.name} (${meta.role}) · Clique para ver terminal`}
                   >
-                    <div className="dock-portrait">
+                    <div className="dock-mini-portrait">
                       <AgentPortrait agentId={ag.id} fullBody={false} animMode="idle" />
-                      <span className={`status-indicator state-${ag.state}`} />
+                      <span className={`status-mini-dot state-${ag.state}`} />
                     </div>
-                    <div className="dock-meta">
-                      <strong>{detail?.name ?? ag.name}</strong>
-                      <span>{ag.role}</span>
-                    </div>
-                    {ag.state === 'working' && (
-                      <div className="dock-activity-pulse" title="Trabalhando agora">
-                        ⚡
+                    <div className="dock-pill-info">
+                      <div className="pill-name-row">
+                        <strong className="dock-pill-name">{meta.name}</strong>
+                        {ag.state === 'working' && <span className="dock-sparkle">⚡</span>}
                       </div>
-                    )}
-                  </div>
+                      <span className="dock-pill-role">{meta.role}</span>
+                    </div>
+                  </button>
                 )
               })}
             </div>
