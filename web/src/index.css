@@ -4038,3 +4038,22 @@ input:focus-visible {
   background: #475569;
   color: #e2e8f0;
 }
+
+/* Ajustes da validação no navegador (10.5): títulos sem margem herdada e equipe em grade nas telas largas. */
+.dyn-monitor h4,
+.dyn-monitor h5,
+.dyn-monitor h6,
+.dyn-proposal h4,
+.dyn-proposal h5 {
+  margin: 0;
+}
+
+.dyn-team-changes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.dyn-proposal p,
+.dyn-recovery p {
+  margin: 0;
+}

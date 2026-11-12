@@ -141,7 +141,8 @@ export class AgentActor {
       .setVisible(false)
 
     this.teamBadge = scene.add
-      .text(0, 6, 'EQUIPE', {
+      // Ao lado da cabeça: não cobre a placa da mesa nem o balão de estado.
+      .text(22, -44, 'EQUIPE', {
         fontFamily: FONT,
         fontSize: '8.5px',
         fontStyle: '800',
@@ -150,7 +151,7 @@ export class AgentActor {
         padding: { x: 4, y: 1 },
         resolution: 2,
       })
-      .setOrigin(0.5, 0)
+      .setOrigin(0, 0.5)
       .setVisible(false)
 
     // Agentes sempre nascem posicionados corretamente no assento da estação

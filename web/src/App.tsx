@@ -132,7 +132,8 @@ function App() {
             agents={agents}
             configs={allConfigs.length > 0 ? allConfigs : configs}
             selectedAgentId={selectedAgentId}
-            onSelectAgent={setSelectedAgentId}
+            // Clicar num agente abre o painel com o terminal dele (a dica do dock já prometia isso).
+            onSelectAgent={(id) => (id ? selectAgent(id) : setSelectedAgentId(null))}
             sidePanelOpen={sidePanelOpen}
             sideTab={sideTab}
             onCloseSidePanel={() => {
