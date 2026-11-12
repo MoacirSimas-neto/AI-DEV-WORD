@@ -2905,58 +2905,152 @@
   font-family: monospace;
 }
 
-/* Stepper Central */
-.mission-stepper-center {
+/* Pipeline Visual e Conectado da Missão */
+.mission-pipeline-center {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
 }
 
-.stepper-mission-name {
+.pipeline-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
-  color: #94a3b8;
-  font-weight: 600;
 }
 
-.stepper-pills {
+.pipeline-title {
+  color: #e2e8f0;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.st-step {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
+.mission-id {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.14);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.pipeline-progress-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 1px 6px;
   border-radius: 4px;
 }
 
-.st-done {
-  background: rgba(16, 185, 129, 0.15);
+.pipeline-track {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(6, 9, 17, 0.6);
+  padding: 3px 8px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 12px;
+  transition: all 0.15s ease;
+}
+
+.pipeline-step:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.step-circle {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.step-texts {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  line-height: 1.15;
+}
+
+.step-texts strong {
+  font-size: 11px;
+  color: #f1f5f9;
+}
+
+.step-texts span {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+.step-done .step-circle {
+  background: #10b981;
+  color: #064e3b;
+}
+
+.step-done .step-texts span {
   color: #34d399;
 }
 
-.st-active {
-  background: rgba(56, 189, 248, 0.2);
-  color: #38bdf8;
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+.step-active {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.step-active .step-circle {
+  background: #0284c7;
+  color: #e0f2fe;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
   animation: pulse-step 2s infinite ease-in-out;
 }
 
-@keyframes pulse-step {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.75; }
+.step-active .step-texts strong {
+  color: #38bdf8;
 }
 
-.st-waiting {
-  background: rgba(255, 255, 255, 0.05);
+.sub-active {
+  color: #7dd3fc !important;
+  font-weight: 600;
+}
+
+.step-waiting {
+  opacity: 0.7;
+}
+
+.step-waiting .step-circle {
+  background: #1e293b;
   color: #64748b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.st-sep {
-  font-size: 10px;
-  color: #475569;
+.pipeline-connector {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.conn-done {
+  background: #10b981;
+}
+
+.conn-pending {
+  background: #334155;
 }
 
 .topbar-right {

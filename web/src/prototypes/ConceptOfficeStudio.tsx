@@ -325,17 +325,77 @@ export function ConceptOfficeStudio() {
           </div>
         </div>
 
-        {/* Stepper Central da Missão */}
-        <div className="mission-stepper-center">
-          <span className="stepper-mission-name">Missão #104: Módulo de Cadastro e Estoque</span>
-          <div className="stepper-pills">
-            <span className="st-step st-done">✓ Planejamento</span>
-            <span className="st-sep">→</span>
-            <span className="st-step st-active">⚡ Dev (Linus)</span>
-            <span className="st-sep">→</span>
-            <span className="st-step st-waiting">🛡️ Segurança</span>
-            <span className="st-sep">→</span>
-            <span className="st-step st-waiting">🔍 QA</span>
+        {/* Pipeline Visual e Intuitivo da Missão */}
+        <div className="mission-pipeline-center">
+          <div className="pipeline-meta-row">
+            <span className="pipeline-title">
+              <strong className="mission-id">#104</strong> Módulo de Cadastro e Estoque
+            </span>
+            <span className="pipeline-progress-badge">Etapa 2 de 4 · 50%</span>
+          </div>
+
+          <div className="pipeline-track">
+            {/* Etapa 1: Planejamento */}
+            <button
+              type="button"
+              className="pipeline-step step-done"
+              onClick={() => handleSelectAgent('lead')}
+              title="Etapa 1: Planejamento concluído por Ada Lovelace"
+            >
+              <span className="step-circle">✓</span>
+              <div className="step-texts">
+                <strong>Planejamento</strong>
+                <span>Ada (Concluído)</span>
+              </div>
+            </button>
+
+            <span className="pipeline-connector conn-done" />
+
+            {/* Etapa 2: Dev (Ativa) */}
+            <button
+              type="button"
+              className="pipeline-step step-active"
+              onClick={() => handleSelectAgent('dev')}
+              title="Etapa 2: Linus Torvalds implementando agora"
+            >
+              <span className="step-circle pulse-circle">⚡</span>
+              <div className="step-texts">
+                <strong>Desenvolvimento</strong>
+                <span className="sub-active">Linus (Codando 84%)</span>
+              </div>
+            </button>
+
+            <span className="pipeline-connector conn-pending" />
+
+            {/* Etapa 3: Segurança */}
+            <button
+              type="button"
+              className="pipeline-step step-waiting"
+              onClick={() => handleSelectAgent('sec')}
+              title="Etapa 3: Auditoria SAST por Bruce Schneier"
+            >
+              <span className="step-circle">🛡️</span>
+              <div className="step-texts">
+                <strong>Segurança</strong>
+                <span>Bruce (Na fila)</span>
+              </div>
+            </button>
+
+            <span className="pipeline-connector conn-pending" />
+
+            {/* Etapa 4: QA */}
+            <button
+              type="button"
+              className="pipeline-step step-waiting"
+              onClick={() => handleSelectAgent('qa')}
+              title="Etapa 4: Verificação de testes por Margaret Hamilton"
+            >
+              <span className="step-circle">🔍</span>
+              <div className="step-texts">
+                <strong>Qualidade</strong>
+                <span>Margaret (Na fila)</span>
+              </div>
+            </button>
           </div>
         </div>
 
@@ -380,11 +440,6 @@ export function ConceptOfficeStudio() {
             selectedId={selectedAgentId}
             onSelect={handleSelectAgent}
           />
-
-          {/* Dica de interação sutil */}
-          <div className="office-canvas-hint">
-            <span>💡 Clique em qualquer agente dentro do escritório para ver o terminal dele</span>
-          </div>
 
           {/* Dock Flutuante Inferior (Roster dos Agentes) */}
           <div className="office-bottom-dock">
