@@ -100,21 +100,26 @@ npm test        # só os testes
 npm test -w web # só os testes de componentes (Vitest + Testing Library, jsdom)
 ```
 
-O backend usa `node --test`. Os testes de concorrência do SQLite usam bancos descartáveis e processos filhos reais. O frontend testa o comportamento visível e as mensagens enviadas ao backend. O Phaser é simulado nos testes, porque WebGL não roda em jsdom.
+O backend usa `node --test`. **Os testes nunca chamam CLIs reais:** `npm test` força o modo simulado (`test/noRealCli.ts`), e CLI real só com `AIDW_ALLOW_REAL_CLI=1` explícito e configuração própria. Os testes de concorrência do SQLite e do supervisor de processos usam bancos, pastas e processos descartáveis. O frontend testa o comportamento visível e as mensagens enviadas ao backend. O Phaser é simulado nos testes, porque WebGL não roda em jsdom.
 
 ---
+
+### Validação com CLIs simulados
+
+Para rodar o app inteiro sem gastar cota, use `AIDW_CLI_MODE=simulated` com `AIDW_SIMULATED_CLI_DIR=<pasta absoluta>`. A pasta precisa ter `codex`, `gemini` e `agy` (no Windows, `.cmd`), cada um contendo o texto `AIDW-SIMULATED-CLI`. Nesse modo o backend **não consulta o PATH**: se faltar um simulado, ele não inicia. Ao iniciar, o backend registra qual executável cada CLI usa.
 
 ## Permissões e segurança
 
 - **Os CLIs agem no seu projeto com as permissões que você configurou neles.** No modo clássico e nos passos de implementação, o Dev roda com escrita: Codex com `--sandbox workspace-write`, Gemini com `--approval-mode auto_edit` e Antigravity com `--mode accept-edits`. Os passos de leitura usam modo somente leitura quando o CLI oferece essa opção. **Trabalhe num repositório Git com commit em dia.**
 - Os agentes só são iniciados dentro da pasta do projeto ativo. Shims `.cmd` no Windows só recebem argumentos simples (sem metacaracteres de shell).
 - O texto produzido pelos modelos é tratado como dado não confiável. Propostas fora do formato ou das regras são recusadas por inteiro. **Isso não elimina prompt injection:** um conteúdo malicioso no projeto ainda pode influenciar o que o CLI faz dentro das permissões dele.
-- Credenciais: o app não lê nem guarda tokens dos CLIs. Textos gravados (histórico, eventos, memória) passam por uma **remoção de segredos baseada em padrões** (chaves conhecidas, JWT, `senha=`, `*_API_KEY=`, URLs com credencial). **Ela não detecta segredos sem formato reconhecível.** Não cole segredos em tarefas.
-- A saída ao vivo dos terminais e dos CLIs chega à interface sem filtro.
+- **Escrita sem permissão é detectada pelo backend:** antes de cada etapa sem escrita, o backend registra a impressão SHA-256 dos arquivos alterados no Git e confere depois. Se algo mudou, a missão para, com evento observado, e nada é desfeito. Essa verificação não depende de o CLI obedecer ao prompt. Arquivos ignorados pelo `.gitignore` não entram na conferência.
+- Credenciais: o app não lê nem guarda tokens dos CLIs. A **remoção de segredos é baseada em padrões** (chaves conhecidas, JWT, `senha=`, `*_API_KEY=`, URLs com credencial, chaves privadas) e vale para histórico, eventos, memória, mensagens de erro, diff encaminhado entre agentes e **saída ao vivo** (terminal e missões). Na saída ao vivo, ela funciona mesmo com o segredo partido entre pedaços ou entremeado de códigos ANSI. **Segredos sem formato reconhecível não são detectados.** Num fluxo muito lento, os primeiros caracteres de um segredo podem aparecer antes da detecção. Não cole segredos em tarefas.
+- **Processos locais do mesmo usuário** (inclusive um CLI com acesso a shell e sem sandbox) conseguem falar com o backend em `127.0.0.1`, forjando o cabeçalho `Origin`, e assim poderiam aprovar propostas. A verificação de origem só barra páginas de outros sites. Com o app rodando como o mesmo usuário, não há como esconder um segredo desse processo. Use os CLIs com as proteções deles (sandbox do Codex, aprovação de comandos).
 
 ## Limitações conhecidas
 
-- Se o backend for **encerrado à força** (queda, `kill`, Gerenciador de Tarefas), o processo do CLI em execução **não é encerrado junto no Windows**: ele continua até terminar sozinho e pode alterar arquivos depois disso. A recuperação detecta essas alterações e pede confirmação. O encerramento normal (Ctrl+C) encerra os CLIs.
+- Todo CLI (missão ou terminal) roda sob um **guardião** ligado ao backend por um canal local. Se o backend cair, mesmo à força, o canal fecha e o guardião encerra a árvore de processos do CLI (medido: nenhum processo restante 1,5 s depois). O guardião só encerra o que ele mesmo iniciou. **Não coberto:** o guardião ser encerrado sozinho, e um CLI que se desligue da própria árvore (daemon). A garantia completa depende de um supervisor no app desktop (Job Object no Windows).
 - Backends de versões anteriores à trava de instância não a respeitam. Não rode versões antigas e novas na mesma pasta de dados.
 - O escritório Phaser é **desmontado ao trocar de aba** e remontado em cerca de 0,1 s ao voltar. Isso foi decidido na Etapa 11.2 depois de comparar com a opção de mantê-lo montado, oculto e com o loop suspenso. Medidas no Chromium: CPU oculto ~0% nas duas; troca de aba 94 ms contra 31 ms; memória do navegador fora do escritório 371–416 MB contra 441 MB. Mantê-lo montado também manteria vivos o painel lateral e o terminal. A memória em repouso pesou mais que os 60 ms de troca.
 - Os CLIs não informam custo nem tokens. Os limites contam chamadas e passos.
