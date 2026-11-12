@@ -58,6 +58,9 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction, team, forwa
           antialiasGL: true,
           roundPixels: false,
           backgroundColor: '#0f172a',
+          // O escritório não tem som. Sem isto cada montagem criava um AudioContext, e desmontar
+          // (trocar de aba) podia lançar "InvalidStateError: AudioContext is closed" (validação 10.6).
+          audio: { noAudio: true },
           scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
           scene: new OfficeScene(bridge),
         })
