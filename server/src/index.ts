@@ -25,8 +25,7 @@ const agentConfigs = new AgentConfigStore(projects.db)
 const memory = new MemoryStore(projects.db, history)
 const skills = new SkillStore(projects.db)
 const events = new EventStore(projects.db)
-// Etapa 10.1: só cria as tabelas do modo dinâmico. A execução ainda não usa este armazenamento.
-new PlanStore(projects.db, tasks)
+const plans = new PlanStore(projects.db, tasks)
 const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
 
 // Sincroniza agentes personalizados e o CLI de cada agente conforme a configuração persistida
@@ -78,6 +77,7 @@ const team = new TeamRunner({
   memory,
   skills,
   events,
+  plans,
   launch: (cli, args, options) => {
     const executable = findCli(cli)
     if (!executable) throw new Error(`CLI "${cli}" não encontrado no PATH.`)
@@ -99,6 +99,7 @@ const server = createAppServer({
   memory,
   skills,
   events,
+  plans,
   allowedOrigins: ALLOWED_ORIGINS,
 })
 

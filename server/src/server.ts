@@ -33,6 +33,7 @@ import type { EventStore } from './observability/store.ts'
 import type { ProjectStore } from './projects/store.ts'
 import type { SkillStore } from './skills/store.ts'
 import type { TaskStore } from './tasks/store.ts'
+import type { PlanStore } from './team/planStore.ts'
 import type { TeamRunner } from './team/runner.ts'
 import type { TerminalManager } from './terminal/manager.ts'
 
@@ -50,6 +51,8 @@ export interface AppServerOptions {
   skills?: SkillStore
   /** Sem trilha de eventos, events-list devolve lista vazia. */
   events?: EventStore
+  /** Propostas e passos das missões dinâmicas. Sem ele, plan-list devolve listas vazias. */
+  plans?: PlanStore
   allowedOrigins: string[]
 }
 
@@ -63,6 +66,8 @@ function hasLocalHost(req: IncomingMessage): boolean {
 
 const isSize = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 2 && (n as number) <= 500
 const isId = (n: unknown): n is number => Number.isInteger(n) && (n as number) > 0
+const isOpId = (v: unknown): v is string => typeof v === 'string' && /^[\w-]{1,80}$/.test(v)
+const DECISIONS = new Set(['approve', 'reject', 'adjust'])
 const isPathList = (v: unknown): v is string[] =>
   Array.isArray(v) && v.length > 0 && v.length <= 500 && v.every((p) => typeof p === 'string' && p.length <= 1024)
 
@@ -181,6 +186,13 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return isId(msg.taskId) ? { type: 'task-delete', taskId: msg.taskId } : null
     case 'mission-start': {
       if (!isId(msg.taskId)) return null
+      if (msg.mode !== undefined && msg.mode !== 'pipeline' && msg.mode !== 'dynamic') return null
+      // Os limites são conferidos de verdade pelo backend (resolveLimits); aqui só o formato.
+      if (msg.limits !== undefined && (typeof msg.limits !== 'object' || msg.limits === null || Array.isArray(msg.limits))) return null
+      const modeFields = {
+        ...(msg.mode !== undefined ? { mode: msg.mode as 'pipeline' | 'dynamic' } : {}),
+        ...(msg.limits !== undefined ? { limits: msg.limits as Record<string, number> } : {}),
+      }
       if (msg.team !== undefined) {
         if (typeof msg.team !== 'object' || msg.team === null) return null
         const tm = msg.team as Record<string, unknown>
@@ -215,10 +227,29 @@ export function parseClientMessage(raw: string): ClientMessage | null {
             ...(tm.qaId ? { qaId: tm.qaId } : {}),
             ...(specialists ? { specialists } : {}),
           },
+          ...modeFields,
         }
       }
-      return { type: 'mission-start', taskId: msg.taskId }
+      return { type: 'mission-start', taskId: msg.taskId, ...modeFields }
     }
+    case 'proposal-decide':
+      // A decisão só chega por aqui, vinda da interface: texto de CLI ou de agente nunca vira mensagem do cliente.
+      if (!isId(msg.missionId) || !isId(msg.proposalId) || !Number.isInteger(msg.revision) || (msg.revision as number) < 1) return null
+      if (!DECISIONS.has(msg.decision as string) || !isOpId(msg.opId)) return null
+      if (msg.feedback !== undefined && (typeof msg.feedback !== 'string' || msg.feedback.length > 5000)) return null
+      return {
+        type: 'proposal-decide',
+        missionId: msg.missionId,
+        proposalId: msg.proposalId,
+        revision: msg.revision as number,
+        decision: msg.decision as 'approve' | 'reject' | 'adjust',
+        opId: msg.opId,
+        ...(typeof msg.feedback === 'string' ? { feedback: msg.feedback } : {}),
+      }
+    case 'mission-close':
+      return isId(msg.missionId) ? { type: 'mission-close', missionId: msg.missionId } : null
+    case 'plan-list':
+      return isId(msg.projectId) && isId(msg.missionId) ? { type: 'plan-list', projectId: msg.projectId, missionId: msg.missionId } : null
     case 'mission-approve':
     case 'mission-cancel':
       return isId(msg.missionId) ? { type: msg.type, missionId: msg.missionId } : null
@@ -366,6 +397,7 @@ export function createAppServer({
   memory,
   skills,
   events,
+  plans,
   allowedOrigins,
 }: AppServerOptions): Server {
   for (const cfg of agentConfigs.list()) {
@@ -435,6 +467,13 @@ export function createAppServer({
     }
     action(cwd).catch((error) => send(socket, { type: 'git-result', ok: false, message: errorText(error) }))
   }
+  const planMessage = (projectId: number, missionId: number): ServerMessage => ({
+    type: 'mission-plan',
+    projectId,
+    missionId,
+    proposals: (plans?.listProposals({ projectId, missionId }) ?? []).map((p) => ({ ...p, previouslyRejected: team.previouslyRejected(p) })),
+    steps: plans?.listSteps({ projectId, missionId }) ?? [],
+  })
   const broadcastGitStatus = async (cwd: string) => broadcast({ type: 'git-status', status: await git.status(cwd) })
 
   const handle = (socket: WebSocket, message: ClientMessage) => {
@@ -614,7 +653,7 @@ export function createAppServer({
         }
         break
       case 'mission-start':
-        team.start(message.taskId, message.team).catch((error) => {
+        team.start(message.taskId, message.team, { mode: message.mode, limits: message.limits }).catch((error) => {
           send(socket, { type: 'notice', message: errorText(error) })
         })
         break
@@ -627,6 +666,43 @@ export function createAppServer({
         team.clarify(message.missionId, message.answer).catch((error) => {
           send(socket, { type: 'notice', message: errorText(error) })
         })
+        break
+      case 'proposal-decide':
+        try {
+          const { proposal, applied } = team.decideProposal(message)
+          send(socket, {
+            type: 'proposal-result',
+            opId: message.opId,
+            missionId: message.missionId,
+            proposalId: message.proposalId,
+            ok: true,
+            applied,
+            status: proposal.status,
+            message: applied ? 'Decisão registrada.' : 'Esta decisão já estava registrada: nada foi executado de novo.',
+          })
+        } catch (error) {
+          send(socket, {
+            type: 'proposal-result',
+            opId: message.opId,
+            missionId: message.missionId,
+            proposalId: message.proposalId,
+            ok: false,
+            applied: false,
+            status: plans?.getProposal(message.proposalId)?.status ?? null,
+            message: errorText(error),
+          })
+        }
+        break
+      case 'mission-close':
+        try {
+          team.closeMission(message.missionId)
+        } catch (error) {
+          send(socket, { type: 'notice', message: errorText(error) })
+        }
+        break
+      case 'plan-list':
+        // Sempre por projeto e missão: nada de outro projeto entra na resposta.
+        send(socket, planMessage(message.projectId, message.missionId))
         break
       case 'mission-cancel':
         try {
@@ -837,6 +913,10 @@ export function createAppServer({
   }
   const onSkills = () => skills && broadcast({ type: 'skills', skills: skills.list(), overrides: skills.overrides() })
   const onEvent = (event: MissionEvent) => broadcast({ type: 'mission-event', event })
+  const onPlan = (missionId: number) => {
+    const mission = tasks.getMission(missionId)
+    if (mission) broadcast(planMessage(mission.projectId, missionId))
+  }
   const onMemory = (projectId: number) => broadcast({ type: 'memory-changed', projectId })
   const onMissionOutput = (missionId: number, data: string) => broadcast({ type: 'mission-output', missionId, data })
   const onGitChange = async (event: { agentId?: string; cwd: string; files: string[]; summary: string }) => {
@@ -857,6 +937,7 @@ export function createAppServer({
   memory.on('change', onMemory)
   skills?.on('change', onSkills)
   events?.on('added', onEvent)
+  plans?.on('change', onPlan)
   team.on('output', onMissionOutput)
   team.on('git-change', onGitChange)
 
@@ -872,6 +953,7 @@ export function createAppServer({
     memory.off('change', onMemory)
     skills?.off('change', onSkills)
     events?.off('added', onEvent)
+    plans?.off('change', onPlan)
     team.off('output', onMissionOutput)
     team.off('git-change', onGitChange)
     for (const client of wss.clients) client.terminate()
