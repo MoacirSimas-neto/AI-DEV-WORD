@@ -57,9 +57,9 @@ const SCHEMA = `
     finished_at TEXT,
     result TEXT NOT NULL DEFAULT '',
     error TEXT,
-    correlation_id TEXT
+    correlation_id TEXT,
+    attempt INTEGER NOT NULL DEFAULT 1
   );
-  CREATE UNIQUE INDEX IF NOT EXISTS mission_steps_key ON mission_steps (mission_id, revision, key);
   CREATE INDEX IF NOT EXISTS mission_steps_by_mission ON mission_steps (project_id, mission_id, id);
 `
 
@@ -68,15 +68,23 @@ const EXTRA_PROPOSAL_COLUMNS: [string, string][] = [
   ['objective', "TEXT NOT NULL DEFAULT ''"],
   ['risks', "TEXT NOT NULL DEFAULT '[]'"],
   ['completion_criteria', "TEXT NOT NULL DEFAULT '[]'"],
+  // Etapa 10.4.
+  ['trigger', "TEXT NOT NULL DEFAULT ''"],
 ]
+const EXTRA_STEP_COLUMNS: [string, string][] = [['attempt', 'INTEGER NOT NULL DEFAULT 1']]
+// Uma tentativa por (revisão, chave, attempt): a reexecução autorizada é outra linha, a anterior fica como estava.
+const STEP_INDEX = `
+  DROP INDEX IF EXISTS mission_steps_key;
+  CREATE UNIQUE INDEX IF NOT EXISTS mission_steps_key_attempt ON mission_steps (mission_id, revision, key, attempt);
+`
 
 const PROPOSAL_COLUMNS = `id, mission_id AS missionId, project_id AS projectId, revision, kind, status, author, reason,
   mission_state AS missionState, alternative, team_changes AS teamChanges, steps, shared_context AS sharedContext,
   adjust_round AS adjustRound, created_at AS createdAt, decided_at AS decidedAt, decided_by AS decidedBy, feedback,
-  objective, risks, completion_criteria AS completionCriteria`
+  objective, risks, completion_criteria AS completionCriteria, "trigger" AS "trigger"`
 const STEP_COLUMNS = `id, mission_id AS missionId, project_id AS projectId, proposal_id AS proposalId, revision, key, seq,
   agent_id AS agentId, mode, objective, depends_on AS dependsOn, inputs, status, started_at AS startedAt,
-  finished_at AS finishedAt, result, error, correlation_id AS correlationId`
+  finished_at AS finishedAt, result, error, correlation_id AS correlationId, attempt`
 
 const MAX_RESULT = 100_000
 
@@ -120,10 +128,13 @@ export class PlanStore extends EventEmitter {
     this.db = db
     this.tasks = tasks
     this.db.exec(SCHEMA)
-    const existing = new Set((this.db.prepare('PRAGMA table_info(mission_proposals)').all() as { name: string }[]).map((c) => c.name))
-    for (const [column, definition] of EXTRA_PROPOSAL_COLUMNS) {
-      if (!existing.has(column)) this.db.exec(`ALTER TABLE mission_proposals ADD COLUMN ${column} ${definition}`)
+    for (const [table, columns] of [['mission_proposals', EXTRA_PROPOSAL_COLUMNS], ['mission_steps', EXTRA_STEP_COLUMNS]] as const) {
+      const existing = new Set((this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name))
+      for (const [column, definition] of columns) {
+        if (!existing.has(column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN "${column}" ${definition}`)
+      }
     }
+    this.db.exec(STEP_INDEX)
   }
 
   /** Em ordem de revisão. */
@@ -142,7 +153,7 @@ export class PlanStore extends EventEmitter {
   /** Todas as revisões, em ordem de revisão e de ordem lógica. */
   listSteps(query: PlanQuery): PlannedStep[] {
     return this.db
-      .prepare(`SELECT ${STEP_COLUMNS} FROM mission_steps WHERE project_id = ? AND mission_id = ? ORDER BY revision, seq`)
+      .prepare(`SELECT ${STEP_COLUMNS} FROM mission_steps WHERE project_id = ? AND mission_id = ? ORDER BY revision, seq, attempt`)
       .all(query.projectId, query.missionId)
       .map(toStep)
   }
@@ -156,11 +167,11 @@ export class PlanStore extends EventEmitter {
    * Registra a proposta (já validada) como a única pendente da missão e põe a missão à espera do usuário.
    * Uma proposta pendente anterior vira superseded: uma aprovação atrasada dela não vale mais.
    */
-  propose(missionId: number, author: string, input: DynamicProposalInput): DynamicProposal {
-    return this.changed(missionId, this.proposeTx(missionId, author, input))
+  propose(missionId: number, author: string, input: DynamicProposalInput, trigger = ''): DynamicProposal {
+    return this.changed(missionId, this.proposeTx(missionId, author, input, trigger))
   }
 
-  private proposeTx(missionId: number, author: string, input: DynamicProposalInput): DynamicProposal {
+  private proposeTx(missionId: number, author: string, input: DynamicProposalInput, trigger: string): DynamicProposal {
     return this.tx(() => {
       const mission = this.dynamicMission(missionId)
       if (mission.phase !== 'awaiting_approval') assertTransition(mission.phase, 'awaiting_approval')
@@ -171,8 +182,8 @@ export class PlanStore extends EventEmitter {
         .prepare(
           `INSERT INTO mission_proposals
              (mission_id, project_id, revision, kind, status, author, reason, mission_state, alternative, team_changes, steps, shared_context, adjust_round, created_at,
-              objective, risks, completion_criteria)
-           VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              objective, risks, completion_criteria, "trigger")
+           VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           missionId,
@@ -192,6 +203,7 @@ export class PlanStore extends EventEmitter {
           redact(input.objective ?? ''),
           JSON.stringify((input.risks ?? []).map(redact)),
           JSON.stringify((input.completionCriteria ?? []).map(redact)),
+          trigger.slice(0, 40),
         )
       if (mission.phase !== 'awaiting_approval') this.tasks.updateMission(missionId, { phase: 'awaiting_approval' })
       return this.getProposal(Number(result.lastInsertRowid))!
@@ -260,6 +272,33 @@ export class PlanStore extends EventEmitter {
       this.tasks.updateMission(mission.id, { phase: next })
       return { proposal: this.getProposal(proposalId)!, applied: true }
     })
+  }
+
+  /**
+   * O usuário autorizou executar de novo um passo interrompido ou que falhou: cria outra tentativa aprovada
+   * com o mesmo objetivo e as mesmas permissões; a anterior fica registrada como estava.
+   * `applied: false` = já existe uma tentativa aprovada, rodando ou concluída (repetição do pedido).
+   */
+  retryStep(stepId: number): { step: PlannedStep; applied: boolean } {
+    const result = this.tx(() => {
+      const step = this.getStep(stepId)
+      if (!step) throw new Error('Passo não encontrado.')
+      const mission = this.dynamicMission(step.missionId)
+      const siblings = this.listSteps({ projectId: mission.projectId, missionId: mission.id }).filter((s) => s.revision === step.revision && s.key === step.key)
+      const live = siblings.find((s) => s.status === 'approved' || s.status === 'running' || s.status === 'completed')
+      if (live) return { step: live, applied: false }
+      if (mission.phase !== 'awaiting_decision') throw new Error('A missão não está aguardando a sua decisão.')
+      if (step.status !== 'interrupted' && step.status !== 'failed') throw new Error('Só um passo interrompido ou que falhou pode ser executado de novo.')
+      const attempt = Math.max(...siblings.map((s) => s.attempt ?? 1)) + 1
+      const inserted = this.db
+        .prepare(
+          `INSERT INTO mission_steps (mission_id, project_id, proposal_id, revision, key, seq, agent_id, mode, objective, depends_on, inputs, status, attempt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?)`,
+        )
+        .run(step.missionId, step.projectId, step.proposalId, step.revision, step.key, step.seq, step.agentId, step.mode, step.objective, JSON.stringify(step.dependsOn), JSON.stringify(step.inputs), attempt)
+      return { step: this.getStep(Number(inserted.lastInsertRowid))!, applied: true }
+    })
+    return result.applied ? this.changed(result.step.missionId, result) : result
   }
 
   /** Só um passo aprovado começa; `correlationId` liga o passo aos eventos da execução. */

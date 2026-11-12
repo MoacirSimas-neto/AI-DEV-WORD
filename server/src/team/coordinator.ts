@@ -78,13 +78,16 @@ export interface LimitHit {
   max: number
 }
 
+/** Gatilho que marca uma proposta como retrabalho. */
+export const REWORK_TRIGGER = 'verdict_rejected'
+
 const consultKey = (s: Pick<PlannedStepInput, 'agentId' | 'mode' | 'objective'>) =>
   `${s.agentId}:${s.mode}:${s.objective.toLowerCase().replace(/\s+/g, ' ').trim()}`
 
 /** `steps` = os passos que contam (o chamador escolhe: iniciados, ou iniciados + planejados). */
 export function usageOf(
   steps: Pick<PlannedStepInput, 'agentId' | 'mode' | 'objective'>[],
-  proposals: Pick<DynamicProposal, 'kind' | 'status' | 'teamChanges' | 'revision' | 'adjustRound'>[],
+  proposals: (Pick<DynamicProposal, 'kind' | 'status' | 'teamChanges' | 'revision' | 'adjustRound'> & { trigger?: string })[],
   techLeadId: string,
 ): Usage {
   const callsByAgent: Record<string, number> = {}
@@ -99,7 +102,8 @@ export function usageOf(
     // A equipe inicial (proposta `plan`) não é mudança de equipe.
     teamChanges: proposals.filter((p) => p.status === 'approved' && p.kind === 'replan').reduce((n, p) => n + p.teamChanges.length, 0),
     activeMembers: teamOf(techLeadId, proposals).length,
-    reworkRounds: Math.max(0, steps.filter((s) => s.mode === 'verify').length - 1),
+    // Retrabalho = replanejamento aprovado porque uma verificação não aprovou. Verificações independentes não contam.
+    reworkRounds: proposals.filter((p) => p.status === 'approved' && p.kind === 'replan' && p.trigger === REWORK_TRIGGER).length,
     techLeadTurns: proposals.length,
     adjustRound: last?.adjustRound ?? 0,
     callsByAgent,
@@ -273,6 +277,10 @@ export interface PlanContext {
   steps: PlannedStep[]
   proposals: DynamicProposal[]
   limits: DynamicLimits
+  /** Turnos do Tech Lead já usados (missions.lead_turns). */
+  leadTurns?: number
+  /** Gatilho do turno atual: decide se a proposta conta como retrabalho. */
+  trigger?: string
 }
 
 export const KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/
@@ -334,8 +342,8 @@ function inputProblems(ref: ArtifactRef, step: PlannedStepInput, existing: Plann
     // O resultado só existe se o passo de origem terminar antes.
     return step.dependsOn.includes(ref.key) ? [] : [`usa o resultado de "${ref.key}" sem depender dele.`]
   }
-  const source = existing.find((s) => s.revision === ref.revision && s.key === ref.key)
-  return source?.status === 'completed' ? [] : [`usa o resultado de "${ref.key}" (revisão ${ref.revision}), que não existe ou não foi concluído.`]
+  // Um passo pode ter mais de uma tentativa: vale a que concluiu.
+  return existing.some((s) => s.revision === ref.revision && s.key === ref.key && s.status === 'completed') ? [] : [`usa o resultado de "${ref.key}" (revisão ${ref.revision}), que não existe ou não foi concluído.`]
 }
 
 /** Problemas de uma proposta do Tech Lead; vazio = pode ir para a aprovação humana. */
@@ -391,7 +399,7 @@ export function validateProposal(input: DynamicProposalInput, ctx: PlanContext):
   const counted = [...ctx.steps.filter((s) => s.startedAt !== null || (!input.steps.length && s.status === 'approved')), ...input.steps]
   const projected = [
     ...ctx.proposals,
-    { kind: input.kind, status: 'approved' as const, teamChanges: input.teamChanges, revision: Infinity, adjustRound: nextAdjustRound(ctx.proposals) },
+    { kind: input.kind, status: 'approved' as const, teamChanges: input.teamChanges, revision: Infinity, adjustRound: nextAdjustRound(ctx.proposals), trigger: ctx.trigger },
   ]
   for (const hit of checkLimits(ctx.limits, usageOf(counted, projected, ctx.techLeadId))) {
     problems.push(`Limite da missão ultrapassado: ${hit.limit} = ${hit.value} (máximo ${hit.max}).`)
@@ -452,4 +460,30 @@ export function planStatus(steps: PlannedStep[]): 'running' | 'ready' | 'blocked
   if (steps.some((s) => s.status === 'running')) return 'running'
   if (eligibleSteps(steps).length) return 'ready'
   return steps.some((s) => s.status === 'approved') ? 'blocked' : 'empty'
+}
+
+// ---------- replanejamento e recuperação ----------
+
+/**
+ * Se um novo turno do Tech Lead ainda cabe nos limites. null = pode consultar.
+ * O retrabalho só pesa quando o gatilho é uma verificação que não aprovou.
+ */
+export function replanLimit(ctx: PlanContext, trigger: string): LimitHit | null {
+  const turns = Math.max(ctx.leadTurns ?? 0, ctx.proposals.length)
+  if (turns >= ctx.limits.maxTechLeadTurns) return { limit: 'maxTechLeadTurns', value: turns, max: ctx.limits.maxTechLeadTurns }
+  if (trigger === REWORK_TRIGGER) {
+    const rounds = usageOf([], ctx.proposals, ctx.techLeadId).reworkRounds
+    if (rounds >= ctx.limits.maxReworkRounds) return { limit: 'maxReworkRounds', value: rounds, max: ctx.limits.maxReworkRounds }
+  }
+  return null
+}
+
+/** Passos interrompidos ou que falharam e que ainda não têm outra tentativa aprovada, rodando ou concluída. */
+export function retryableSteps(steps: PlannedStep[]): PlannedStep[] {
+  const live = new Set(steps.filter((s) => s.status === 'approved' || s.status === 'running' || s.status === 'completed').map((s) => stepRef(s.revision, s.key)))
+  const latest = new Map<string, PlannedStep>()
+  for (const s of steps) {
+    if ((s.status === 'interrupted' || s.status === 'failed') && !live.has(stepRef(s.revision, s.key))) latest.set(stepRef(s.revision, s.key), s)
+  }
+  return [...latest.values()]
 }

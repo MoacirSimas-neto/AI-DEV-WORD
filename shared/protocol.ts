@@ -407,6 +407,8 @@ export interface PlannedStep extends PlannedStepInput {
   error: string | null
   /** Liga o passo aos eventos da execução (mission_events.correlation_id). */
   correlationId: string | null
+  /** 1 = primeira execução; maior = reexecução autorizada pelo usuário depois de interrupção ou falha. */
+  attempt?: number
 }
 
 /** convene = entra na equipe; release = deixa a equipe (o cadastro do agente não muda). */
@@ -488,6 +490,8 @@ export interface DynamicProposal extends DynamicProposalInput {
   decidedBy: string | null
   /** Texto do usuário ao rejeitar ou pedir ajustes. */
   feedback: string | null
+  /** O que fez o Tech Lead ser consultado nesta proposta (ex.: verdict_rejected); vazio em propostas antigas. */
+  trigger?: string
   /** Calculado ao enviar: agentes desta proposta cuja mudança de equipe o usuário já rejeitou antes, e em quais revisões. */
   previouslyRejected?: { agentId: string; action: TeamChange['action']; revisions: number[] }[]
 }
@@ -527,6 +531,8 @@ export interface MissionInfo {
   mode?: MissionMode
   /** Só em missões dinâmicas. */
   limits?: DynamicLimits
+  /** Só em missões dinâmicas: turnos do Tech Lead já usados (inclui respostas recusadas). */
+  leadTurns?: number
   /** Agente responsável pelo planejamento (padrão: 'architect'). */
   plannerId?: string
   /** Agente responsável pela implementação (padrão: 'dev'). */
@@ -562,6 +568,25 @@ export interface MissionInfo {
   error: string | null
   createdAt: string
   updatedAt: string
+}
+
+export type ResumeAction = 'continue' | 'retry_step' | 'replan'
+
+/** Fotografia de uma missão dinâmica para decidir como seguir. Lida do banco e do Git agora; nada é executado. */
+export interface RecoveryState {
+  projectId: number
+  missionId: number
+  phase: MissionPhase
+  /** Motivo da última parada (mission.blocked), quando a trilha existe. */
+  reason: string | null
+  error: string | null
+  /** Passos interrompidos ou que falharam e ainda não têm outra tentativa. */
+  retryable: PlannedStep[]
+  /** Chaves dos passos aprovados que podem rodar agora. */
+  eligible: string[]
+  /** known = arquivos com alterações que a missão registrou; unknown = alterações de origem não registrada. */
+  files: { available: boolean; known: string[]; unknown: string[] }
+  actions: (ResumeAction | 'close' | 'cancel')[]
 }
 
 /** Missão no modo dinâmico: o plano vive em propostas (DynamicProposal) e passos (PlannedStep). */
@@ -693,6 +718,16 @@ export type MissionEventType =
   | 'step.finished'
   /** observed: a missão parou à espera de decisão humana (data: reason). */
   | 'mission.blocked'
+  /** Um novo turno do Tech Lead foi pedido (data: trigger, origem). declared quando o gatilho veio da resposta de um agente. */
+  | 'replan.triggered'
+  /** observed: o app foi fechado com este passo rodando; ele não é relançado sozinho. */
+  | 'step.interrupted'
+  /** observed: o usuário decidiu como seguir uma missão parada (data: action, opId). */
+  | 'mission.resumed'
+  /** observed: um limite da missão foi atingido e a missão parou. */
+  | 'limit.reached'
+  /** declared: o Tech Lead recomendou encerrar. Só a aprovação humana encerra. */
+  | 'closure.recommended'
 
 /** Um fato da trilha de execução de uma missão. Textos passam por remoção de segredos; nunca traz prompts nem conteúdo de arquivos. */
 export interface MissionEvent {
@@ -720,6 +755,8 @@ export type ServerMessage =
   | { type: 'mission-event'; event: MissionEvent }
   /** Resposta a plan-list e aviso a cada mudança: todas as revisões, em ordem. */
   | { type: 'mission-plan'; projectId: number; missionId: number; proposals: DynamicProposal[]; steps: PlannedStep[] }
+  | { type: 'mission-recovery'; state: RecoveryState }
+  | { type: 'mission-resume-result'; opId: string; missionId: number; ok: boolean; applied: boolean; message: string }
   /** Resultado de proposal-decide para quem pediu. applied=false com ok=true = a decisão já estava registrada. */
   | { type: 'proposal-result'; opId: string; missionId: number; proposalId: number; ok: boolean; applied: boolean; status: ProposalStatus | null; message: string }
   | {
@@ -811,6 +848,14 @@ export type ClientMessage =
   | { type: 'proposal-decide'; missionId: number; proposalId: number; revision: number; decision: ProposalDecision; feedback?: string; opId: string }
   /** O usuário confirma o encerramento de uma missão dinâmica que aguarda decisão. */
   | { type: 'mission-close'; missionId: number }
+  /** Estado de uma missão dinâmica parada: passos interrompidos, alterações no Git e ações possíveis. */
+  | { type: 'mission-recovery'; projectId: number; missionId: number }
+  /**
+   * Decisão humana sobre uma missão dinâmica parada. continue = rodar os passos aprovados elegíveis;
+   * retry_step = executar de novo um passo interrompido ou que falhou (stepId); replan = consultar o Tech Lead.
+   * acceptChanges = seguir preservando alterações no repositório que a missão não registrou.
+   */
+  | { type: 'mission-resume'; missionId: number; action: ResumeAction; stepId?: number; detail?: string; acceptChanges?: boolean; opId: string }
   /** Propostas (com as decisões) e passos de uma missão dinâmica. Também serve para retomar depois de reconectar. */
   | { type: 'plan-list'; projectId: number; missionId: number }
   /** Aprova o plano e libera o Dev. */

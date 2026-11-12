@@ -126,11 +126,15 @@ test('limites: o consumo é contado dos passos e propostas reais e cada excesso 
     step('d', 'qa', 'verify'),
     step('e', 'dev', 'implement', [], { objective: 'Outro objetivo' }),
   ]
-  const replan = stored(proposal({ kind: 'replan', teamChanges: [convene('dados')] }), 2, 'approved')
-  const usage = usageOf(steps, [approvedPlan, replan, stored(proposal({ kind: 'replan', teamChanges: [convene('seguranca')] }), 3, 'rejected')], 'architect')
+  // Retrabalho (10.4): replanejamento aprovado porque uma verificação não aprovou.
+  const replan = { ...stored(proposal({ kind: 'replan', teamChanges: [convene('dados')] }), 2, 'approved'), trigger: 'verdict_rejected' }
+  const rejectedRework = { ...stored(proposal({ kind: 'replan', teamChanges: [convene('seguranca')] }), 3, 'rejected'), trigger: 'verdict_rejected' }
+  const usage = usageOf(steps, [approvedPlan, replan, rejectedRework], 'architect')
   assert.equal(usage.steps, 5)
   assert.equal(usage.callsByAgent.dev, 3)
-  assert.equal(usage.reworkRounds, 1)
+  assert.equal(usage.reworkRounds, 1, 'só o retrabalho aprovado conta')
+  // Duas verificações independentes, sem reprovação no meio, não são retrabalho.
+  assert.equal(usageOf(steps, [approvedPlan, { ...replan, trigger: 'queue_empty' }], 'architect').reworkRounds, 0)
   // A equipe inicial não conta; a convocação rejeitada também não.
   assert.equal(usage.teamChanges, 1)
   assert.equal(usage.techLeadTurns, 3)

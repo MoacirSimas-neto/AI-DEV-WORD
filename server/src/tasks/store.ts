@@ -54,6 +54,7 @@ const SCHEMA = `
     skill_applications TEXT NOT NULL DEFAULT '[]',
     mode TEXT NOT NULL DEFAULT 'pipeline',
     limits TEXT NOT NULL DEFAULT '{}',
+    lead_turns INTEGER NOT NULL DEFAULT 0,
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -82,6 +83,7 @@ const EXTRA_MISSION_COLUMNS: [string, string][] = [
   // Etapa 10: missões que já existem ficam no fluxo clássico.
   ['mode', "TEXT NOT NULL DEFAULT 'pipeline'"],
   ['limits', "TEXT NOT NULL DEFAULT '{}'"],
+  ['lead_turns', 'INTEGER NOT NULL DEFAULT 0'],
 ]
 
 export const OPEN_PHASES: MissionPhase[] = ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing', 'executing', 'awaiting_decision']
@@ -101,7 +103,7 @@ const MISSION_COLUMNS = `id, task_id AS taskId, project_id AS projectId, phase,
   planner_id AS plannerId, dev_id AS devId, qa_id AS qaId,
   plan, dev_report AS devReport, review, verdict, verdict_detail AS verdictDetail,
   team_snapshot AS teamSnapshot, specialists, specialist_results AS specialistResults,
-  files, attempts, clarifications, memory_context AS memoryContext, skill_applications AS skillApplications, mode, limits, error, created_at AS createdAt, updated_at AS updatedAt`
+  files, attempts, clarifications, memory_context AS memoryContext, skill_applications AS skillApplications, mode, limits, lead_turns AS leadTurns, error, created_at AS createdAt, updated_at AS updatedAt`
 
 type MissionPatch = Partial<
   Pick<
@@ -123,6 +125,7 @@ type MissionPatch = Partial<
     | 'clarifications'
     | 'memoryContext'
     | 'skillApplications'
+    | 'leadTurns'
     | 'error'
   >
 >
@@ -145,6 +148,7 @@ const MISSION_FIELDS: Record<keyof MissionPatch, string> = {
   clarifications: 'clarifications',
   memoryContext: 'memory_context',
   skillApplications: 'skill_applications',
+  leadTurns: 'lead_turns',
   error: 'error',
 }
 
@@ -172,7 +176,7 @@ const toMission = (row: Record<string, unknown>): MissionInfo => ({
   projectId: Number(row.projectId),
   phase: row.phase as MissionPhase,
   mode: row.mode === 'dynamic' ? 'dynamic' : 'pipeline',
-  ...(row.mode === 'dynamic' ? { limits: readLimits(row.limits) } : {}),
+  ...(row.mode === 'dynamic' ? { limits: readLimits(row.limits), leadTurns: Number(row.leadTurns ?? 0) } : {}),
   plannerId: String(row.plannerId || 'architect'),
   devId: String(row.devId || 'dev'),
   qaId: String(row.qaId || 'qa'),
