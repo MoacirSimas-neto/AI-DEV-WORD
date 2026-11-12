@@ -142,6 +142,8 @@ export const EVENT_LABEL: Record<string, string> = {
   'replan.triggered': 'Replanejamento',
   'limit.reached': 'Limite atingido',
   'closure.recommended': 'Encerramento recomendado',
+  'chat.mission_requested': 'Missão pedida no chat',
+  'chat.mission_linked': 'Missão vinculada à conversa',
   'log.truncated': 'Trilha cortada',
 }
 
@@ -166,6 +168,8 @@ export const COORDINATION_EVENTS = new Set([
   'limit.reached',
   'closure.recommended',
   'mission.completed',
+  'chat.mission_requested',
+  'chat.mission_linked',
 ])
 
 // ---------- plano ----------
@@ -361,4 +365,58 @@ export class OpGate {
   reset() {
     this.pending = null
   }
+}
+
+// ---------- chat → missão (Etapa 12.2) ----------
+
+export type ChatMissionTone = 'wait' | 'decide' | 'run' | 'done' | 'fail' | 'off'
+
+/** Chip de estado de uma missão nascida do chat: o que o usuário precisa saber de relance. */
+export function chatMissionState(mission: Pick<MissionInfo, 'phase'> | null | undefined): { label: string; tone: ChatMissionTone } {
+  if (!mission) return { label: 'Carregando missão…', tone: 'off' }
+  switch (mission.phase) {
+    case 'planning':
+      return { label: 'Tech Lead preparando a proposta', tone: 'wait' }
+    case 'awaiting_approval':
+      return { label: 'Aguardando sua aprovação', tone: 'decide' }
+    case 'awaiting_clarification':
+      return { label: 'Tech Lead fez uma pergunta', tone: 'decide' }
+    case 'awaiting_decision':
+      return { label: 'Parada · aguardando sua decisão', tone: 'decide' }
+    case 'executing':
+    case 'developing':
+    case 'reviewing':
+      return { label: 'Executando passos aprovados', tone: 'run' }
+    case 'done':
+      return { label: 'Concluída', tone: 'done' }
+    case 'failed':
+      return { label: 'Falhou', tone: 'fail' }
+    case 'cancelled':
+      return { label: 'Cancelada', tone: 'off' }
+    default:
+      return { label: mission.phase, tone: 'off' }
+  }
+}
+
+/**
+ * Por que o botão "Preparar missão" está desligado (null = pode preparar). Só orienta a tela:
+ * o backend refaz todas as checagens e é quem decide.
+ */
+export function prepareBlocker(s: {
+  online: boolean
+  conversationId: number | null
+  hasUserMessage: boolean
+  responding: boolean
+  preparing: boolean
+  agentAvailable: boolean
+  openMissionId: number | null
+}): string | null {
+  if (!s.online) return 'Sem conexão com o backend.'
+  if (!s.conversationId) return 'Converse com o Tech Lead primeiro: a missão nasce de uma conversa.'
+  if (s.preparing) return 'Preparando a missão…'
+  if (s.openMissionId) return `Esta conversa já tem a missão #${s.openMissionId} em andamento.`
+  if (s.responding) return 'Aguarde a resposta do Tech Lead terminar.'
+  if (!s.hasUserMessage) return 'Diga ao Tech Lead o que você quer antes de preparar a missão.'
+  if (!s.agentAvailable) return 'O CLI do Tech Lead está indisponível.'
+  return null
 }

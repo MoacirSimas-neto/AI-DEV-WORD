@@ -1,7 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { CHAT_LIMITS, type AgentConfig, type AgentInfo, type ChatConversation, type ChatMessage } from '../../../../shared/protocol.ts'
+import { isOpenMission } from '../../../../shared/missionPhases.ts'
+import { CHAT_LIMITS, type AgentConfig, type AgentInfo, type ChatConversation, type ChatMessage, type ChatMissionLink, type MissionInfo, type TaskInfo } from '../../../../shared/protocol.ts'
 import { useChat } from '../../net/useChat.ts'
 import type { Send, Subscribe } from '../../net/useServer.ts'
+import { DynamicMissionMonitor } from '../DynamicMissionMonitor.tsx'
+import { chatMissionState, prepareBlocker } from '../dynamicView.ts'
 import { Markdown } from './markdown.tsx'
 import './chat.css'
 
@@ -14,6 +17,13 @@ interface Props {
   send: Send
   subscribe: Subscribe
   onOpenTasks: () => void
+  /** Etapa 12.2: missões nascidas das conversas deste projeto. */
+  links?: ChatMissionLink[]
+  missions?: MissionInfo[]
+  tasks?: TaskInfo[]
+  /** Conversa a abrir ao montar (vindo de "Voltar ao chat"). */
+  initialConversationId?: number | null
+  onOpenObservability?: (missionId: number) => void
 }
 
 const AVAILABILITY: Record<string, { label: string; tone: 'ok' | 'warn' | 'off' }> = {
@@ -65,7 +75,7 @@ const MessageItem = memo(function MessageItem({ message, name, live }: { message
   )
 })
 
-export function ChatView({ projectId, projectName, agents, configs, online, send, subscribe, onOpenTasks }: Props) {
+export function ChatView({ projectId, projectName, agents, configs, online, send, subscribe, onOpenTasks, links = [], missions = [], tasks = [], initialConversationId, onOpenObservability }: Props) {
   const chat = useChat(send, subscribe, online, projectId)
   const { state } = chat
   const planners = agents.filter((a) => {
@@ -80,6 +90,22 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
   const agentName = conversation ? (configs.find((c) => c.agentId === conversation.agentId)?.name ?? agent?.name ?? conversation.agentId) : (agent?.name ?? 'Tech Lead')
   const streaming = state.streaming
   const responding = state.messages.some((m) => m.status === 'streaming')
+
+  // ---------- missões nascidas desta conversa (mais recente primeiro) ----------
+  const convLinks = conversation ? links.filter((l) => l.conversationId === conversation.id).sort((a, b) => b.missionId - a.missionId) : []
+  const missionOf = (id: number) => missions.find((m) => m.id === id)
+  const openLink = convLinks.find((l) => {
+    const m = missionOf(l.missionId)
+    return m && isOpenMission(m)
+  })
+  const [confirmPrepare, setConfirmPrepare] = useState(false)
+
+  // "Voltar ao chat": abre a conversa de origem da missão.
+  useEffect(() => {
+    if (initialConversationId && projectId) chat.select(initialConversationId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialConversationId, projectId])
+  useEffect(() => setConfirmPrepare(false), [state.selectedId])
 
   // ---------- altura: o chat ocupa o resto da janela (composer sempre visível) ----------
   const shell = useRef<HTMLDivElement>(null)
@@ -142,6 +168,15 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
   }, [state.sending, state.error])
 
   const canWrite = online && !!projectId && avail.tone !== 'off' && !agent?.checking
+  const blocker = prepareBlocker({
+    online,
+    conversationId: conversation?.id ?? null,
+    hasUserMessage: state.hasMore || state.messages.some((m) => m.role === 'user'),
+    responding,
+    preparing: state.preparing,
+    agentAvailable: avail.tone !== 'off' && !agent?.checking,
+    openMissionId: openLink?.missionId ?? null,
+  })
   const tooLong = draft.length > CHAT_LIMITS.maxMessageChars
   const canSend = canWrite && !state.sending && !responding && !!draft.trim() && !tooLong
   const submit = () => {
@@ -297,6 +332,17 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
               <span className="chat-agent-name">{agentName}</span>
             )}
             <span className={`chat-avail chat-avail-${avail.tone}`}>{avail.label}</span>
+            {conversation && (
+              <button
+                type="button"
+                className="chat-prepare"
+                disabled={!!blocker || confirmPrepare}
+                title={blocker ?? 'O Tech Lead lê esta conversa e propõe equipe e passos. Nada é executado sem a sua aprovação.'}
+                onClick={() => setConfirmPrepare(true)}
+              >
+                {state.preparing ? 'Preparando…' : '▶ Preparar missão'}
+              </button>
+            )}
             {avail.tone === 'off' && agent && (
               <button type="button" className="btn-quiet btn-xs" disabled={!online} onClick={() => send({ type: 'check-cli', agentId: agent.id })}>
                 Verificar CLI
@@ -331,6 +377,50 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
           ) : (
             state.messages.map((m) => <MessageItem key={m.id} message={m} name={agentName} live={streaming?.messageId === m.id ? streaming.text : undefined} />)
           )}
+          {convLinks.length > 0 && (
+            <section className="chat-missions" aria-label="Missões desta conversa">
+              {convLinks.map((l) => {
+                const m = missionOf(l.missionId)
+                const st = chatMissionState(m)
+                const open = !!m && isOpenMission(m)
+                return (
+                  <article key={l.missionId} className={`chat-mission chat-mission-${st.tone}`} aria-label={`Missão #${l.missionId}`}>
+                    <header className="chat-mission-head">
+                      <strong>Missão #{l.missionId}</strong>
+                      <span className={`chat-mission-chip chat-mission-chip-${st.tone}`}>{st.label}</span>
+                      <span className="chat-mission-meta">
+                        {l.context.sentMessages} msg da conversa no contexto
+                        {l.context.omittedMessages > 0 ? ` · ${l.context.omittedMessages} mais antiga(s) de fora` : ''}
+                      </span>
+                      <span className="chat-mission-actions">
+                        {open && (
+                          <button type="button" className="chat-link" onClick={onOpenTasks}>
+                            Abrir em Tarefas
+                          </button>
+                        )}
+                        {onOpenObservability && (
+                          <button type="button" className="chat-link" onClick={() => onOpenObservability(l.missionId)}>
+                            Trilha de eventos
+                          </button>
+                        )}
+                      </span>
+                    </header>
+                    {open && m && (
+                      <DynamicMissionMonitor
+                        mission={m}
+                        task={tasks.find((t) => t.id === m.taskId) ?? null}
+                        agents={agents}
+                        configs={configs}
+                        online={online}
+                        send={send}
+                        subscribe={subscribe}
+                      />
+                    )}
+                  </article>
+                )
+              })}
+            </section>
+          )}
         </div>
         {showJump && (
           <button type="button" className="chat-jump" onClick={toBottom}>
@@ -345,6 +435,38 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
               <button type="button" className="btn-quiet btn-xs" aria-label="Fechar aviso" onClick={chat.dismissError}>
                 ×
               </button>
+            </div>
+          )}
+          {state.notice && (
+            <div className="chat-notice" role="status">
+              <span>{state.notice}</span>
+              <button type="button" className="btn-quiet btn-xs" aria-label="Fechar aviso" onClick={chat.dismissNotice}>
+                ×
+              </button>
+            </div>
+          )}
+          {confirmPrepare && (
+            <div className="chat-prepare-confirm" role="alertdialog" aria-label="Preparar missão">
+              <p>
+                <strong>Preparar missão a partir desta conversa?</strong> {agentName} lê as últimas mensagens e propõe equipe e passos. A proposta aparece
+                aqui para você aprovar, ajustar ou rejeitar: <strong>nada é executado antes disso</strong>.
+              </p>
+              <div>
+                <button
+                  type="button"
+                  className="chat-send"
+                  disabled={!!blocker}
+                  onClick={() => {
+                    chat.prepareMission()
+                    setConfirmPrepare(false)
+                  }}
+                >
+                  Confirmar
+                </button>
+                <button type="button" className="btn-quiet" onClick={() => setConfirmPrepare(false)}>
+                  Cancelar
+                </button>
+              </div>
             </div>
           )}
           {!canWrite && (

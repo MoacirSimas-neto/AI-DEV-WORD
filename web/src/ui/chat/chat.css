@@ -599,6 +599,131 @@
   color: #e2e8f0;
 }
 
+/* ---------- Etapa 12.2: conversa → missão ---------- */
+.chat-prepare {
+  --bg: rgba(16, 185, 129, 0.14);
+  --bg-hover: rgba(16, 185, 129, 0.24);
+  --fg: #a7f3d0;
+  --bg-disabled: transparent;
+  --fg-disabled: #64748b;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap !important;
+}
+.chat-prepare:disabled {
+  border-color: var(--chat-line);
+  cursor: default;
+}
+.chat-prepare-confirm,
+.chat-notice {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.chat-prepare-confirm {
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.08);
+}
+.chat-prepare-confirm p {
+  margin: 0 0 8px;
+}
+.chat-prepare-confirm div {
+  display: flex;
+  gap: 8px;
+}
+.chat-prepare-confirm .chat-send {
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.chat-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  color: #bae6fd;
+  background: rgba(56, 189, 248, 0.1);
+}
+.chat-missions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chat-mission {
+  border: 1px solid var(--chat-line);
+  border-left: 3px solid var(--chat-dim);
+  border-radius: 12px;
+  background: var(--chat-panel);
+  padding: 10px 14px;
+  min-width: 0;
+}
+.chat-mission-decide {
+  border-left-color: #f59e0b;
+}
+.chat-mission-run,
+.chat-mission-wait {
+  border-left-color: var(--chat-accent);
+}
+.chat-mission-done {
+  border-left-color: #10b981;
+}
+.chat-mission-fail {
+  border-left-color: #ef4444;
+}
+.chat-mission-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.chat-mission-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--chat-dim);
+  background: rgba(148, 163, 184, 0.12);
+}
+.chat-mission-chip-decide {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.14);
+}
+.chat-mission-chip-wait,
+.chat-mission-chip-run {
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.12);
+}
+.chat-mission-chip-done {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+}
+.chat-mission-chip-fail {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+}
+.chat-mission-meta {
+  color: var(--chat-dim);
+  font-size: 12px;
+}
+.chat-mission-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+  font-size: 12.5px;
+}
+.chat-mission .dyn-monitor {
+  margin-top: 10px;
+  color: var(--ink); /* o monitor tem fundo creme; o chat herdaria texto claro */
+}
+
 @media (max-width: 1440px) {
   .chat-shell {
     grid-template-columns: 236px minmax(0, 1fr);

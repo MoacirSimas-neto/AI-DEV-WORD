@@ -30,10 +30,14 @@ interface Props {
   subscribe: Subscribe
   liveOutput?: string
   onOpenObservability?: () => void
+  /** Missão nascida de uma conversa (Etapa 12.2). */
+  origin?: { conversationId: number; title?: string } | null
+  /** Volta para a conversa de origem (omitido quando o monitor já está dentro do chat). */
+  onOpenChat?: (conversationId: number) => void
 }
 
 /** Missão dinâmica: só o que o backend gravou — passos aprovados, propostas, gatilhos e decisões. */
-export function DynamicMissionMonitor({ mission, task, agents, configs, online, send, subscribe, liveOutput, onOpenObservability }: Props) {
+export function DynamicMissionMonitor({ mission, task, agents, configs, online, send, subscribe, liveOutput, onOpenObservability, origin, onOpenChat }: Props) {
   const plan = usePlan(send, subscribe, online, mission.projectId, mission.id)
   const events = useMissionEvents(send, subscribe, online, mission.projectId, mission.id)
   const nameOf = useCallback(
@@ -90,6 +94,18 @@ export function DynamicMissionMonitor({ mission, task, agents, configs, online, 
           )}
         </div>
         <h3>{task?.title ?? `Tarefa #${mission.taskId}`}</h3>
+        {origin && (
+          <p className="dyn-origin">
+            <span>
+              Origem: conversa {origin.title ? `“${origin.title}”` : `#${origin.conversationId}`}
+            </span>
+            {onOpenChat && (
+              <button type="button" className="btn-quiet btn-xs" onClick={() => onOpenChat(origin.conversationId)}>
+                ← Voltar ao chat
+              </button>
+            )}
+          </p>
+        )}
         {objective && <p className="dyn-objective">{objective}</p>}
         <div className="dyn-team">
           {team.active.map((id) => (

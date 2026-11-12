@@ -35,13 +35,24 @@ Agentes padrão: **Arquiteto** (Tech Lead / planejamento), **Dev** (implementaç
 
 Ao abrir o app, a aba **Chat** mostra as conversas do projeto ativo. Você pode conversar com o Tech Lead, ou com outro agente planejador ativo, sobre ideias, requisitos, arquitetura e planejamento.
 
-- **Conversar não executa nada.** O agente roda com o papel de planejamento, sem permissão de escrita e sob o supervisor de processos. Nenhuma resposta vira proposta, aprovação ou missão. Para implementar, use **Tarefas** (modos clássico e dinâmico).
+- **Conversar não executa nada.** O agente roda com o papel de planejamento, sem permissão de escrita e sob o supervisor de processos. Nenhuma resposta vira proposta, aprovação ou missão por conta própria. Frases como "pode fazer" ou "aprovado" na conversa não autorizam nada.
 - As conversas ficam no SQLite, separadas por projeto: uma conversa não é vista nem usada a partir de outro projeto. Elas podem ser renomeadas e excluídas (com confirmação).
 - **Contexto limitado:** cada resposta recebe só as mensagens mais recentes (até 20 e 16 mil caracteres). Quando mensagens antigas ficam de fora, a resposta avisa.
 - Uma resposta por vez no app. **Interromper** encerra o processo do CLI e guarda o texto parcial. Se o app fechar no meio, a resposta fica como interrompida e nada é relançado.
 - Sem CLI disponível, as conversas continuam consultáveis.
 - O texto mostrado e o gravado passam pela remoção de segredos. A interface renderiza Markdown sem HTML: links só abrem se forem `http(s)`.
 - Se arquivos mudarem durante uma resposta, ela é marcada com erro e aviso. Nada é desfeito.
+
+### Da conversa para a missão
+
+O botão **▶ Preparar missão**, no cabeçalho da conversa, transforma a conversa numa **missão dinâmica**. Antes de criar, o app pede confirmação.
+
+- O backend cria a tarefa e a missão, e o Tech Lead recebe as mensagens mais recentes da conversa como **contexto, não como ordens**: até 12 mensagens, 6 mil caracteres no total e 1.500 por mensagem. Pedidos na conversa para ignorar regras, ampliar permissões ou fazer commit/push não valem e vão para os riscos da proposta.
+- A proposta passa pela mesma validação e pela mesma **aprovação humana** do modo dinâmico. Você aprova, ajusta ou rejeita no próprio chat ou em **Tarefas**. Nada é executado antes disso.
+- A conversa mostra um card por missão vinculada, com o estado ("Aguardando sua aprovação", "Executando passos aprovados", "Concluída"…). Se a missão estiver aberta, o monitor dinâmico aparece dentro do card. O card também tem atalhos para **Tarefas** e para a trilha de eventos.
+- Em **Tarefas**, a missão mostra "Origem: conversa #N" e o botão **← Voltar ao chat**.
+- Uma missão aberta por conversa. O botão também fica desligado sem conexão, sem mensagem sua na conversa, durante uma resposta do Tech Lead ou com o CLI dele indisponível. O backend refaz todas essas checagens.
+- A trilha registra `chat.mission_requested` e `chat.mission_linked`.
 
 ## Modos de missão
 

@@ -15,10 +15,14 @@ export interface ChatState {
   streaming: { messageId: number; text: string } | null
   /** Envio aguardando a confirmação do backend. */
   sending: boolean
+  /** "Preparar missão" aguardando a resposta do backend. */
+  preparing: boolean
+  /** Confirmação do backend (ex.: missão criada). */
+  notice: string | null
   error: string | null
 }
 
-const EMPTY: ChatState = { conversations: [], listed: false, selectedId: null, messages: [], hasMore: false, loadingMessages: false, streaming: null, sending: false, error: null }
+const EMPTY: ChatState = { conversations: [], listed: false, selectedId: null, messages: [], hasMore: false, loadingMessages: false, streaming: null, sending: false, preparing: false, notice: null, error: null }
 
 /**
  * Estado do chat de um projeto. Tudo vem do backend (fonte da verdade): a tela pede a lista,
@@ -74,10 +78,12 @@ export function useChat(send: Send, subscribe: Subscribe, online: boolean, proje
         if (msg.opId && !op) return // resposta de outra aba
         if (msg.opId) pending.current.delete(msg.opId)
         if (msg.action === 'send') patch({ sending: false })
+        if (msg.action === 'prepare-mission') patch({ preparing: false })
         if (!msg.ok) {
-          patch({ error: msg.message, sending: false })
+          patch({ error: msg.message, sending: false, preparing: false, notice: null })
           return
         }
+        if (msg.action === 'prepare-mission') patch({ notice: msg.message, error: null })
         if (msg.action === 'create' && msg.conversationId) {
           select(msg.conversationId)
           // Primeira mensagem digitada sem conversa aberta: segue para a conversa recém-criada.
@@ -98,7 +104,7 @@ export function useChat(send: Send, subscribe: Subscribe, online: boolean, proje
     }
     if (!online) {
       pending.current.clear()
-      patch({ sending: false })
+      patch({ sending: false, preparing: false })
     }
   }, [online, projectId, send])
 
@@ -106,7 +112,7 @@ export function useChat(send: Send, subscribe: Subscribe, online: boolean, proje
     (conversationId: number) => {
       if (!projectRef.current) return
       selectedRef.current = conversationId
-      setState((s) => ({ ...s, selectedId: conversationId, messages: [], streaming: null, hasMore: false, loadingMessages: true, error: null }))
+      setState((s) => ({ ...s, selectedId: conversationId, messages: [], streaming: null, hasMore: false, loadingMessages: true, error: null, notice: null }))
       send({ type: 'chat-open', projectId: projectRef.current, conversationId })
     },
     [send],
@@ -140,6 +146,14 @@ export function useChat(send: Send, subscribe: Subscribe, online: boolean, proje
       send({ type: 'chat-create', projectId: projectRef.current, agentId, opId: op('create', { afterCreate: firstMessage }) })
     },
     sendText,
+    /** Pede ao backend para transformar a conversa aberta numa missão dinâmica (um clique = um opId). */
+    prepareMission() {
+      const projectId = projectRef.current
+      const conversationId = selectedRef.current
+      if (!projectId || !conversationId || state.preparing) return
+      patch({ preparing: true, error: null, notice: null })
+      send({ type: 'chat-prepare-mission', projectId, conversationId, opId: op('prepare-mission') })
+    },
     cancel() {
       if (projectRef.current && selectedRef.current) send({ type: 'chat-cancel', projectId: projectRef.current, conversationId: selectedRef.current, opId: op('cancel') })
     },
@@ -156,8 +170,9 @@ export function useChat(send: Send, subscribe: Subscribe, online: boolean, proje
     /** Tela de conversa nova: a conversa só é criada no primeiro envio. */
     startNew() {
       selectedRef.current = null
-      patch({ selectedId: null, messages: [], streaming: null, hasMore: false, loadingMessages: false, error: null })
+      patch({ selectedId: null, messages: [], streaming: null, hasMore: false, loadingMessages: false, error: null, notice: null })
     },
     dismissError: () => patch({ error: null }),
+    dismissNotice: () => patch({ notice: null }),
   }
 }

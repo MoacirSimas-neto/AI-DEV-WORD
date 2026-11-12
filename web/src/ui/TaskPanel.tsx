@@ -3,6 +3,7 @@ import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type {
   AgentConfig,
   AgentInfo,
+  ChatMissionLink,
   MissionInfo,
   MissionSpecialistSelection,
   MissionTeamSelection,
@@ -30,6 +31,10 @@ interface Props {
   send: Send
   subscribe: Subscribe
   onClose: () => void
+  /** Etapa 12.2: missões nascidas de conversas (origem + voltar ao chat). */
+  chatLinks?: ChatMissionLink[]
+  onOpenChat?: (conversationId: number) => void
+  onOpenObservability?: (missionId: number) => void
 }
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = { low: 'Baixa', medium: 'Média', high: 'Alta' }
@@ -50,6 +55,9 @@ export function TaskPanel({
   send,
   subscribe,
   onClose,
+  chatLinks = [],
+  onOpenChat,
+  onOpenObservability,
 }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [title, setTitle] = useState('')
@@ -264,6 +272,9 @@ export function TaskPanel({
             send={send}
             subscribe={subscribe}
             liveOutput={liveOutput?.missionId === activeMission.id ? liveOutput.text : undefined}
+            origin={chatLinks.find((l) => l.missionId === activeMission.id) ?? null}
+            onOpenChat={onOpenChat}
+            onOpenObservability={onOpenObservability ? () => onOpenObservability(activeMission.id) : undefined}
           />
         </section>
       )}

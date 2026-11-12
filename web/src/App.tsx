@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import { isOpenMission } from '../../shared/missionPhases.ts'
 import type { WorldAction } from './game/WorldBridge.ts'
+import { useChatLinks } from './net/useChatLinks.ts'
 import { useGitStatus } from './net/useGitStatus.ts'
 import { useServer } from './net/useServer.ts'
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
@@ -46,6 +47,8 @@ function App() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [observabilityMissionId, setObservabilityMissionId] = useState<number | null>(null)
   const [observabilityAgentId, setObservabilityAgentId] = useState<string | null>(null)
+  // Etapa 12.2: "Voltar ao chat" abre a conversa de origem da missão.
+  const [chatConversationId, setChatConversationId] = useState<number | null>(null)
 
   // Controle integrado do Drawer lateral do Studio (Agente, Missão, Git)
   const [sidePanelOpen, setSidePanelOpen] = useState(false)
@@ -56,6 +59,16 @@ function App() {
   // As telas secundárias descem em segundo plano depois da primeira pintura.
   useEffect(() => prefetchScreens(), [])
   const gitStatus = useGitStatus(send, subscribe, online, workspace.activeProjectId)
+  const chatLinks = useChatLinks(send, subscribe, online, workspace.activeProjectId)
+  const openChat = useCallback((conversationId: number) => {
+    setChatConversationId(conversationId)
+    setActiveTab('chat')
+  }, [])
+  const openObservability = useCallback((missionId?: number | null, agentId?: string | null) => {
+    setObservabilityMissionId(missionId ?? null)
+    setObservabilityAgentId(agentId ?? null)
+    setActiveTab('observability')
+  }, [])
 
   const selectAgent = useCallback((agentId: string) => {
     setSelectedAgentId(agentId)
@@ -150,6 +163,11 @@ function App() {
                   send={send}
                   subscribe={subscribe}
                   onOpenTasks={() => setActiveTab('tasks')}
+                  links={chatLinks}
+                  missions={missions}
+                  tasks={tasks}
+                  initialConversationId={chatConversationId}
+                  onOpenObservability={(missionId) => openObservability(missionId)}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -182,11 +200,7 @@ function App() {
             subscribe={subscribe}
             onAction={handleWorldAction}
             onOpenTasks={() => setActiveTab('tasks')}
-            onOpenObservability={(missionId, agentId) => {
-              setObservabilityMissionId(missionId ?? null)
-              setObservabilityAgentId(agentId ?? null)
-              setActiveTab('observability')
-            }}
+            onOpenObservability={openObservability}
           />
         )}
 
@@ -205,6 +219,9 @@ function App() {
                   send={send}
                   subscribe={subscribe}
                   onClose={() => setActiveTab('office')}
+                  chatLinks={chatLinks}
+                  onOpenChat={openChat}
+                  onOpenObservability={(missionId) => openObservability(missionId)}
                 />
               </Suspense>
             </ErrorBoundary>
