@@ -12,6 +12,7 @@ import { ProjectStore } from './projects/store.ts'
 import { createAppServer } from './server.ts'
 import { SkillStore } from './skills/store.ts'
 import { TaskStore } from './tasks/store.ts'
+import { PlanStore } from './team/planStore.ts'
 import { agyEffortArgs, TeamRunner } from './team/runner.ts'
 import { TerminalManager } from './terminal/manager.ts'
 import { spawnCliPty } from './terminal/spawnPty.ts'
@@ -24,6 +25,8 @@ const agentConfigs = new AgentConfigStore(projects.db)
 const memory = new MemoryStore(projects.db, history)
 const skills = new SkillStore(projects.db)
 const events = new EventStore(projects.db)
+// Etapa 10.1: só cria as tabelas do modo dinâmico. A execução ainda não usa este armazenamento.
+new PlanStore(projects.db, tasks)
 const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
 
 // Sincroniza agentes personalizados e o CLI de cada agente conforme a configuração persistida
