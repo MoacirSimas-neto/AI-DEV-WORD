@@ -69,7 +69,7 @@ test('TeamRunner fluxo completo: planejar -> aprovar -> desenvolver -> revisar',
   assert.equal(mission.phase, 'planning')
 
   // Espera a fase de planejamento terminar (assincrona)
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 250; i++) {
     const m = tasks.getMission(mission.id)!
     if (m.phase === 'awaiting_approval') break
     await new Promise((r) => setTimeout(r, 20))
@@ -83,7 +83,7 @@ test('TeamRunner fluxo completo: planejar -> aprovar -> desenvolver -> revisar',
   await runner.approve(mission.id)
 
   // Espera desenvolvimento e revisao
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 250; i++) {
     const m = tasks.getMission(mission.id)!
     if (m.phase === 'done') break
     await new Promise((r) => setTimeout(r, 20))
@@ -161,7 +161,7 @@ test('TeamRunner aplica configurações dinâmicas de provedor/modelo/esforço e
 
   const mission = await runner.start(task.id)
 
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 250; i++) {
     const m = tasks.getMission(mission.id)!
     if (m.phase === 'awaiting_approval') break
     await new Promise((r) => setTimeout(r, 20))
@@ -174,7 +174,7 @@ test('TeamRunner aplica configurações dinâmicas de provedor/modelo/esforço e
 
   await runner.approve(mission.id)
 
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 250; i++) {
     const m = tasks.getMission(mission.id)!
     if (m.phase === 'done') break
     await new Promise((r) => setTimeout(r, 20))
@@ -414,7 +414,7 @@ test('TeamRunner executa missão com equipe personalizada, carrega especializaç
   assert.equal(mission.teamSnapshot?.['dev-backend']?.specializationId, 'developer')
   assert.equal(mission.teamSnapshot?.['qa-sec']?.specializationId, 'qa-tester')
 
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 250; i++) {
     if (tasks.getMission(mission.id)!.phase === 'awaiting_approval') break
     await new Promise((r) => setTimeout(r, 20))
   }
@@ -426,7 +426,7 @@ test('TeamRunner executa missão com equipe personalizada, carrega especializaç
 
   await runner.approve(mission.id)
 
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 250; i++) {
     if (tasks.getMission(mission.id)!.phase === 'done') break
     await new Promise((r) => setTimeout(r, 20))
   }
@@ -673,7 +673,7 @@ test('TeamRunner cancelamento e recuperação funcionam com equipes personalizad
   })
 
   const m = await runner.start(task.id, { plannerId: 'custom-planner', devId: 'dev', qaId: 'qa' })
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 250; i++) {
     if (tasks.getMission(m.id)!.phase === 'awaiting_approval') break
     await new Promise((r) => setTimeout(r, 15))
   }
@@ -741,7 +741,7 @@ test('TeamRunner avisa o Antigravity headless que não há comandos e explica a 
     agentId: null,
   })
   const mission = await runner.start(task.id)
-  for (let i = 0; i < 50 && tasks.getMission(mission.id)!.phase === 'planning'; i++) {
+  for (let i = 0; i < 250 && tasks.getMission(mission.id)!.phase === 'planning'; i++) {
     await new Promise((r) => setTimeout(r, 20))
   }
 
@@ -791,7 +791,7 @@ test('TeamRunner devolve ao Dev o parecer completo do QA reprovado e conclui só
 
   const task = tasks.create(projects.active()!.id, { title: 'Somar', description: 'soma(a, b)', priority: 'low', status: 'todo', agentId: null })
   const mission = await runner.start(task.id)
-  for (let i = 0; i < 50 && tasks.getMission(mission.id)!.phase !== 'awaiting_approval'; i++) await new Promise((r) => setTimeout(r, 20))
+  for (let i = 0; i < 250 && tasks.getMission(mission.id)!.phase !== 'awaiting_approval'; i++) await new Promise((r) => setTimeout(r, 20))
   await runner.approve(mission.id)
   for (let i = 0; i < 100 && tasks.getMission(mission.id)!.phase !== 'done'; i++) await new Promise((r) => setTimeout(r, 20))
 
@@ -1146,7 +1146,7 @@ test('TeamRunner com especialistas: executa pré-dev, passa contexto ao Dev, exe
   })
 
   // Aguarda fim do planejamento
-  for (let i = 0; i < 50 && tasks.getMission(mission.id)!.phase !== 'awaiting_approval'; i++) {
+  for (let i = 0; i < 250 && tasks.getMission(mission.id)!.phase !== 'awaiting_approval'; i++) {
     await new Promise((r) => setTimeout(r, 20))
   }
   const awaiting = tasks.getMission(mission.id)!
@@ -1156,8 +1156,8 @@ test('TeamRunner com especialistas: executa pré-dev, passa contexto ao Dev, exe
   // Aprova o plano
   await runner.approve(mission.id)
 
-  // Aguarda conclusão total
-  for (let i = 0; i < 50 && tasks.getMission(mission.id)!.phase !== 'done' && tasks.getMission(mission.id)!.phase !== 'failed'; i++) {
+  // Aguarda conclusão total (pré-dev, Dev, pós-dev e QA: 1 s era curto em máquina carregada)
+  for (let i = 0; i < 250 && tasks.getMission(mission.id)!.phase !== 'done' && tasks.getMission(mission.id)!.phase !== 'failed'; i++) {
     await new Promise((r) => setTimeout(r, 20))
   }
 
