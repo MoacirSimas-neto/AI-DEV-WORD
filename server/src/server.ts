@@ -144,7 +144,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
 
   switch (msg.type) {
     case 'chat-list':
-      return isId(msg.projectId) ? { type: 'chat-list', projectId: msg.projectId } : null
+    case 'chat-links':
+      return isId(msg.projectId) ? { type: msg.type, projectId: msg.projectId } : null
     case 'chat-create':
       return isId(msg.projectId) && isAgentId(msg.agentId) && isOpId(msg.opId) ? { type: 'chat-create', projectId: msg.projectId, agentId: msg.agentId, opId: msg.opId } : null
     case 'chat-rename':
@@ -153,6 +154,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         : null
     case 'chat-delete':
     case 'chat-cancel':
+    case 'chat-prepare-mission':
       return isId(msg.projectId) && isId(msg.conversationId) && isOpId(msg.opId) ? { type: msg.type, projectId: msg.projectId, conversationId: msg.conversationId, opId: msg.opId } : null
     case 'chat-open':
       if (!isId(msg.projectId) || !isId(msg.conversationId) || (msg.beforeId !== undefined && !isId(msg.beforeId))) return null
@@ -432,9 +434,9 @@ export function parseClientMessage(raw: string): ClientMessage | null {
   }
 }
 
-type ChatClientMessage = Extract<ClientMessage, { type: 'chat-list' | 'chat-create' | 'chat-rename' | 'chat-delete' | 'chat-open' | 'chat-send' | 'chat-cancel' }>
+type ChatClientMessage = Extract<ClientMessage, { type: 'chat-list' | 'chat-create' | 'chat-rename' | 'chat-delete' | 'chat-open' | 'chat-send' | 'chat-cancel' | 'chat-prepare-mission' | 'chat-links' }>
 const isChatMessage = (m: ClientMessage): m is ChatClientMessage => m.type.startsWith('chat-')
-const CHAT_ACTIONS: Record<string, ChatAction> = { 'chat-create': 'create', 'chat-send': 'send', 'chat-rename': 'rename', 'chat-delete': 'delete', 'chat-cancel': 'cancel' }
+const CHAT_ACTIONS: Record<string, ChatAction> = { 'chat-create': 'create', 'chat-send': 'send', 'chat-rename': 'rename', 'chat-delete': 'delete', 'chat-cancel': 'cancel', 'chat-prepare-mission': 'prepare-mission' }
 const actionOf = (type: string): ChatAction => CHAT_ACTIONS[type] ?? 'send'
 const safeJson = (text: string): Record<string, unknown> | null => {
   try {
@@ -541,6 +543,7 @@ export function createAppServer({
   const chatResult = (socket: WebSocket, action: ChatAction, opId: string | null, ok: boolean, text: string, conversationId: number | null = null) =>
     send(socket, { type: 'chat-result', action, opId, ok, message: text, conversationId })
   const conversationsMessage = (projectId: number): ServerMessage => ({ type: 'chat-conversations', projectId, conversations: chat?.store.listConversations(projectId) ?? [] })
+  const linksMessage = (projectId: number): ServerMessage => ({ type: 'chat-links', projectId, links: chat?.store.listLinks(projectId) ?? [] })
 
   const handleChat = (socket: WebSocket, message: ChatClientMessage) => {
     if (!chat) {
@@ -553,6 +556,25 @@ export function createAppServer({
       switch (message.type) {
         case 'chat-list':
           send(socket, conversationsMessage(message.projectId))
+          return
+        case 'chat-links':
+          send(socket, linksMessage(message.projectId))
+          return
+        case 'chat-prepare-mission':
+          // Só este clique (com opId) cria missão a partir do chat; nenhuma mensagem de texto faz isso.
+          service
+            .prepareMission(message)
+            .then(({ applied, link }) =>
+              chatResult(
+                socket,
+                'prepare-mission',
+                message.opId,
+                true,
+                applied ? `Missão #${link?.missionId} criada: o Tech Lead está preparando a proposta. Nada é executado antes da sua aprovação.` : 'Este pedido já tinha sido recebido: nenhuma missão nova foi criada.',
+                message.conversationId,
+              ),
+            )
+            .catch((error) => chatResult(socket, 'prepare-mission', message.opId, false, errorText(error), message.conversationId))
           return
         case 'chat-open': {
           const page = store.listMessages(message.projectId, message.conversationId, { beforeId: message.beforeId })
@@ -1083,9 +1105,11 @@ export function createAppServer({
   const onChatMessage = (message: ChatMessage) => broadcast({ type: 'chat-message', message })
   const onChatDelta = (delta: { projectId: number; conversationId: number; messageId: number; text: string }) => broadcast({ type: 'chat-delta', ...delta })
   const onChatConversations = (projectId: number) => broadcast(conversationsMessage(projectId))
+  const onChatLinks = (projectId: number) => broadcast(linksMessage(projectId))
   chat?.service.on('message', onChatMessage)
   chat?.service.on('delta', onChatDelta)
   chat?.store.on('conversations', onChatConversations)
+  chat?.store.on('links', onChatLinks)
 
   server.on('close', () => {
     registry.off('change', onAgent)
@@ -1105,6 +1129,7 @@ export function createAppServer({
     chat?.service.off('message', onChatMessage)
     chat?.service.off('delta', onChatDelta)
     chat?.store.off('conversations', onChatConversations)
+    chat?.store.off('links', onChatLinks)
     for (const client of wss.clients) client.terminate()
   })
 

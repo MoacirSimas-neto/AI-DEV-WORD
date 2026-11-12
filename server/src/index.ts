@@ -128,7 +128,7 @@ const team = new TeamRunner({
 const chatStore = new ChatStore(projects.db)
 // Respostas que estavam chegando quando o app fechou: ficam interrompidas (nada é relançado).
 chatStore.interruptStreaming()
-const chat = new ChatService({ store: chatStore, projects, registry, configs: agentConfigs, launch, git })
+const chat = new ChatService({ store: chatStore, projects, registry, configs: agentConfigs, launch, git, tasks, team, events })
 
 team.recover()
 

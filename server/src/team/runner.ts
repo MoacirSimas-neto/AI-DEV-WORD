@@ -315,9 +315,13 @@ export class TeamRunner extends EventEmitter {
   }
 
   /** Etapa 1: o planejador (padrão: 'architect') planeja. Devolve a missão criada. */
-  async start(taskId: number, team?: Partial<MissionTeamSelection>, options?: { mode?: MissionMode; limits?: unknown }): Promise<MissionInfo> {
+  /**
+   * `onCreated` (só modo dinâmico): chamado na criação da missão, antes de qualquer evento ou CLI dela.
+   * O chat usa para vincular a conversa de origem; um erro nele não impede a missão.
+   */
+  async start(taskId: number, team?: Partial<MissionTeamSelection>, options?: { mode?: MissionMode; limits?: unknown; onCreated?: (mission: MissionInfo) => void }): Promise<MissionInfo> {
     // O modo é escolhido aqui e nunca muda durante a missão.
-    if (options?.mode === 'dynamic') return this.startDynamic(taskId, team, options.limits)
+    if (options?.mode === 'dynamic') return this.startDynamic(taskId, team, options.limits, options.onCreated)
     this.assertTeamFree()
     const { task, cwd } = this.context(taskId)
     const { plannerId, devId, qaId, specialists, teamSnapshot } = this.validateAndBuildTeam(team)
@@ -1173,7 +1177,7 @@ export class TeamRunner extends EventEmitter {
   // Caminho separado do fluxo clássico. O Tech Lead só propõe; o que roda é o que o usuário aprovou
   // pela interface (decideProposal), um passo por vez, com as permissões que o backend define.
 
-  private async startDynamic(taskId: number, team: Partial<MissionTeamSelection> | undefined, limitsInput: unknown): Promise<MissionInfo> {
+  private async startDynamic(taskId: number, team: Partial<MissionTeamSelection> | undefined, limitsInput: unknown, onCreated?: (mission: MissionInfo) => void): Promise<MissionInfo> {
     this.requirePlans()
     this.assertTeamFree()
     const { task, cwd } = this.context(taskId)
@@ -1195,6 +1199,11 @@ export class TeamRunner extends EventEmitter {
 
     const mission = this.tasks.createMission(task.id, task.projectId, { mode: 'dynamic', limits, plannerId: techLeadId, teamSnapshot: { [techLeadId]: snapshot } })
     this.running = { missionId: mission.id, cancelled: false }
+    try {
+      onCreated?.(mission)
+    } catch (error) {
+      this.log(mission, 'error', `Missão #${mission.id}: falha ao registrar a origem (${errorText(error)}).`)
+    }
     this.tasks.setStatus(task.id, 'doing')
     this.log(mission, 'mission', `Missão dinâmica #${mission.id} iniciada: "${task.title}" (Tech Lead: ${snapshot.name})`)
     this.events?.prune(mission.projectId)

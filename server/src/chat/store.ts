@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
-import { CHAT_LIMITS, type ChatContextInfo, type ChatConversation, type ChatMessage, type ChatMessageStatus, type CliId } from '../../../shared/protocol.ts'
+import { CHAT_LIMITS, type ChatContextInfo, type ChatConversation, type ChatMessage, type ChatMessageStatus, type ChatMissionLink, type CliId } from '../../../shared/protocol.ts'
 import { inTransaction } from '../db/database.ts'
 import { redact } from '../security/redact.ts'
 
@@ -34,6 +34,18 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS chat_messages_conversation ON chat_messages (conversation_id, id);
   CREATE UNIQUE INDEX IF NOT EXISTS chat_messages_op ON chat_messages (conversation_id, role, op_id) WHERE op_id IS NOT NULL;
+  -- Etapa 12.2: missão nascida de uma conversa. Uma conversa -> várias missões; missão -> uma conversa.
+  CREATE TABLE IF NOT EXISTS chat_mission_links (
+    mission_id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    conversation_id INTEGER NOT NULL REFERENCES chat_conversations (id) ON DELETE CASCADE,
+    task_id INTEGER NOT NULL,
+    op_id TEXT NOT NULL,
+    context TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (conversation_id, op_id)
+  );
+  CREATE INDEX IF NOT EXISTS chat_mission_links_project ON chat_mission_links (project_id, conversation_id);
 `
 
 type Row = Record<string, unknown>
@@ -65,6 +77,16 @@ const messageOf = (r: Row): ChatMessage => ({
   context: r.context ? (JSON.parse(String(r.context)) as ChatContextInfo) : null,
   createdAt: String(r.created_at),
   updatedAt: String(r.updated_at),
+})
+
+const linkOf = (r: Row): ChatMissionLink => ({
+  projectId: Number(r.project_id),
+  conversationId: Number(r.conversation_id),
+  missionId: Number(r.mission_id),
+  taskId: Number(r.task_id),
+  opId: String(r.op_id),
+  context: JSON.parse(String(r.context)) as ChatContextInfo,
+  createdAt: String(r.created_at),
 })
 
 /** Título inicial sem chamar o modelo: começo da primeira mensagem do usuário. */
@@ -138,6 +160,8 @@ export class ChatStore extends EventEmitter {
   delete(projectId: number, conversationId: number) {
     this.requireConversation(projectId, conversationId)
     inTransaction(this.db, () => {
+      // A missão e a trilha dela ficam; só o vínculo com a conversa some.
+      this.db.prepare('DELETE FROM chat_mission_links WHERE conversation_id = ? AND project_id = ?').run(conversationId, projectId)
       this.db.prepare('DELETE FROM chat_messages WHERE conversation_id = ? AND project_id = ?').run(conversationId, projectId)
       this.db.prepare('DELETE FROM chat_conversations WHERE id = ? AND project_id = ?').run(conversationId, projectId)
     })
@@ -235,6 +259,27 @@ export class ChatStore extends EventEmitter {
     return Number(
       (this.db.prepare("SELECT COUNT(*) AS n FROM chat_messages WHERE conversation_id = ? AND project_id = ? AND id < ? AND content <> ''").get(conversationId, projectId, beforeId) as Row).n,
     )
+  }
+
+  /** Vincula a missão à conversa (mesmo projeto, conferido aqui). Emite 'links' (projectId). */
+  linkMission(input: Omit<ChatMissionLink, 'createdAt'>): ChatMissionLink {
+    this.requireConversation(input.projectId, input.conversationId)
+    this.db
+      .prepare('INSERT INTO chat_mission_links (mission_id, project_id, conversation_id, task_id, op_id, context, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(input.missionId, input.projectId, input.conversationId, input.taskId, input.opId, JSON.stringify(input.context), new Date().toISOString())
+    this.emit('links', input.projectId)
+    return this.findLink(input.projectId, input.conversationId, input.opId)!
+  }
+
+  /** Vínculo criado por esta operação (clique repetido no mesmo botão). */
+  findLink(projectId: number, conversationId: number, opId: string): ChatMissionLink | null {
+    const row = this.db.prepare('SELECT * FROM chat_mission_links WHERE project_id = ? AND conversation_id = ? AND op_id = ?').get(projectId, conversationId, opId) as Row | undefined
+    return row ? linkOf(row) : null
+  }
+
+  /** Vínculos do projeto, do mais antigo ao mais novo. */
+  listLinks(projectId: number): ChatMissionLink[] {
+    return (this.db.prepare('SELECT * FROM chat_mission_links WHERE project_id = ? ORDER BY mission_id').all(projectId) as Row[]).map(linkOf)
   }
 
   /** Na inicialização: respostas que estavam chegando quando o app fechou ficam interrompidas. */

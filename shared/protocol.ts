@@ -730,6 +730,11 @@ export type MissionEventType =
   | 'limit.reached'
   /** declared: o Tech Lead recomendou encerrar. Só a aprovação humana encerra. */
   | 'closure.recommended'
+  // ----- chat → missão (Etapa 12.2) -----
+  /** observed: o usuário pediu, no chat, para preparar uma missão (data: conversationId, opId, tamanho do contexto). */
+  | 'chat.mission_requested'
+  /** observed: a missão ficou vinculada à conversa de origem. */
+  | 'chat.mission_linked'
 
 /** Um fato da trilha de execução de uma missão. Textos passam por remoção de segredos; nunca traz prompts nem conteúdo de arquivos. */
 export interface MissionEvent {
@@ -808,7 +813,26 @@ export const CHAT_LIMITS = {
   pageSize: 100,
 } as const
 
-export type ChatAction = 'create' | 'send' | 'rename' | 'delete' | 'cancel'
+export type ChatAction = 'create' | 'send' | 'rename' | 'delete' | 'cancel' | 'prepare-mission'
+
+/**
+ * Missão nascida de uma conversa (Etapa 12.2). Uma conversa pode originar várias missões;
+ * cada missão tem no máximo uma conversa de origem. Sempre do mesmo projeto.
+ */
+export interface ChatMissionLink {
+  projectId: number
+  conversationId: number
+  missionId: number
+  taskId: number
+  /** Operação do usuário (botão "Preparar missão"). */
+  opId: string
+  /** Quantas mensagens da conversa entraram no contexto da missão e quantas ficaram de fora. */
+  context: ChatContextInfo
+  createdAt: string
+}
+
+/** Contexto de conversa que vira a descrição da tarefa da missão (o backend é a autoridade). */
+export const CHAT_MISSION_CONTEXT = { messages: 12, chars: 6000, perMessage: 1500 } as const
 
 export type ServerMessage =
   | { type: 'chat-conversations'; projectId: number; conversations: ChatConversation[] }
@@ -820,6 +844,8 @@ export type ServerMessage =
   | { type: 'chat-delta'; projectId: number; conversationId: number; messageId: number; text: string }
   | { type: 'chat-deleted'; projectId: number; conversationId: number }
   | { type: 'chat-result'; action: ChatAction; opId: string | null; ok: boolean; message: string; conversationId: number | null }
+  /** Missões nascidas de conversas do projeto (resposta a chat-links e aviso a cada vínculo novo). */
+  | { type: 'chat-links'; projectId: number; links: ChatMissionLink[] }
   /** Resposta a events-list: em ordem de id. */
   | { type: 'mission-events'; projectId: number; missionId: number | null; events: MissionEvent[] }
   /** Evento novo, ao vivo. */
@@ -896,6 +922,9 @@ export type ClientMessage =
   | { type: 'chat-open'; projectId: number; conversationId: number; beforeId?: number }
   | { type: 'chat-send'; projectId: number; conversationId: number; content: string; opId: string }
   | { type: 'chat-cancel'; projectId: number; conversationId: number; opId: string }
+  /** Transforma a conversa numa missão dinâmica: o Tech Lead propõe, nada roda sem aprovação. */
+  | { type: 'chat-prepare-mission'; projectId: number; conversationId: number; opId: string }
+  | { type: 'chat-links'; projectId: number }
   | { type: 'check-cli'; agentId: string }
   | { type: 'dialog-open-folder' }
   | { type: 'project-validate'; path: string }
