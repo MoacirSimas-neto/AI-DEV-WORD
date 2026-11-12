@@ -1,7 +1,7 @@
 import Phaser from 'phaser'
 import type { AgentInfo, AgentState } from '../../../shared/protocol.ts'
 import { characterRows, type Frame, lookFor, paletteFor } from './agentLooks.ts'
-import { FONT, type Station, U } from './officeLayout.ts'
+import { FONT, shortLabelForAgent, type Station, U } from './officeLayout.ts'
 import { makePixelTexture } from './pixelArt.ts'
 
 const WALK_SPEED = 96 // pixels do mundo por segundo
@@ -16,29 +16,6 @@ const BUBBLE_STYLE: Record<AgentState, { text: string; bg: string; fg: string }>
   done: { text: '', bg: 'transparent', fg: 'transparent' }, // Silencioso e limpo na mesa; LED e placa já comunicam
   offline: { text: 'OFF', bg: 'rgba(51, 65, 85, 0.85)', fg: '#cbd5e1' },
   error: { text: '⚠ ERRO', bg: 'rgba(239, 68, 68, 0.95)', fg: '#fef2f2' },
-}
-
-function formatStationPlate(agent: AgentInfo): string {
-  const name = agent.name.trim()
-  const role = (agent.role || '').toLowerCase()
-  const text = `${name} ${role}`.toLowerCase()
-
-  if (text.includes('dado') || text.includes('data') || text.includes('sql') || text.includes('banco')) {
-    return text.includes('2') || text.includes('alt') || agent.id.endsWith('2') ? 'Dados (B)' : 'Dados'
-  }
-  if (text.includes('seguran') || text.includes('sec') || text.includes('audit')) {
-    return text.includes('2') || text.includes('alt') || agent.id.endsWith('2') ? 'Segurança (B)' : 'Segurança'
-  }
-  if (text.includes('design') || text.includes('ui') || text.includes('ux')) return 'Design'
-  if (text.includes('doc') || text.includes('texto') || text.includes('manual')) return 'Docs'
-  if (text.includes('devops') || text.includes('infra') || text.includes('cloud')) return 'DevOps'
-  if (text.includes('mobile') || text.includes('app')) return 'Mobile'
-  if (text.includes('ia') || text.includes('ai') || text.includes('pesquis')) return 'IA'
-
-  if (name.length <= 8) return name
-  const first = name.split(' ')[0]
-  if (first && first.length <= 8 && first.toLowerCase() !== 'especialista') return first
-  return name.slice(0, 6) + '.'
 }
 
 const LED_COLOR: Partial<Record<AgentState, number>> = {
@@ -162,8 +139,9 @@ export class AgentActor {
       .setOrigin(0.5, 1)
       .setVisible(false)
 
-    this.root = scene.add.container(station.rest.x, station.rest.y, [this.ring, shadow, this.sprite])
-    this.root.setDepth(this.root.y)
+    // Agentes sempre nascem posicionados corretamente no assento da estação
+    this.root = scene.add.container(station.seat.x, station.seat.y, [this.ring, shadow, this.sprite])
+    this.root.setDepth(station.seat.y)
     this.overlay = scene.add.container(this.root.x, this.root.y, [this.label, this.bubble, this.hoverTip]).setDepth(10_500)
 
     this.syncPlate()
@@ -183,14 +161,17 @@ export class AgentActor {
     this.setState(agent.state)
   }
 
-  updateAgent(agent: AgentInfo, station: Station) {
+  updateAgent(agent: AgentInfo, station: Station, allAgents?: AgentInfo[]) {
     this.agent = agent
     if (this.station !== station) {
       this.setLed(null)
       this.station = station
+      this.root.setPosition(station.seat.x, station.seat.y)
+      this.root.setDepth(station.seat.y)
+      this.overlay.setPosition(station.seat.x, station.seat.y)
     }
     this.label.setText(agent.name)
-    this.syncPlate()
+    this.syncPlate(allAgents)
     const nextPreset = `${agent.avatarPreset ?? ''}:${agent.id}:${agent.role ?? ''}:${agent.name ?? ''}`
     if (nextPreset !== this.currentPreset) {
       this.currentPreset = nextPreset
@@ -216,9 +197,9 @@ export class AgentActor {
     }
   }
 
-  private syncPlate() {
+  syncPlate(allAgents?: AgentInfo[]) {
     if (this.station.plateText) {
-      const formatted = formatStationPlate(this.agent)
+      const formatted = shortLabelForAgent(this.agent, allAgents)
       this.station.plateText.setText(formatted).setVisible(true)
     }
   }
@@ -249,22 +230,20 @@ export class AgentActor {
       })
       .setVisible(hasBadge)
 
-    this.label.setVisible(state === 'idle' || state === 'offline' || state === 'error')
+    // A placa física da mesa já identifica a estação de forma limpa; esconde o rótulo redundante flutuante
+    this.label.setVisible(false)
     if (state === 'offline') this.sprite.setTint(0x8a8fa0)
     else this.sprite.clearTint()
     this.setLed(state)
 
-    const { seat, rest } = this.station
+    const { seat } = this.station
+    // Todos os agentes permanecem sentados em suas estações
     if (state === 'working' || state === 'planning' || state === 'reviewing') {
       this.walkTo(seat.x, seat.y, () => this.startTyping())
-    } else if (state === 'waiting' || state === 'approval' || state === 'done') {
-      this.walkTo(seat.x, seat.y)
-    } else if (state === 'idle') {
-      this.wanderSoon()
-    } else if (state === 'offline') {
-      this.walkTo(rest.x, rest.y)
-    } else if (state === 'error') {
-      this.walkTo(seat.x, seat.y)
+    } else {
+      this.walkTo(seat.x, seat.y, () => {
+        if (!this.sprite.anims.isPlaying) this.sprite.setTexture(this.key('stand'))
+      })
     }
   }
 

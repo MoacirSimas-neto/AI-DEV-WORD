@@ -105,6 +105,66 @@ export const SPECIALIST_SLOTS = [
 
 const BUILTIN_STATION_IDS = new Set(DESKS.map((d) => d.id))
 
+/**
+ * Calcula rótulo conciso para placas do escritório (ex: Arquiteto, Dev, QA, Tutor, Dados 1, Segurança 1).
+ * Não polui a cena com nomes longos e numera apenas categorias com mais de um especialista.
+ */
+export function shortLabelForAgent(agent: AgentInfo, allAgents: AgentInfo[] = []): string {
+  const id = agent.id.toLowerCase()
+  if (id === 'architect') return 'Arquiteto'
+  if (id === 'dev') return 'Dev'
+  if (id === 'qa') return 'QA'
+  if (id === 'tutor') return 'Tutor'
+
+  const name = (agent.name || '').trim()
+  const role = (agent.role || '').toLowerCase()
+  const spec = (agent.specializationId || '').toLowerCase()
+  const text = `${name} ${role} ${spec}`.toLowerCase()
+
+  let category = ''
+  if (text.includes('dado') || text.includes('data') || text.includes('sql') || text.includes('banco') || spec.includes('data')) {
+    category = 'Dados'
+  } else if (text.includes('seguran') || text.includes('sec') || text.includes('audit') || spec.includes('security')) {
+    category = 'Segurança'
+  } else if (text.includes('devops') || text.includes('infra') || text.includes('cloud') || spec.includes('devops')) {
+    category = 'DevOps'
+  } else if (text.includes('design') || text.includes('ui') || text.includes('ux') || spec.includes('design')) {
+    category = 'Design'
+  } else if (text.includes('mobile') || text.includes('app') || spec.includes('mobile')) {
+    category = 'Mobile'
+  } else if (text.includes('doc') || text.includes('manual') || text.includes('writer')) {
+    category = 'Docs'
+  } else if (text.includes('ia') || text.includes('ai') || text.includes('pesquis')) {
+    category = 'IA'
+  } else {
+    const firstWord = name.split(/\s+/)[0]
+    category = firstWord && firstWord.toLowerCase() !== 'especialista' ? firstWord.slice(0, 8) : 'Espec'
+  }
+
+  // Se houver mais de um especialista com a mesma categoria, numera (Dados 1, Dados 2...)
+  const matchingAgents = allAgents.filter((a) => {
+    if (BUILTIN_STATION_IDS.has(a.id)) return false
+    const aText = `${a.name || ''} ${a.role || ''} ${a.specializationId || ''}`.toLowerCase()
+    if (category === 'Dados') return aText.includes('dado') || aText.includes('data') || aText.includes('sql') || aText.includes('banco') || (a.specializationId || '').includes('data')
+    if (category === 'Segurança') return aText.includes('seguran') || aText.includes('sec') || aText.includes('audit') || (a.specializationId || '').includes('security')
+    if (category === 'DevOps') return aText.includes('devops') || aText.includes('infra') || aText.includes('cloud') || (a.specializationId || '').includes('devops')
+    if (category === 'Design') return aText.includes('design') || aText.includes('ui') || aText.includes('ux') || (a.specializationId || '').includes('design')
+    if (category === 'Mobile') return aText.includes('mobile') || aText.includes('app') || (a.specializationId || '').includes('mobile')
+    if (category === 'Docs') return aText.includes('doc') || aText.includes('manual')
+    if (category === 'IA') return aText.includes('ia') || aText.includes('ai')
+    return false
+  })
+
+  if (matchingAgents.length > 1) {
+    const index = matchingAgents.findIndex((a) => a.id === agent.id)
+    if (index >= 0) {
+      return `${category} ${index + 1}`
+    }
+  }
+
+  return category
+}
+
 export interface AgentPlacement {
   agent: AgentInfo
   stationKey: string
@@ -297,12 +357,14 @@ export function drawOffice(scene: Phaser.Scene, callbacks?: OfficeCallbacks): Re
 
   const stations: Record<string, Station> = {}
   for (const desk of DESKS) {
+    const visuals = drawDesk(scene, p, desk.x, desk.plate, desk.id, desk.accent)
     stations[desk.id] = {
-      seat: { x: (desk.x + 28) * U, y: 59 * U },
+      seat: { x: (desk.x + 28) * U, y: 56 * U },
       wander: { x: (desk.x + 6) * U, y: 78 * U, width: 28 * U, height: 14 * U },
       rest: { x: desk.restX * U, y: 73 * U },
       corridorY: 76 * U,
-      led: drawDesk(scene, p, desk.x, desk.plate, desk.id, desk.accent),
+      led: visuals.led,
+      plateText: visuals.plateText,
     }
     bindHotspot(desk.x, 41, 42, 25, desk.tooltip, () => callbacks?.onSelectAgent?.(desk.id))
   }
@@ -476,7 +538,7 @@ function drawDesk(
   plate: string,
   agentId: string,
   accent: number,
-) {
+): { led: Phaser.GameObjects.Rectangle; plateText: Phaser.GameObjects.Text } {
   // Cadeira ergonômica: fica atrás do personagem
   base(x + 23, 44, 10, 12, C.metalDark)
   base(x + 24, 43, 8, 1, accent)
@@ -530,7 +592,7 @@ function drawDesk(
   p(x + 7, 58, 28, 4, 0x1e293b)
   p(x + 6, 57, 30, 1, 0x38bdf8, 0.6)
 
-  scene.add
+  const plateText = scene.add
     .text((x + 21) * U, 60 * U, plate, {
       fontFamily: FONT,
       fontSize: '11px',
@@ -541,10 +603,12 @@ function drawDesk(
     .setOrigin(0.5)
     .setDepth(66 * U + 1)
 
-  return scene.add
+  const led = scene.add
     .rectangle((x + 16) * U, 48 * U, U * 1.5, U * 1.5, C.metalDark)
     .setOrigin(0)
     .setDepth(66 * U + 2)
+
+  return { led, plateText }
 }
 
 function drawSpecialistStation(
@@ -558,6 +622,11 @@ function drawSpecialistStation(
     // Tapete individual da estação de especialista
     base(x - 1, y - 1, 22, 18, C.corridorCarpet, 0.7)
     base(x, y, 20, 1, slot.accent, 0.65)
+
+    // Cadeira ergonômica atrás do personagem
+    base(x + 5, y - 4, 10, 8, C.metalDark)
+    base(x + 6, y - 5, 8, 1, slot.accent)
+    base(x + 6, y - 3, 8, 6, C.metal)
 
     const p = prop(scene, y + 14)
     p(x + 1, y + 13, 18, 2, 0x000000, 0.2)
@@ -612,6 +681,7 @@ function drawSpecialistStation(
     })
     .setOrigin(0.5)
     .setDepth(116 * U)
+    .setVisible(false) // Oculto por padrão até ser ocupado por equipe grande
 
   return { led, plateText }
 }

@@ -79,7 +79,7 @@ export function StudioTopBar({
       {/* 1. Lado Esquerdo: Marca Studio e Seletor Spotlight de Pastas */}
       <div className="topbar-left">
         <div
-          className="brand-badge"
+          className="brand-badge studio-brand-badge"
           onClick={() => onSelectTab('office')}
           role="button"
           tabIndex={0}

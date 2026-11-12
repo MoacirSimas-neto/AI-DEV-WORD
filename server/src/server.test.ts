@@ -8,7 +8,7 @@ import path from 'node:path'
 import { after, before, test } from 'node:test'
 import { WebSocket } from 'ws'
 import type { ClientMessage, ServerMessage } from '../../shared/protocol.ts'
-import { computeOfficePlacement } from '../../web/src/game/officeLayout.ts'
+import { computeOfficePlacement, shortLabelForAgent } from '../../web/src/game/officeLayout.ts'
 import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { GitService } from './git/service.ts'
@@ -407,6 +407,36 @@ test('posicionamento dinâmico no escritório 2D: inclusão, remoção e pagina�
   assert.equal(afterPlacement.visible.length, 5)
   assert.ok(afterPlacement.visible.some((p) => p.agent.id === 'custom-agent-1'))
   assert.ok(!afterPlacement.visible.some((p) => p.agent.id === 'custom-agent-2'))
+
+  // Rótulos concisos e numeração de especialidades duplicadas (sem nomes longos flutuando)
+  const testAgents = [
+    { id: 'architect', name: 'Arquiteto', role: 'Planeja a solução' } as any,
+    { id: 'dev', name: 'Dev', role: 'Implementa o código' } as any,
+    { id: 'qa', name: 'QA', role: 'Revisa e testa' } as any,
+    { id: 'tutor', name: 'Tutor', role: 'Explica e ensina' } as any,
+    { id: 'data-1', name: 'Especialista em Dados', role: 'Valida regras de dados e integridade' } as any,
+    { id: 'sec-1', name: 'Especialista em Segurança', role: 'Audita vulnerabilidades e validação' } as any,
+    { id: 'data-2', name: 'Especialista em Dados', role: 'Valida regras de dados e integridade' } as any,
+    { id: 'sec-2', name: 'Especialista em Segurança', role: 'Audita vulnerabilidades e validação' } as any,
+  ]
+  assert.equal(shortLabelForAgent(testAgents[0], testAgents), 'Arquiteto')
+  assert.equal(shortLabelForAgent(testAgents[1], testAgents), 'Dev')
+  assert.equal(shortLabelForAgent(testAgents[2], testAgents), 'QA')
+  assert.equal(shortLabelForAgent(testAgents[3], testAgents), 'Tutor')
+  assert.equal(shortLabelForAgent(testAgents[4], testAgents), 'Dados 1')
+  assert.equal(shortLabelForAgent(testAgents[5], testAgents), 'Segurança 1')
+  assert.equal(shortLabelForAgent(testAgents[6], testAgents), 'Dados 2')
+  assert.equal(shortLabelForAgent(testAgents[7], testAgents), 'Segurança 2')
+
+  // Se houver apenas 1 especialista em dados, exibe sem número
+  const singleData = [testAgents[0], testAgents[4]]
+  assert.equal(shortLabelForAgent(testAgents[4], singleData), 'Dados')
+
+  // Profundidade matemática consistente: todos os assentos têm profundidade < profundidade da bancada
+  for (const placed of initial.visible) {
+    // Top desks: desk surface depth is 66 * 3 = 198, seat depth is 56 * 3 = 168
+    assert.ok(placed.seat.y < 198, `Agente ${placed.agent.id} deve ter profundidade atrás da bancada`)
+  }
 })
 
 

@@ -5,10 +5,13 @@ import { computeOfficePlacement, drawOffice, type Station } from './officeLayout
 import type { WorldAction, WorldBridge } from './WorldBridge.ts'
 
 /** Cena única do escritório: cenário interativo + um ator por agente vindo do backend. */
+const DEBUG_LAYOUT = false
+
 export class OfficeScene extends Phaser.Scene {
   private readonly bridge: WorldBridge
   private readonly actors = new Map<string, AgentActor>()
   private stations: Record<string, Station> = {}
+  private debugGraphics?: Phaser.GameObjects.Graphics
 
   constructor(bridge: WorldBridge) {
     super('office')
@@ -20,6 +23,10 @@ export class OfficeScene extends Phaser.Scene {
       onSelectAgent: (id: string) => this.bridge.emit('select', id),
       onAction: (action: WorldAction) => this.bridge.triggerAction(action),
     })
+
+    if (DEBUG_LAYOUT) {
+      this.debugGraphics = this.add.graphics().setDepth(20_000)
+    }
 
     this.bridge.on('agents', this.syncAgents, this)
     this.bridge.on('page', this.onPageChange, this)
@@ -40,6 +47,7 @@ export class OfficeScene extends Phaser.Scene {
   private syncAgents(agents: AgentInfo[]) {
     const placement = computeOfficePlacement(agents, this.bridge.specialistPage)
     const alive = new Set(placement.visible.map((p) => p.agent.id))
+    const visibleAgents = placement.visible.map((p) => p.agent)
 
     for (const [id, actor] of this.actors) {
       if (alive.has(id)) continue
@@ -52,12 +60,26 @@ export class OfficeScene extends Phaser.Scene {
       if (!station) continue
       const existing = this.actors.get(agent.id)
       if (existing) {
-        existing.updateAgent(agent, station)
+        existing.updateAgent(agent, station, visibleAgents)
         continue
       }
-      this.actors.set(agent.id, new AgentActor(this, agent, station, (id) => this.bridge.emit('select', id)))
+      const actor = new AgentActor(this, agent, station, (id) => this.bridge.emit('select', id))
+      actor.syncPlate(visibleAgents)
+      this.actors.set(agent.id, actor)
     }
     this.syncSelection(this.bridge.selectedId)
+    this.renderDebug(placement)
+  }
+
+  private renderDebug(placement: ReturnType<typeof computeOfficePlacement>) {
+    if (!DEBUG_LAYOUT || !this.debugGraphics) return
+    this.debugGraphics.clear()
+    for (const { seat } of placement.visible) {
+      this.debugGraphics.lineStyle(2, 0xef4444, 0.8)
+      this.debugGraphics.strokeCircle(seat.x, seat.y, 8)
+      this.debugGraphics.fillStyle(0x38bdf8, 1)
+      this.debugGraphics.fillPoint(seat.x, seat.y, 4)
+    }
   }
 
   private syncSelection(selectedId: string | null) {
