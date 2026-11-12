@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 
 interface StudioMember {
   id: string
@@ -84,6 +84,88 @@ export function ConceptHybridWorkspace() {
   const [isIsoPerspective, setIsIsoPerspective] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(true)
 
+  // Estado de Navegação Espacial 2.5D (Arrastar / Pan e Zoom)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStartRef = useRef<{ x: number; y: number; startPanX: number; startPanY: number } | null>(null)
+  const hasDraggedRef = useRef(false)
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, .proto-mix-inspector, input, select')) return
+    setIsDragging(true)
+    hasDraggedRef.current = false
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      startPanX: pan.x,
+      startPanY: pan.y
+    }
+  }
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragStartRef.current) return
+    const dx = e.clientX - dragStartRef.current.x
+    const dy = e.clientY - dragStartRef.current.y
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      hasDraggedRef.current = true
+    }
+    setPan({
+      x: dragStartRef.current.startPanX + dx,
+      y: dragStartRef.current.startPanY + dy
+    })
+  }, [])
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+    dragStartRef.current = null
+  }
+
+  const handleWheel = (e: React.WheelEvent) => {
+    // Zoom suave com a rodinha
+    const zoomDelta = e.deltaY < 0 ? 0.08 : -0.08
+    setZoom(prev => Math.min(Math.max(0.6, prev + zoomDelta), 2.2))
+  }
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if ((e.target as HTMLElement).closest('button, .proto-mix-inspector, input')) return
+    if (e.touches.length === 1) {
+      const touch = e.touches[0]
+      setIsDragging(true)
+      hasDraggedRef.current = false
+      dragStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        startPanX: pan.x,
+        startPanY: pan.y
+      }
+    }
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!dragStartRef.current || e.touches.length !== 1) return
+    const touch = e.touches[0]
+    const dx = touch.clientX - dragStartRef.current.x
+    const dy = touch.clientY - dragStartRef.current.y
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      hasDraggedRef.current = true
+    }
+    setPan({
+      x: dragStartRef.current.startPanX + dx,
+      y: dragStartRef.current.startPanY + dy
+    })
+  }
+
+  const handleTouchEnd = () => {
+    setIsDragging(false)
+    dragStartRef.current = null
+  }
+
+  const resetView = () => {
+    setPan({ x: 0, y: 0 })
+    setZoom(1)
+  }
+
   return (
     <div className="proto-mix-container">
       {/* 1. TOP BAR INTEGRADA */}
@@ -163,11 +245,29 @@ export function ConceptHybridWorkspace() {
 
       {/* 3. CORPO PRINCIPAL COM CONTEÚDO DINÂMICO */}
       <div className="proto-mix-body">
-        {/* ABA 1: LIVING WORKSPACE 2.5D MODERNO */}
+        {/* ABA 1: LIVING WORKSPACE 2.5D MODERNO COM NAVEGAÇÃO ESPACIAL */}
         {activeTab === 'workspace' && (
-          <div className="proto-mix-stage-area">
-            {/* Palco Espacial Isométrico */}
-            <div className={`proto-mix-iso-canvas ${isIsoPerspective ? 'is-iso' : 'is-flat'}`}>
+          <div 
+            className={`proto-mix-stage-area ${isDragging ? 'is-dragging' : ''}`}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onWheel={handleWheel}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            {/* Palco Espacial Isométrico Arrastável */}
+            <div 
+              className={`proto-mix-iso-canvas ${isIsoPerspective ? 'is-iso' : 'is-flat'} ${isDragging ? 'is-dragging' : ''}`}
+              style={{
+                transform: isIsoPerspective
+                  ? `perspective(1200px) translate3d(${pan.x}px, ${pan.y}px, 0px) scale(${zoom}) rotateX(42deg) rotateZ(-12deg)`
+                  : `translate3d(${pan.x}px, ${pan.y}px, 0px) scale(${zoom})`,
+                transition: isDragging ? 'none' : 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
+              }}
+            >
               <div className="proto-mix-grid-floor" />
 
               {/* Linhas de Fluxo de Dados Animadas */}
@@ -194,7 +294,10 @@ export function ConceptHybridWorkspace() {
                     key={m.id}
                     className={`proto-mix-pod ${isSelected ? 'is-selected' : ''} state-${m.state}`}
                     style={{ left: `${pos.x}%`, top: `${pos.y}%`, borderColor: m.avatarColor }}
-                    onClick={() => setSelectedMember(m)}
+                    onClick={() => {
+                      if (hasDraggedRef.current) return
+                      setSelectedMember(m)
+                    }}
                   >
                     {/* Personagem com Glow e Animação */}
                     <div className="proto-mix-char-holder" style={{ background: `radial-gradient(circle, ${m.avatarColor}33 0%, transparent 70%)` }}>
@@ -230,15 +333,54 @@ export function ConceptHybridWorkspace() {
               })}
             </div>
 
-            {/* Alternador de Câmera 2.5D / 2D */}
-            <div className="proto-cam-switch">
-              <button 
-                type="button" 
-                onClick={() => setIsIsoPerspective(!isIsoPerspective)}
-                title="Alternar entre Perspectiva 2.5D e Planta Baixa"
-              >
-                {isIsoPerspective ? '📐 Visão 2.5D Ativa' : '📄 Planta Baixa 2D'}
-              </button>
+            {/* Barra de Navegação e Controles de Câmera */}
+            <div className="proto-stage-controls">
+              <div className="proto-drag-indicator">
+                <span className="proto-drag-icon">✋</span>
+                <span>Clique e arraste para o lado para explorar o espaço</span>
+              </div>
+              <div className="proto-cam-buttons">
+                <button 
+                  type="button" 
+                  onClick={() => setZoom(z => Math.min(2.0, Number((z + 0.15).toFixed(2))))} 
+                  title="Aproximar (+)"
+                >
+                  ＋
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => setZoom(z => Math.max(0.6, Number((z - 0.15).toFixed(2))))} 
+                  title="Afastar (-)"
+                >
+                  −
+                </button>
+                <button 
+                  type="button" 
+                  onClick={resetView} 
+                  title="Resetar posição e zoom"
+                  className="btn-reset-view"
+                >
+                  ⟲ Centralizar
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => setIsIsoPerspective(!isIsoPerspective)}
+                  title="Alternar entre Perspectiva 2.5D e Planta Baixa"
+                  className="btn-perspective"
+                >
+                  {isIsoPerspective ? '📐 Visão 2.5D' : '📄 Planta Baixa 2D'}
+                </button>
+                {!inspectorOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setInspectorOpen(true)}
+                    className="btn-open-inspector"
+                    title="Abrir painel lateral do agente"
+                  >
+                    👤 Detalhes do Agente
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Inspector Lateral Retrátil Estilo Studio */}

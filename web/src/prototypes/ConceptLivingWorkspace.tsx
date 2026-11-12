@@ -1,72 +1,64 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 
 interface WorkspaceStation {
   id: string
-  name: string
   agentName: string
   agentRole: string
   agentIcon: string
-  stationType: 'design' | 'dev' | 'security' | 'qa'
-  status: 'working' | 'idle' | 'waiting' | 'review'
-  currentThought: string
+  status: 'working' | 'waiting' | 'idle' | 'error'
+  currentAction: string
+  activeFile?: string
   progress: number
-  x: number // coordenadas relativas no plano 2.5D
+  x: number
   y: number
   color: string
 }
 
 const STATIONS: WorkspaceStation[] = [
   {
-    id: 'station-arch',
-    name: 'Estação de Arquitetura',
-    agentName: 'Arquiteto',
-    agentRole: 'Tech Lead',
+    id: 'lead',
+    agentName: 'Arquiteto (Ada)',
+    agentRole: 'Tech Lead / Coordenação',
     agentIcon: '📐',
-    stationType: 'design',
     status: 'idle',
-    currentThought: 'Plano aprovado. Monitorando conformidade dos contratos.',
+    currentAction: 'Aguardando entrega do QA para validar conformidade do plano.',
     progress: 100,
     x: 18,
     y: 25,
     color: '#38bdf8'
   },
   {
-    id: 'station-dev',
-    name: 'Bancada de Código',
-    agentName: 'Dev',
-    agentRole: 'Implementador',
+    id: 'dev',
+    agentName: 'Desenvolvedor (Linus)',
+    agentRole: 'Engenheiro de Código',
     agentIcon: '⚡',
-    stationType: 'dev',
     status: 'working',
-    currentThought: 'Refatorando cálculo de centavos com Number.isSafeInteger...',
-    progress: 78,
+    currentAction: 'Escrevendo teste de limite monetário com BigInt e centavos inteiros.',
+    activeFile: 'tests/estoque.test.js',
+    progress: 74,
     x: 50,
     y: 45,
     color: '#10b981'
   },
   {
-    id: 'station-sec',
-    name: 'Posto de Auditoria',
-    agentName: 'Especialista em Segurança',
-    agentRole: 'Security Reviewer',
+    id: 'sec',
+    agentName: 'Segurança (Bruce)',
+    agentRole: 'Auditoria & SAST',
     agentIcon: '🛡️',
-    stationType: 'security',
     status: 'waiting',
-    currentThought: 'Aguardando encerramento do processo do Dev para rodar auditoria estática.',
+    currentAction: 'Na fila: aguardando submissão do diff do Dev para inspeção estática.',
     progress: 0,
     x: 82,
     y: 30,
     color: '#a855f7'
   },
   {
-    id: 'station-qa',
-    name: 'Laboratório de Testes',
-    agentName: 'QA Engineer',
-    agentRole: 'Quality & Resilience',
+    id: 'qa',
+    agentName: 'QA (Margaret)',
+    agentRole: 'Engenharia de Qualidade',
     agentIcon: '🔍',
-    stationType: 'qa',
     status: 'waiting',
-    currentThought: 'Fila pronta: validação estática de cobertura e bordas numéricas.',
+    currentAction: 'Na fila: aguardando parecer de segurança e execução da suíte.',
     progress: 0,
     x: 65,
     y: 75,
@@ -78,6 +70,86 @@ export function ConceptLivingWorkspace() {
   const [activeStation, setActiveStation] = useState<WorkspaceStation>(STATIONS[1])
   const [viewMode, setViewMode] = useState<'isometric' | 'topdown'>('isometric')
   const [zoom, setZoom] = useState(1)
+
+  // Estado de Arrastar / Pan e Zoom
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStartRef = useRef<{ x: number; y: number; startPanX: number; startPanY: number } | null>(null)
+  const hasDraggedRef = useRef(false)
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, .proto-living-sidebar, input')) return
+    setIsDragging(true)
+    hasDraggedRef.current = false
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      startPanX: pan.x,
+      startPanY: pan.y
+    }
+  }
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragStartRef.current) return
+    const dx = e.clientX - dragStartRef.current.x
+    const dy = e.clientY - dragStartRef.current.y
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      hasDraggedRef.current = true
+    }
+    setPan({
+      x: dragStartRef.current.startPanX + dx,
+      y: dragStartRef.current.startPanY + dy
+    })
+  }, [])
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+    dragStartRef.current = null
+  }
+
+  const handleWheel = (e: React.WheelEvent) => {
+    const zoomDelta = e.deltaY < 0 ? 0.08 : -0.08
+    setZoom(prev => Math.min(Math.max(0.6, prev + zoomDelta), 2.0))
+  }
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if ((e.target as HTMLElement).closest('button, .proto-living-sidebar, input')) return
+    if (e.touches.length === 1) {
+      const touch = e.touches[0]
+      setIsDragging(true)
+      hasDraggedRef.current = false
+      dragStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        startPanX: pan.x,
+        startPanY: pan.y
+      }
+    }
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!dragStartRef.current || e.touches.length !== 1) return
+    const touch = e.touches[0]
+    const dx = touch.clientX - dragStartRef.current.x
+    const dy = touch.clientY - dragStartRef.current.y
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      hasDraggedRef.current = true
+    }
+    setPan({
+      x: dragStartRef.current.startPanX + dx,
+      y: dragStartRef.current.startPanY + dy
+    })
+  }
+
+  const handleTouchEnd = () => {
+    setIsDragging(false)
+    dragStartRef.current = null
+  }
+
+  const resetView = () => {
+    setPan({ x: 0, y: 0 })
+    setZoom(1)
+  }
 
   return (
     <div className="proto-living-container">
@@ -100,9 +172,27 @@ export function ConceptLivingWorkspace() {
         </div>
       </div>
 
-      <div className="proto-living-stage-wrapper">
+      <div 
+        className={`proto-living-stage-wrapper ${isDragging ? 'is-dragging' : ''}`}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
         {/* Espaço Isométrico 2.5D */}
-        <div className={`proto-iso-stage ${viewMode === 'isometric' ? 'is-iso' : 'is-flat'}`} style={{ transform: `scale(${zoom})` }}>
+        <div 
+          className={`proto-iso-stage ${viewMode === 'isometric' ? 'is-iso' : 'is-flat'} ${isDragging ? 'is-dragging' : ''}`}
+          style={{
+            transform: viewMode === 'isometric'
+              ? `perspective(1200px) translate3d(${pan.x}px, ${pan.y}px, 0px) scale(${zoom}) rotateX(42deg) rotateZ(-12deg)`
+              : `translate3d(${pan.x}px, ${pan.y}px, 0px) scale(${zoom})`,
+            transition: isDragging ? 'none' : 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}
+        >
           {/* Grid de Piso Tecnológico */}
           <div className="proto-iso-floor" />
 
@@ -125,7 +215,10 @@ export function ConceptLivingWorkspace() {
                   top: `${station.y}%`,
                   borderColor: station.color
                 }}
-                onClick={() => setActiveStation(station)}
+                onClick={() => {
+                  if (hasDraggedRef.current) return
+                  setActiveStation(station)
+                }}
               >
                 {/* Personagem Animado 2.5D */}
                 <div className="proto-avatar-3d" style={{ background: `radial-gradient(circle, ${station.color}44 0%, transparent 70%)` }}>
@@ -143,16 +236,19 @@ export function ConceptLivingWorkspace() {
 
                 {/* Balão de Pensamento / Atividade em Tempo Real */}
                 <div className="proto-thought-bubble">
-                  <span className="bubble-role">{station.agentName}</span>
-                  <p className="bubble-text">{station.currentThought}</p>
+                  <strong className="bubble-title" style={{ color: station.color }}>{station.agentName}</strong>
+                  <p className="bubble-text">{station.currentAction}</p>
+                  {station.activeFile && (
+                    <code className="bubble-code">{station.activeFile}</code>
+                  )}
                 </div>
 
-                {/* Base da Estação */}
-                <div className="proto-pod-base">
-                  <strong>{station.name}</strong>
+                {/* Estação Física no Piso */}
+                <div className="proto-station-desk">
+                  <span className="desk-label">{station.agentRole}</span>
                   {station.progress > 0 && (
-                    <div className="proto-pod-progress">
-                      <div className="proto-progress-bar" style={{ width: `${station.progress}%`, background: station.color }} />
+                    <div className="desk-progress-bar">
+                      <div className="desk-progress-fill" style={{ width: `${station.progress}%`, background: station.color }} />
                     </div>
                   )}
                 </div>
@@ -161,32 +257,41 @@ export function ConceptLivingWorkspace() {
           })}
         </div>
 
-        {/* Painel Flutuante Lateral: Inspeção da Estação Ativa */}
-        <aside className="proto-inspector-glass">
-          <header className="proto-glass-header">
-            <div className="proto-glass-avatar" style={{ borderColor: activeStation.color }}>
-              <span>{activeStation.agentIcon}</span>
-            </div>
-            <div>
-              <h3>{activeStation.agentName}</h3>
-              <p>{activeStation.agentRole} · {activeStation.name}</p>
-            </div>
-            <span className={`tag tag-${activeStation.status}`}>{activeStation.status.toUpperCase()}</span>
-          </header>
-
-          <div className="proto-glass-body">
-            <div className="proto-glass-section">
-              <h4>Estado da Estação</h4>
-              <p className="proto-highlight-text">{activeStation.currentThought}</p>
-              <div className="proto-metric-row">
-                <span>Progresso da Etapa:</span>
-                <strong>{activeStation.progress}%</strong>
+        {/* Painel Lateral de Inspeção do Agente Ativo */}
+        <aside className="proto-living-sidebar">
+          <div className="proto-sidebar-glass">
+            <div className="proto-agent-hero">
+              <div className="proto-hero-avatar" style={{ borderColor: activeStation.color }}>
+                <span>{activeStation.agentIcon}</span>
+              </div>
+              <div className="proto-hero-meta">
+                <h3>{activeStation.agentName}</h3>
+                <p>{activeStation.agentRole}</p>
+                <div className="proto-hero-badges">
+                  <span className={`tag tag-${activeStation.status}`}>{activeStation.status.toUpperCase()}</span>
+                </div>
               </div>
             </div>
 
             <div className="proto-glass-section">
-              <h4>Conexões no Workspace</h4>
-              <ul className="proto-connections-list">
+              <h4>Atividade em Andamento</h4>
+              <p className="proto-activity-desc">{activeStation.currentAction}</p>
+              {activeStation.progress > 0 && (
+                <div className="proto-progress-widget">
+                  <div className="proto-progress-labels">
+                    <span>Progresso da Etapa:</span>
+                    <strong>{activeStation.progress}%</strong>
+                  </div>
+                  <div className="proto-progress-track">
+                    <div className="proto-progress-fill" style={{ width: `${activeStation.progress}%`, background: activeStation.color }} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="proto-glass-section">
+              <h4>Colaboração na Missão</h4>
+              <ul className="proto-collab-list">
                 <li>
                   <span className="dot dot-green" /> Recebeu diretrizes de: <strong>Arquiteto</strong> (via prompt)
                 </li>
@@ -207,11 +312,12 @@ export function ConceptLivingWorkspace() {
           </div>
         </aside>
 
-        {/* Controles de Câmera */}
+        {/* Controles de Câmera e Dica de Arraste */}
         <div className="proto-cam-controls">
-          <button type="button" onClick={() => setZoom(z => Math.min(1.4, z + 0.1))}>＋</button>
-          <button type="button" onClick={() => setZoom(1)}>Reset</button>
-          <button type="button" onClick={() => setZoom(z => Math.max(0.7, z - 0.1))}>－</button>
+          <span className="proto-cam-hint">✋ Arraste para navegar</span>
+          <button type="button" onClick={() => setZoom(z => Math.min(2.0, Number((z + 0.15).toFixed(2))))} title="Aproximar">＋</button>
+          <button type="button" onClick={resetView} title="Resetar Câmera">⟲ Reset</button>
+          <button type="button" onClick={() => setZoom(z => Math.max(0.6, Number((z - 0.15).toFixed(2))))} title="Afastar">－</button>
         </div>
       </div>
     </div>
