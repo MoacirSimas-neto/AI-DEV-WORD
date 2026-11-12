@@ -9,7 +9,6 @@ import type { GitService } from '../git/service.ts'
 import { cleanOutput } from '../history/store.ts'
 import type { EventStore } from '../observability/store.ts'
 import type { ProjectStore } from '../projects/store.ts'
-import { liveRedaction, redact } from '../security/redact.ts'
 import { stripProposalMarkers } from '../team/proposal.ts'
 import type { TaskStore } from '../tasks/store.ts'
 import { AGY_HEADLESS_NOTICE, type AgentLauncher, contentHashes, getStepCliAndArgs, LIMIT_PATTERN, MAX_ARG_PROMPT, type TeamRunner } from '../team/runner.ts'
@@ -26,8 +25,6 @@ export interface ChatServiceOptions {
   /** Janela de contexto (padrão CHAT_LIMITS). */
   contextMessages?: number
   contextChars?: number
-  /** Intervalo mínimo entre pedaços enviados à tela. */
-  deltaMs?: number
   /** Etapa 12.2: conversa -> missão. Sem eles, "Preparar missão" responde com erro. */
   tasks?: TaskStore
   team?: Pick<TeamRunner, 'start'>
@@ -41,10 +38,7 @@ interface Active {
   opId: string
   proc: RunningCli | null
   cancelled: boolean
-  text: string
 }
-
-const CHECKPOINT_MS = 3000
 
 /**
  * Conversa com o Tech Lead. Só conversa: o CLI roda com o papel de planejamento (sem permissão
@@ -108,7 +102,7 @@ export class ChatService extends EventEmitter {
     }
 
     // Reserva antes de qualquer espera: dois envios no mesmo instante não abrem dois CLIs.
-    const active: Active = { projectId: conv.projectId, conversationId: conv.id, messageId: 0, opId: input.opId, proc: null, cancelled: false, text: '' }
+    const active: Active = { projectId: conv.projectId, conversationId: conv.id, messageId: 0, opId: input.opId, proc: null, cancelled: false }
     this.active = active
     let reply: ChatMessage
     try {
@@ -227,30 +221,7 @@ export class ChatService extends EventEmitter {
 
   private async run(a: Active, cwd: string, cli: CliId, args: string[], input: string | undefined) {
     const { store } = this.o
-    let pending = ''
-    let flushTimer: ReturnType<typeof setTimeout> | undefined
-    let lastCheckpoint = Date.now()
-    const flushDelta = () => {
-      flushTimer = undefined
-      if (!pending) return
-      this.emit('delta', { projectId: a.projectId, conversationId: a.conversationId, messageId: a.messageId, text: pending })
-      pending = ''
-      if (Date.now() - lastCheckpoint > CHECKPOINT_MS) {
-        lastCheckpoint = Date.now()
-        store.updateReply(a.projectId, a.messageId, { content: a.text })
-      }
-    }
-    // Saída bruta fica aqui; a tela recebe a versão redigida, em lotes (não a cada caractere).
-    const live = liveRedaction((safe) => {
-      const clean = cleanOutput(safe)
-      if (!clean) return
-      a.text += clean
-      pending += clean
-      flushTimer ??= setTimeout(flushDelta, this.o.deltaMs ?? 80)
-    })
     const finish = (patch: { content?: string; status: ChatMessage['status']; error?: string | null }) => {
-      clearTimeout(flushTimer)
-      flushDelta()
       this.active = null
       this.emit('message', store.updateReply(a.projectId, a.messageId, patch))
     }
@@ -258,29 +229,30 @@ export class ChatService extends EventEmitter {
     let before: Record<string, string> | null = null
     try {
       before = await this.snapshot(cwd)
-      if (a.cancelled) return finish({ status: 'interrupted', content: a.text })
-      a.proc = this.o.launch(cli, args, { cwd, input, timeoutMs: this.o.timeoutMs ?? 5 * 60_000, label: `chat #${a.conversationId} · ${cli}`, onOutput: (t) => live.write(t) })
-      const result = await a.proc.done.finally(() => live.end())
+      if (a.cancelled) return finish({ status: 'interrupted' })
+      a.proc = this.o.launch(cli, args, { cwd, input, timeoutMs: this.o.timeoutMs ?? 5 * 60_000, label: `chat #${a.conversationId} · ${cli}` })
+      const result = await a.proc.done
       a.proc = null
       const touched = before ? await this.changedSince(cwd, before) : []
       const writeWarning = touched.length
         ? `O agente não tinha permissão de escrita, mas ${touched.length} arquivo(s) mudaram durante a resposta (${touched.slice(0, 10).join(', ')}). Nada foi desfeito: confira as alterações.`
         : null
-      if (a.cancelled) return finish({ status: 'interrupted', content: a.text, error: writeWarning })
-      const text = cleanOutput(result.stdout).trim()
-      if (result.timedOut) return finish({ status: 'error', content: a.text, error: 'Tempo esgotado: a resposta foi interrompida.' })
-      if (result.code !== 0 || !text) {
-        const output = cleanOutput(`${result.stderr}\n${result.stdout}`).trim().slice(-600)
-        const reason = LIMIT_PATTERN.test(output)
+      if (a.cancelled) return finish({ status: 'interrupted', error: writeWarning })
+      if (writeWarning) return finish({ status: 'error', error: writeWarning })
+      if (result.timedOut) return finish({ status: 'error', error: 'Tempo esgotado: a resposta foi interrompida.' })
+      if (result.code !== 0) {
+        const error = LIMIT_PATTERN.test(`${result.stderr}\n${result.stdout}`)
           ? `O ${cli} atingiu um limite de uso (cota ou excesso de requisições). Tente mais tarde.`
-          : result.code !== 0
-            ? `O ${cli} terminou com código ${result.code}. ${output}`
-            : `O ${cli} terminou sem resposta.`
-        return finish({ status: 'error', content: text || a.text, error: reason })
+          : `O ${cli} terminou com código ${result.code}.`
+        return finish({ status: 'error', error })
       }
-      finish({ status: writeWarning ? 'error' : 'complete', content: text, error: writeWarning })
-    } catch (error) {
-      finish({ status: a.cancelled ? 'interrupted' : 'error', content: a.text, error: a.cancelled ? null : redact(error instanceof Error ? error.message : String(error)) })
+      // O CLI pode repetir o prompt ao falhar. Só publique stdout após sucesso.
+      const text = cleanOutput(result.stdout).trim()
+      if (!text) return finish({ status: 'error', error: `O ${cli} terminou sem resposta.` })
+      this.emit('delta', { projectId: a.projectId, conversationId: a.conversationId, messageId: a.messageId, text })
+      finish({ status: 'complete', content: text })
+    } catch {
+      finish({ status: a.cancelled ? 'interrupted' : 'error', error: a.cancelled ? null : `Não foi possível obter uma resposta do ${cli}.` })
     }
   }
 

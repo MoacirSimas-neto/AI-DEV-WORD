@@ -294,7 +294,10 @@ test('trilha: cancelamento encerra o CLI e registra a intervenção sem marcar f
 
 test('trilha: falhas de CLI ficam registradas com código de saída, sem credenciais e sem vazar entre missões', async () => {
   let mode: 'exit' | 'throw' = 'exit'
-  const w = await world(() => (mode === 'exit' ? { code: 3, stderr: 'fatal: token=abcdef123456 recusado' } : new Error('CLI "gemini" não encontrado no PATH.')))
+  const context = 'instrução-interna-ficticia token=abcdef123456'
+  const w = await world(() => (mode === 'exit' ? { code: 3, stdout: context, stderr: context } : new Error(context)))
+  const output: string[] = []
+  w.runner.on('output', (_id: number, text: string) => output.push(text))
 
   const first = await w.start()
   await w.phase(first.id, 'failed')
@@ -307,7 +310,7 @@ test('trilha: falhas de CLI ficam registradas com código de saída, sem credenc
   const failure = one(a, 'mission.failed')
   assert.equal(failure.correlationId, exit.correlationId)
   assert.equal(failure.data.phase, 'planning')
-  assert.ok(!JSON.stringify(a).includes('abcdef123456'))
+  assert.doesNotMatch(JSON.stringify(a), /abcdef123456|instrução-interna-ficticia/)
   assert.equal(of(a, 'plan.produced').length, 0)
 
   mode = 'throw'
@@ -319,6 +322,9 @@ test('trilha: falhas de CLI ficam registradas com código de saída, sem credenc
   assert.equal(notStarted.data.launched, false)
   assert.equal(notStarted.state, 'failed')
   one(b, 'mission.failed')
+  assert.doesNotMatch(JSON.stringify(b), /abcdef123456|instrução-interna-ficticia/)
+  assert.doesNotMatch(w.tasks.getMission(second.id)!.error!, /instrução-interna-ficticia/)
+  assert.deepEqual(output, [])
 
   // Cada missão só enxerga a própria trilha.
   assert.ok(a.every((e) => e.missionId === first.id) && b.every((e) => e.missionId === second.id))

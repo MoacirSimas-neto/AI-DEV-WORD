@@ -86,7 +86,7 @@ async function world(opts: { file?: string; contextMessages?: number; contextCha
       },
     }
   }
-  const service = new ChatService({ store, projects, registry, configs, launch, git: new GitService(), deltaMs: 5, contextMessages: opts.contextMessages, contextChars: opts.contextChars })
+  const service = new ChatService({ store, projects, registry, configs, launch, git: new GitService(), contextMessages: opts.contextMessages, contextChars: opts.contextChars })
   const messages: ChatMessage[] = []
   const deltas: string[] = []
   service.on('message', (m: ChatMessage) => messages.push(m))
@@ -184,7 +184,7 @@ test('envio repetido com o mesmo opId não duplica nem chama o CLI de novo; envi
   assert.equal(w.store.listMessages(w.projectA.id, conv.id).messages.length, 2)
 })
 
-test('interrupção: o processo é encerrado e o texto parcial fica gravado como interrompido', async () => {
+test('interrupção: o processo é encerrado e a resposta fica interrompida sem publicar texto parcial', async () => {
   const w = await world()
   const conv = w.store.createConversation(w.projectA.id, 'architect')
   await w.service.send({ projectId: w.projectA.id, conversationId: conv.id, content: 'Fale longamente.', opId: 'op-1' })
@@ -194,7 +194,8 @@ test('interrupção: o processo é encerrado e o texto parcial fica gravado como
   assert.equal(w.service.cancel(w.projectA.id, conv.id), true)
   await until(() => lastReply(w).status === 'interrupted', 'interrompida')
   assert.equal((await call(w, 0)).killed, true)
-  assert.match(lastReply(w).content, /Primeira parte/)
+  assert.equal(lastReply(w).content, '')
+  assert.deepEqual(w.deltas, [])
   // Depois da interrupção, a conversa aceita nova mensagem.
   await w.service.send({ projectId: w.projectA.id, conversationId: conv.id, content: 'Continue curto.', opId: 'op-2' })
   await call(w, 1)
@@ -213,6 +214,22 @@ test('CLI indisponível: nada é gravado e as conversas seguem consultáveis; fa
   ;(await call(w, 0)).finish({ code: 1, stdout: '', stderr: 'Error 429: quota exceeded' })
   await until(() => lastReply(w).status === 'error', 'erro')
   assert.match(lastReply(w).error!, /limite de uso/)
+})
+
+test('falha do CLI descarta o prompt e diagnósticos brutos, inclusive na saída que iria ao WebSocket', async () => {
+  const w = await world()
+  const conv = w.store.createConversation(w.projectA.id, 'architect')
+  await w.service.send({ projectId: w.projectA.id, conversationId: conv.id, content: 'Oi', opId: 'echo' })
+  const cli = await call(w, 0)
+  const internal = promptOf(cli) + '\nsegredo-ficticio-fora-dos-padroes'
+  cli.output(internal)
+  await new Promise((r) => setTimeout(r, 20))
+  cli.finish({ code: 23, stderr: internal })
+  await until(() => lastReply(w).status === 'error', 'erro')
+  assert.match(lastReply(w).error!, /terminou com código 23/)
+  assert.equal(lastReply(w).content, '')
+  assert.deepEqual(w.deltas, [])
+  assert.doesNotMatch(JSON.stringify(w.store.listMessages(w.projectA.id, conv.id)), /segredo-ficticio|Regras obrigatórias/)
 })
 
 test('limites: mensagem vazia ou grande demais é recusada; janela de contexto informa o que ficou de fora', async () => {
@@ -335,8 +352,8 @@ test('WebSocket: criar, enviar, receber em lotes, reconectar com histórico, err
     await until(() => w.calls.length === 1, 'CLI')
     ;(await call(w, 0)).output('Olá! ')
     ;(await call(w, 0)).output('Como posso ajudar?')
-    await ui.take('chat-delta', (m) => m.conversationId === conversationId)
     ;(await call(w, 0)).finish()
+    await ui.take('chat-delta', (m) => m.conversationId === conversationId)
     await ui.take('chat-message', (m) => m.message.role === 'assistant' && m.message.status === 'complete')
 
     // Reenvio após "queda": mesmo opId não repete.

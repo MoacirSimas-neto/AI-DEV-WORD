@@ -41,7 +41,6 @@ import type { MemoryStore } from '../memory/store.ts'
 import { type EventStore, fingerprint } from '../observability/store.ts'
 import type { ProjectStore } from '../projects/store.ts'
 import { composeSkills, type SkillStore } from '../skills/store.ts'
-import { liveRedaction } from '../security/redact.ts'
 import { OPEN_PHASES, type TaskStore } from '../tasks/store.ts'
 import {
   assertTransition,
@@ -963,6 +962,7 @@ export class TeamRunner extends EventEmitter {
     const startedAt = Date.now()
     let launched = false
     let exited = false
+    let launchFailure = `${name}: não foi possível iniciar o ${cli}.`
     // Permissão de escrita vem só do papel (args montados pelo backend). Sem ela, o backend confere
     // depois se algum arquivo mudou: a garantia não depende de o CLI obedecer ao prompt.
     const writes = args.some((a) => WRITE_ARGS.has(a))
@@ -970,21 +970,16 @@ export class TeamRunner extends EventEmitter {
     try {
       const fullPrompt = cli === 'agy' ? prompt + AGY_HEADLESS_NOTICE : prompt
       if (passPromptAsArg && fullPrompt.length > 30_000) {
-        throw new Error(`${name}: o prompt desta etapa (${fullPrompt.length} caracteres) não cabe na linha de comando do ${cli}. Use outro provedor para este agente ou reduza a tarefa/plano.`)
+        launchFailure = `${name}: o prompt desta etapa (${fullPrompt.length} caracteres) não cabe na linha de comando do ${cli}. Use outro provedor ou reduza a tarefa/plano.`
+        throw new Error(launchFailure)
       }
       const stepArgs = passPromptAsArg ? [...args, fullPrompt] : args
       const stepInput = passPromptAsArg ? undefined : fullPrompt
-      // A saída bruta fica no backend (parser); a tela recebe só a versão redigida, mesmo em pedaços.
-      const live = liveRedaction((safe) => {
-        const clean = cleanOutput(safe)
-        if (clean) this.emit('output', missionId, clean)
-      })
       run.proc = this.launch(cli, stepArgs, {
         cwd,
         label: `missão #${missionId} · ${agentId} · ${cli}`,
         input: stepInput,
         timeoutMs: this.stepTimeoutMs,
-        onOutput: (text) => live.write(text),
       })
       launched = true
       // Nunca o prompt: só tamanho e hash. `args` são as opções do CLI, sem o texto do prompt.
@@ -993,12 +988,12 @@ export class TeamRunner extends EventEmitter {
         model,
         effort,
         args,
-        promptVia: passPromptAsArg ? 'argument' : 'stdin',
+        promptVia: run.proc.promptVia ?? (passPromptAsArg ? 'argument' : 'stdin'),
         guarded: run.proc.guarded ?? false,
         prompt: fingerprint(fullPrompt),
         timeoutMs: this.stepTimeoutMs,
       })
-      const result = await run.proc.done.finally(() => live.end())
+      const result = await run.proc.done
       run.proc = undefined
       exited = true
       if (before && !run.cancelled) {
@@ -1048,11 +1043,13 @@ export class TeamRunner extends EventEmitter {
         )
       }
       if (!text) throw new Error(`${name}: o ${cli} terminou sem resposta.`)
+      this.emit('output', missionId, text)
       this.log(mission, 'agent', `${name} (${cli}) terminou a sua etapa da missão #${missionId}.`, agentId)
       stepEvent(`${role}.finished`, 'completed', `${name} concluiu a etapa ${stage} da missão #${missionId}.`, { durationMs: Date.now() - startedAt })
       return text
     } catch (error) {
-      const reason = errorText(error).split('\n')[0]
+      run.proc = undefined
+      const reason = exited ? errorText(error) : launched ? `${name}: não foi possível concluir a execução do ${cli}.` : launchFailure
       if (!exited) {
         stepEvent('cli.finished', run.cancelled ? 'cancelled' : 'failed', launched ? `CLI ${cli} falhou durante a execução.` : `CLI ${cli} não chegou a iniciar.`, { cli, launched, error: reason })
       }
@@ -1061,8 +1058,8 @@ export class TeamRunner extends EventEmitter {
         // Sinal de segurança: para para o usuário, sem consultar outro agente nem seguir o plano.
         if (error instanceof UnauthorizedWriteError && mission.mode === 'dynamic') {
           this.securityStops.add(missionId)
-          this.block(missionId, errorText(error), 'unauthorized_write', agentId, trace)
-        } else this.fail(missionId, agentId, errorText(error), trace)
+          this.block(missionId, reason, 'unauthorized_write', agentId, trace)
+        } else this.fail(missionId, agentId, reason, trace)
       }
       return null
     }
@@ -2249,12 +2246,10 @@ export class TeamRunner extends EventEmitter {
 }
 
 function failureText(name: string, cli: CliId, result: CliResult) {
-  const output = cleanOutput(`${result.stderr}\n${result.stdout}`).trim()
-  const tail = output.slice(-800)
-  if (LIMIT_PATTERN.test(output)) {
-    return `${name}: o ${cli} atingiu um limite de uso (cota ou excesso de requisições). Tente de novo mais tarde.\n${tail}`
+  if (LIMIT_PATTERN.test(`${result.stderr}\n${result.stdout}`)) {
+    return `${name}: o ${cli} atingiu um limite de uso (cota ou excesso de requisições). Tente de novo mais tarde.`
   }
-  return `${name}: o ${cli} terminou com código ${result.code}.\n${tail}`
+  return `${name}: o ${cli} terminou com código ${result.code}.`
 }
 
 const listPaths = (paths: string[]) => `${paths.slice(0, 10).join(', ')}${paths.length > 10 ? ` e mais ${paths.length - 10}` : ''}`

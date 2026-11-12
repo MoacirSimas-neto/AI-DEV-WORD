@@ -38,9 +38,9 @@ Ao abrir o app, a aba **Chat** mostra as conversas do projeto ativo. Você pode 
 - **Conversar não executa nada.** O agente roda com o papel de planejamento, sem permissão de escrita e sob o supervisor de processos. Nenhuma resposta vira proposta, aprovação ou missão por conta própria. Frases como "pode fazer" ou "aprovado" na conversa não autorizam nada.
 - As conversas ficam no SQLite, separadas por projeto: uma conversa não é vista nem usada a partir de outro projeto. Elas podem ser renomeadas e excluídas (com confirmação).
 - **Contexto limitado:** cada resposta recebe só as mensagens mais recentes (até 20 e 16 mil caracteres). Quando mensagens antigas ficam de fora, a resposta avisa.
-- Uma resposta por vez no app. **Interromper** encerra o processo do CLI e guarda o texto parcial. Se o app fechar no meio, a resposta fica como interrompida e nada é relançado.
+- Uma resposta por vez no app. **Interromper** encerra o processo do CLI. Se o app fechar no meio, a resposta fica como interrompida e nada é relançado.
 - Sem CLI disponível, as conversas continuam consultáveis.
-- O texto mostrado e o gravado passam pela remoção de segredos. A interface renderiza Markdown sem HTML: links só abrem se forem `http(s)`.
+- O texto mostrado e o gravado passam pela remoção de segredos. O app só publica a saída do CLI após sucesso, pois uma falha pode repetir o prompt. A interface renderiza Markdown sem HTML: links só abrem se forem `http(s)`.
 - Se arquivos mudarem durante uma resposta, ela é marcada com erro e aviso. Nada é desfeito.
 
 ### Da conversa para a missão
@@ -131,13 +131,15 @@ O backend usa `node --test`. **Os testes nunca chamam CLIs reais:** `npm test` f
 
 Para rodar o app inteiro sem gastar cota, use `AIDW_CLI_MODE=simulated` com `AIDW_SIMULATED_CLI_DIR=<pasta absoluta>`. A pasta precisa ter `codex`, `gemini` e `agy` (no Windows, `.cmd`), cada um contendo o texto `AIDW-SIMULATED-CLI`. Nesse modo o backend **não consulta o PATH**: se faltar um simulado, ele não inicia. Ao iniciar, o backend registra qual executável cada CLI usa.
 
+No Windows, o `agy.cmd` ou `agy.bat` simulado recebe as opções até `-p` na linha de comando e lê o prompt pela entrada padrão até EOF. O `agy.exe` continua recebendo o prompt como argumento.
+
 ## Permissões e segurança
 
 - **Os CLIs agem no seu projeto com as permissões que você configurou neles.** No modo clássico e nos passos de implementação, o Dev roda com escrita: Codex com `--sandbox workspace-write`, Gemini com `--approval-mode auto_edit` e Antigravity com `--mode accept-edits`. Os passos de leitura usam modo somente leitura quando o CLI oferece essa opção. **Trabalhe num repositório Git com commit em dia.**
 - Os agentes só são iniciados dentro da pasta do projeto ativo. Shims `.cmd` no Windows só recebem argumentos simples (sem metacaracteres de shell).
 - O texto produzido pelos modelos é tratado como dado não confiável. Propostas fora do formato ou das regras são recusadas por inteiro. **Isso não elimina prompt injection:** um conteúdo malicioso no projeto ainda pode influenciar o que o CLI faz dentro das permissões dele.
 - **Escrita sem permissão é detectada pelo backend:** antes de cada etapa sem escrita, o backend registra a impressão SHA-256 dos arquivos alterados no Git e confere depois. Se algo mudou, a missão para, com evento observado, e nada é desfeito. Essa verificação não depende de o CLI obedecer ao prompt. Arquivos ignorados pelo `.gitignore` não entram na conferência.
-- Credenciais: o app não lê nem guarda tokens dos CLIs. A **remoção de segredos é baseada em padrões** (chaves conhecidas, JWT, `senha=`, `*_API_KEY=`, URLs com credencial, chaves privadas) e vale para histórico, eventos, memória, mensagens de erro, diff encaminhado entre agentes e **saída ao vivo** (terminal e missões). Na saída ao vivo, ela funciona mesmo com o segredo partido entre pedaços ou entremeado de códigos ANSI. **Segredos sem formato reconhecível não são detectados.** Num fluxo muito lento, os primeiros caracteres de um segredo podem aparecer antes da detecção. Não cole segredos em tarefas.
+- Credenciais: o app não lê nem guarda tokens dos CLIs. A **remoção de segredos é baseada em padrões** (chaves conhecidas, JWT, `senha=`, `*_API_KEY=`, URLs com credencial, chaves privadas) e vale para histórico, eventos, memória, mensagens de erro, diff encaminhado entre agentes e saída dos CLIs. O terminal interativo continua ao vivo: a remoção funciona mesmo com o segredo partido entre pedaços ou entremeado de códigos ANSI. **Segredos sem formato reconhecível não são detectados.** Num fluxo muito lento no terminal, os primeiros caracteres de um segredo podem aparecer antes da detecção. Não cole segredos em tarefas.
 - **Processos locais do mesmo usuário** (inclusive um CLI com acesso a shell e sem sandbox) conseguem falar com o backend em `127.0.0.1`, forjando o cabeçalho `Origin`, e assim poderiam aprovar propostas. A verificação de origem só barra páginas de outros sites. Com o app rodando como o mesmo usuário, não há como esconder um segredo desse processo. Use os CLIs com as proteções deles (sandbox do Codex, aprovação de comandos).
 
 ## Limitações conhecidas

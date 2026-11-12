@@ -105,7 +105,7 @@ async function world(options: { file?: string; dir?: string } = {}) {
     return { done, kill: () => kill() }
   }
   const team = new TeamRunner({ tasks, history, projects, registry, git: new GitService(), configs, skills: new SkillStore(projects.db), events, memory, plans, launch })
-  const service = new ChatService({ store, projects, registry, configs, launch, git: new GitService(), deltaMs: 5, tasks, team, events })
+  const service = new ChatService({ store, projects, registry, configs, launch, git: new GitService(), tasks, team, events })
   /** Conversa já existente (gravada direto no banco, sem CLI). */
   const conversation = (projectId: number, exchanges: [string, string][]) => {
     let conv = store.createConversation(projectId, 'architect')
