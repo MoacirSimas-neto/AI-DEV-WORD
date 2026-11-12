@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
+import { cliMode, requireSimulatedClis } from './cli/mode.ts'
 import { findCli, probeCli } from './cli/probe.ts'
 import { startCli } from './cli/run.ts'
 import { ProcessSupervisor, setSupervisor } from './cli/supervisor.ts'
@@ -30,6 +31,20 @@ try {
   process.exit(1)
 }
 process.on('exit', () => instanceLock.release())
+
+// Qual executável cada CLI usa (só o caminho; nada de conta ou credencial).
+try {
+  const mode = cliMode()
+  if (mode.kind === 'simulated') {
+    const files = requireSimulatedClis(mode.dir)
+    console.log(`CLIs SIMULADOS (${mode.dir}): ${Object.entries(files).map(([cli, file]) => `${cli} -> ${file}`).join('; ')}`)
+  } else {
+    console.log(`CLIs: ${(['codex', 'gemini', 'agy'] as const).map((cli) => `${cli} -> ${findCli(cli) ?? 'não encontrado'}`).join('; ')}`)
+  }
+} catch (error) {
+  console.error(`Não foi possível iniciar o backend: ${error instanceof Error ? error.message : String(error)}`)
+  process.exit(1)
+}
 
 // Todo CLI (missão ou terminal) roda sob um guardião ligado a este supervisor: se o backend
 // morrer, inclusive à força, o canal fecha e o guardião encerra a árvore do CLI.

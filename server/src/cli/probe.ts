@@ -1,4 +1,5 @@
 import type { AuthState, CliId } from '../../../shared/protocol.ts'
+import { cliMode, findSimulatedCli } from './mode.ts'
 import { resolveCommand } from './resolve.ts'
 import { runCli } from './run.ts'
 
@@ -26,6 +27,9 @@ const CATALOG: Record<CliId, CliSpec> = {
 
 /** Caminho absoluto do executável do CLI, ou null se não estiver instalado. */
 export function findCli(cli: CliId): string | null {
+  const mode = cliMode()
+  // Modo simulado: só a pasta dos simulados, nunca o PATH.
+  if (mode.kind === 'simulated') return findSimulatedCli(cli, mode.dir)
   return resolveCommand(CATALOG[cli].command)
 }
 
