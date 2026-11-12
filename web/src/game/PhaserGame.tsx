@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AgentInfo } from '../../../shared/protocol.ts'
 import { computeOfficePlacement, FONT, MAX_VISIBLE_SPECIALISTS, WORLD } from './officeLayout.ts'
 import { OfficeScene } from './OfficeScene.ts'
+import { trackPhaserGlobals } from './phaserLifecycle.ts'
 import { type WorldAction, WorldBridge } from './WorldBridge.ts'
 
 interface Props {
@@ -43,6 +44,7 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction, team, forwa
     bridgeRef.current = bridge
     let game: Phaser.Game | undefined
     let disposed = false
+    const globals = trackPhaserGlobals()
 
     void document.fonts
       .load(`14px ${FONT}`)
@@ -63,6 +65,7 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction, team, forwa
           audio: { noAudio: true },
           scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
           scene: new OfficeScene(bridge),
+          callbacks: { postBoot: globals.postBoot },
         })
       })
 
@@ -71,6 +74,7 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction, team, forwa
       bridgeRef.current = null
       bridge.removeAllListeners()
       game?.destroy(true)
+      globals.release()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
