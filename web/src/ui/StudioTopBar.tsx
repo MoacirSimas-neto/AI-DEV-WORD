@@ -113,9 +113,16 @@ export function StudioTopBar({
                   <input
                     type="text"
                     className="popover-search-input"
-                    placeholder="Buscar projetos recentes ou digite o caminho..."
+                    placeholder="Buscar ou digite qualquer caminho (Enter para abrir)..."
                     value={projectSearch}
                     onChange={(e) => setProjectSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && projectSearch.trim()) {
+                        send({ type: 'project-add', path: projectSearch.trim() })
+                        setProjectModalOpen(false)
+                        setProjectSearch('')
+                      }
+                    }}
                     autoFocus
                   />
                 </div>
@@ -132,45 +139,40 @@ export function StudioTopBar({
                   <span className="browse-icon">📂</span>
                   <div className="browse-text">
                     <strong>Procurar Pasta no Computador...</strong>
-                    <span>Abre o Windows Explorer para escolher qualquer diretório</span>
+                    <span>Abre o seletor nativo do sistema operacional (Explorer / Zenity)</span>
                   </div>
                   <span className="browse-arrow">➔</span>
                 </button>
               </div>
 
-              {/* Atalhos Rápidos de Pastas Comuns */}
+              {/* Projetos Recentes / Atalhos Rápidos */}
               <div className="popover-shortcuts">
-                <span className="shortcuts-lbl">Atalhos Comuns:</span>
+                <span className="shortcuts-lbl">Atalhos Rápidos:</span>
                 <div className="shortcuts-list">
+                  {(workspace.projects ?? []).slice(0, 3).map((p: ProjectInfo) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="shortcut-tag"
+                      onClick={() => {
+                        send({ type: 'project-select', projectId: p.id })
+                        setProjectModalOpen(false)
+                      }}
+                      title={p.path}
+                    >
+                      📁 {p.name}
+                    </button>
+                  ))}
                   <button
                     type="button"
                     className="shortcut-tag"
                     onClick={() => {
-                      send({ type: 'project-add', path: 'C:\\AI DEV WORD' })
+                      send({ type: 'project-add', path: '.' })
                       setProjectModalOpen(false)
                     }}
+                    title="Adicionar pasta do repositório atual"
                   >
-                    🏠 C:\AI DEV WORD
-                  </button>
-                  <button
-                    type="button"
-                    className="shortcut-tag"
-                    onClick={() => {
-                      send({ type: 'project-add', path: 'C:\\Projetos' })
-                      setProjectModalOpen(false)
-                    }}
-                  >
-                    📁 C:\Projetos
-                  </button>
-                  <button
-                    type="button"
-                    className="shortcut-tag"
-                    onClick={() => {
-                      send({ type: 'project-add', path: 'C:\\Users\\Desktop' })
-                      setProjectModalOpen(false)
-                    }}
-                  >
-                    💻 Área de Trabalho
+                    🏠 Pasta Atual (.)
                   </button>
                 </div>
               </div>
