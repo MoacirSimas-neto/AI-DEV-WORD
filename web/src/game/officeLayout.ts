@@ -456,7 +456,15 @@ function drawRugAndMeetingZone(scene: Phaser.Scene, p: Paint, _callbacks?: Offic
   table(104, 103, 12, 1, 0xffffff, 0.7)
 
   scene.add
-    .text(120 * U, 116 * U, 'MESA DE MISSÕES', { fontFamily: FONT, fontSize: '10px', fontStyle: '700', color: '#7dd3fc', resolution: 2 })
+    .text(120 * U, 116 * U, 'MESA DE MISSÕES', {
+      fontFamily: FONT,
+      fontSize: '10px',
+      fontStyle: '700',
+      color: '#7dd3fc',
+      backgroundColor: '#090d16cc',
+      padding: { x: 6, y: 2 },
+      resolution: 2,
+    })
     .setOrigin(0.5, 0)
     .setDepth(115 * U)
 }
@@ -552,12 +560,15 @@ function drawSpecialistStation(
     p(x + 4, y + 1, 7, 4, 0x0f172a)
     p(x + 6, y + 6, 3, 1, C.metalDark)
 
+    // Plaquinha frontal de alto contraste
+    p(x + 2, y + 8, 16, 4, 0x0f172a)
+
     const plateText = scene.add
-      .text((x + 10) * U, (y + 10.5) * U, slot.defaultPlate, {
+      .text((x + 10) * U, (y + 10) * U, slot.defaultPlate, {
         fontFamily: FONT,
-        fontSize: '9px',
+        fontSize: '10px',
         fontStyle: '700',
-        color: '#f8fafc',
+        color: '#7dd3fc',
         resolution: 2,
       })
       .setOrigin(0.5)
@@ -579,12 +590,13 @@ function drawSpecialistStation(
     .rectangle((gx - 1) * U, (gy - 6) * U, U * 1.5, U * 1.5, C.metalDark)
     .setOrigin(0)
     .setDepth(116 * U)
+  base(gx - 4, gy + 2, 8, 4, 0x0f172a)
   const plateText = scene.add
     .text(gx * U, (gy + 4) * U, slot.defaultPlate, {
       fontFamily: FONT,
-      fontSize: '9px',
+      fontSize: '10px',
       fontStyle: '700',
-      color: '#cbd5e1',
+      color: '#7dd3fc',
       resolution: 2,
     })
     .setOrigin(0.5)

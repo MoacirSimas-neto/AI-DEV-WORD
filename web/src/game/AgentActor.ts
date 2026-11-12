@@ -105,15 +105,16 @@ export class AgentActor {
     })
 
     this.label = scene.add
-      .text(0, 3, agent.name, {
+      .text(0, 4, agent.name, {
         fontFamily: FONT,
         fontSize: '11px',
         fontStyle: '700',
         color: '#f8fafc',
+        backgroundColor: '#0f172acc',
+        padding: { x: 5, y: 1 },
         resolution: 2,
       })
       .setOrigin(0.5, 0)
-      .setStroke('#0f172a', 3)
     this.bubble = scene.add
       .text(0, -68, '', {
         fontFamily: FONT,
@@ -193,7 +194,9 @@ export class AgentActor {
 
   private syncPlate() {
     if (this.station.plateText) {
-      this.station.plateText.setText(this.agent.name.slice(0, 10)).setVisible(true)
+      const raw = this.agent.name
+      const shortName = raw.length > 7 ? raw.slice(0, 5) + '.' : raw
+      this.station.plateText.setText(shortName).setVisible(true)
     }
   }
 
