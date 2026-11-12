@@ -49,3 +49,17 @@ test('redact é idempotente: reaplicar não deforma o texto já sanitizado', () 
   assert.equal(once, 'use api_key=[SEGREDO REMOVIDO] e token: [SEGREDO REMOVIDO] aqui')
   assert.equal(redact(redact(once)), once)
 })
+
+test('redact cobre JWT, tokens npm/Stripe e variáveis de ambiente com prefixo', () => {
+  const cases = [
+    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJlZmFrZQ',
+    'npm_abcdefghijklmnopqrstuvwxyz0123456789',
+    'sk_live_abcdefghijklmnop12345678',
+    'rk_test_abcdefghijklmnop12345678',
+  ]
+  for (const secret of cases) assert.equal(redact(`valor ${secret} fim`), 'valor [SEGREDO REMOVIDO] fim', secret)
+  assert.equal(redact('export GOOGLE_API_KEY=AbCdEf123456'), 'export GOOGLE_API_KEY=[SEGREDO REMOVIDO]')
+  assert.equal(redact('DB_PASSWORD: "hunter22x"'), 'DB_PASSWORD: [SEGREDO REMOVIDO]')
+  // Texto comum com palavras parecidas continua intacto.
+  assert.equal(redact('o token expira em 5 minutos; veja a api_key no painel'), 'o token expira em 5 minutos; veja a api_key no painel')
+})

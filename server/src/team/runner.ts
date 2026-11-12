@@ -2204,9 +2204,15 @@ export function contentHashes(cwd: string, paths: string[]): Record<string, stri
   return hashes
 }
 
-/** Arquivos que a missão registrou e cujo conteúdo mudou desde então. Sem impressão registrada (missões antigas) não há como saber. */
-function driftedFiles(cwd: string, mission: Pick<MissionInfo, 'fileHashes'>): string[] {
+/**
+ * Arquivos que a missão registrou e cujo conteúdo mudou desde então. Arquivo registrado sem impressão
+ * (missão gravada antes da proteção SHA-256) não pode ser conferido: entra na lista e só é
+ * sobrescrito depois da confirmação do usuário, que grava a impressão atual.
+ */
+function driftedFiles(cwd: string, mission: Pick<MissionInfo, 'fileHashes' | 'files'>): string[] {
   const recorded = mission.fileHashes ?? {}
   const now = contentHashes(cwd, Object.keys(recorded))
-  return Object.keys(recorded).filter((p) => now[p] !== undefined && now[p] !== recorded[p])
+  const changed = Object.keys(recorded).filter((p) => now[p] !== undefined && now[p] !== recorded[p])
+  const unverifiable = (mission.files ?? []).filter((p) => !(p in recorded))
+  return [...new Set([...changed, ...unverifiable])]
 }

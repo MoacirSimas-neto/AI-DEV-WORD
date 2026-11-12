@@ -23,6 +23,9 @@ const LIST_LIMIT = 200
 const SECRET_PATTERNS: [RegExp, string][] = [
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[SEGREDO REMOVIDO]'],
   [/\b(sk|rk|pk)-[A-Za-z0-9_-]{16,}/g, '[SEGREDO REMOVIDO]'],
+  [/\b(sk|rk|pk)_(live|test)_[A-Za-z0-9]{16,}/g, '[SEGREDO REMOVIDO]'],
+  [/\bnpm_[A-Za-z0-9]{30,}/g, '[SEGREDO REMOVIDO]'],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[SEGREDO REMOVIDO]'],
   [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, '[SEGREDO REMOVIDO]'],
   [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, '[SEGREDO REMOVIDO]'],
   [/\bAIza[0-9A-Za-z_-]{30,}/g, '[SEGREDO REMOVIDO]'],
@@ -30,7 +33,8 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, '[SEGREDO REMOVIDO]'],
   [/\bAKIA[0-9A-Z]{16}\b/g, '[SEGREDO REMOVIDO]'],
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [SEGREDO REMOVIDO]'],
-  [/\b((?:password|passwd|pwd|senha|secret|token|api[_-]?key|client[_-]?secret)["']?\s*[:=]\s*)(["']?)(?!\[SEGREDO REMOVIDO\])[^\s"']{4,}\2/gi, '$1[SEGREDO REMOVIDO]'],
+  // O prefixo opcional cobre nomes de variável de ambiente (GOOGLE_API_KEY=, DB_PASSWORD:).
+  [/\b((?:[A-Za-z0-9]+_)*(?:password|passwd|pwd|senha|secret|token|api[_-]?key|client[_-]?secret)["']?\s*[:=]\s*)(["']?)(?!\[SEGREDO REMOVIDO\])[^\s"']{4,}\2/gi, '$1[SEGREDO REMOVIDO]'],
   [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, '$1[SEGREDO REMOVIDO]@'],
 ]
 

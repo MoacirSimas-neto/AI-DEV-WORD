@@ -603,6 +603,33 @@ test('repositório com alterações de fora da missão: a implementação não c
 })
 
 // Regressão da validação 10.6 (limitação da 10.4): o caminho já registrado não basta; o conteúdo também é conferido.
+test('missão sem impressão SHA-256 (gravada antes da proteção): arquivo registrado não é sobrescrito sem confirmação', async () => {
+  const w = await world()
+  w.lead.push(
+    proposalText({
+      steps: [stepJson('impl', 'dev', 'implement'), stepJson('revisar', 'qa', 'review', ['impl']), stepJson('impl2', 'dev', 'implement', ['revisar'])],
+    }),
+  )
+  const mission = await w.runner.start(w.task.id, { plannerId: 'architect' }, { mode: 'dynamic' })
+  await until(() => w.phase(mission.id) === 'awaiting_approval', 'proposta')
+  w.steps.revisar = () => {
+    // Banco antigo: a missão conhece api.ts, mas não tem a impressão do conteúdo.
+    w.tasks.updateMission(mission.id, { fileHashes: {} })
+    writeFileSync(path.join(w.dir, 'api.ts'), 'export const saldo = 42 // ajuste manual do usuário\n')
+    return { stdout: 'Revisei api.ts.' }
+  }
+  w.steps.impl2 = () => {
+    writeFileSync(path.join(w.dir, 'api.ts'), 'export const saldo = 0 // reescrito pelo Dev\n')
+    return { stdout: 'Reescrevi api.ts.' }
+  }
+  w.decide(mission.id, 'approve')
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'bloqueio')
+  assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'revisar'], 'a escrita seguinte não rodou')
+  assert.match(readFileSync(path.join(w.dir, 'api.ts'), 'utf8'), /ajuste manual do usuário/)
+  const state = await w.runner.recoveryState(w.project.id, mission.id)
+  assert.deepEqual(state.files.unknown, ['api.ts'], 'sem impressão, o arquivo precisa de confirmação')
+})
+
 test('arquivo da missão editado por fora entre passos: a próxima escrita não começa e a edição do usuário é preservada', async () => {
   const w = await world()
   w.lead.push(
