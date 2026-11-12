@@ -68,7 +68,11 @@ socket.on('data', (chunk: string) => {
   if (nl < 0) return
   clearTimeout(timer)
   const spec = JSON.parse(buffer.slice(0, nl)) as { file: string; args: string[]; verbatim: boolean }
+  // O CLI não precisa saber onde está o supervisor.
+  const env = { ...process.env }
+  delete env.AIDW_SUPERVISOR
   child = spawn(spec.file, spec.args, {
+    env,
     stdio: 'inherit',
     windowsHide: true,
     windowsVerbatimArguments: spec.verbatim,

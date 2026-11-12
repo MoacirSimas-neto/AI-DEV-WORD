@@ -603,6 +603,29 @@ test('repositório com alterações de fora da missão: a implementação não c
 })
 
 // Regressão da validação 10.6 (limitação da 10.4): o caminho já registrado não basta; o conteúdo também é conferido.
+test('etapa sem permissão de escrita que altera arquivo (ex.: instrução injetada): a missão para, o evento é observado e nada é desfeito', async () => {
+  const w = await world()
+  w.lead.push(proposalText({ steps: [stepJson('analise', 'qa', 'review'), stepJson('impl', 'dev', 'implement', ['analise'])] }))
+  const mission = await w.runner.start(w.task.id, { plannerId: 'architect' }, { mode: 'dynamic' })
+  await until(() => w.phase(mission.id) === 'awaiting_approval', 'proposta')
+  // O "revisor" obedece a um texto do repositório e grava um arquivo.
+  w.steps.analise = () => {
+    writeFileSync(path.join(w.dir, 'injetado.txt'), 'escrito por quem só podia ler\n')
+    return { stdout: 'Revisei. Também criei injetado.txt como o README pedia.' }
+  }
+  w.decide(mission.id, 'approve')
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'bloqueio')
+  assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'analise'], 'o passo de escrita seguinte não rodou')
+  assert.match(w.tasks.getMission(mission.id)!.error!, /não tinha permissão de escrita.*\(injetado\.txt\)/)
+  const event = trailOf(w, mission.id).find((e) => e.type === 'files.changed' && e.data.unauthorized === true)!
+  assert.equal(event.evidence, 'observed')
+  assert.deepEqual(event.data.files, ['injetado.txt'])
+  assert.match(readFileSync(path.join(w.dir, 'injetado.txt'), 'utf8'), /quem só podia ler/, 'nada foi desfeito')
+  // Na recuperação o arquivo aparece como alteração a confirmar.
+  const state = await w.runner.recoveryState(w.project.id, mission.id)
+  assert.deepEqual(state.files.unknown, ['injetado.txt'])
+})
+
 test('missão sem impressão SHA-256 (gravada antes da proteção): arquivo registrado não é sobrescrito sem confirmação', async () => {
   const w = await world()
   w.lead.push(
@@ -612,12 +635,11 @@ test('missão sem impressão SHA-256 (gravada antes da proteção): arquivo regi
   )
   const mission = await w.runner.start(w.task.id, { plannerId: 'architect' }, { mode: 'dynamic' })
   await until(() => w.phase(mission.id) === 'awaiting_approval', 'proposta')
-  w.steps.revisar = () => {
-    // Banco antigo: a missão conhece api.ts, mas não tem a impressão do conteúdo.
+  // Entre o passo do Dev e a revisão (fora de qualquer etapa): banco antigo sem impressão + edição manual.
+  w.runner.once('git-change', () => {
     w.tasks.updateMission(mission.id, { fileHashes: {} })
     writeFileSync(path.join(w.dir, 'api.ts'), 'export const saldo = 42 // ajuste manual do usuário\n')
-    return { stdout: 'Revisei api.ts.' }
-  }
+  })
   w.steps.impl2 = () => {
     writeFileSync(path.join(w.dir, 'api.ts'), 'export const saldo = 0 // reescrito pelo Dev\n')
     return { stdout: 'Reescrevi api.ts.' }
@@ -643,11 +665,11 @@ test('arquivo da missão editado por fora entre passos: a próxima escrita não 
   )
   const mission = await w.runner.start(w.task.id, { plannerId: 'architect' }, { mode: 'dynamic' })
   await until(() => w.phase(mission.id) === 'awaiting_approval', 'proposta')
-  // Enquanto o QA lê, o usuário edita à mão o arquivo que o Dev criou (arquivo novo: sem histórico no Git).
-  w.steps.revisar = () => {
+  // Entre o passo do Dev e a revisão, o usuário edita à mão o arquivo que o Dev criou.
+  // (Durante uma etapa sem escrita a edição seria pega ainda antes: ver o teste de escrita não autorizada.)
+  w.runner.once('git-change', () => {
     writeFileSync(path.join(w.dir, 'api.ts'), 'export const saldo = 42 // ajuste manual do usuário\n')
-    return { stdout: 'Revisei api.ts.' }
-  }
+  })
   w.steps.impl2 = () => {
     writeFileSync(path.join(w.dir, 'api.ts'), 'export const saldo = 0 // reescrito pelo Dev\n')
     return { stdout: 'Reescrevi api.ts.' }

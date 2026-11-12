@@ -1227,3 +1227,38 @@ test('saída ao vivo da missão: segredo fictício em pedaços não chega à tel
   assert.ok(!tasks.getMission(mission.id)!.plan.includes('0123456789abcdef'))
   runner.cancel(mission.id)
 })
+
+test('modo clássico: o planejador (sem permissão de escrita) que grava arquivo encerra a missão sem chegar ao Dev', async () => {
+  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-ro-')))
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp })
+  writeFileSync(path.join(tmp, 'init.txt'), 'init')
+  execFileSync('git', ['add', '.'], { cwd: tmp })
+  execFileSync('git', ['-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-qm', 'i'], { cwd: tmp })
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+  for (const a of registry.list()) await registry.check(a.id)
+  const roles: string[] = []
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    git: new GitService(),
+    launch: (cli, args) => {
+      roles.push(`${cli}:${args.join(' ')}`)
+      writeFileSync(path.join(tmp, 'plano-gravado.md'), 'o planejador não podia gravar\n')
+      return { done: Promise.resolve({ code: 0, stdout: '## Plano\nFeito.', stderr: '', timedOut: false }), kill: () => {} }
+    },
+  })
+  const task = tasks.create(projects.active()!.id, { title: 'T', description: '', priority: 'low', status: 'todo', agentId: null })
+  const mission = await runner.start(task.id)
+  for (let i = 0; i < 100 && tasks.getMission(mission.id)!.phase === 'planning'; i++) await new Promise((r) => setTimeout(r, 20))
+  const m = tasks.getMission(mission.id)!
+  assert.equal(m.phase, 'failed')
+  assert.match(m.error!, /não tinha permissão de escrita.*plano-gravado\.md/)
+  assert.equal(roles.length, 1, 'nenhuma outra etapa rodou')
+  assert.ok(!/workspace-write|auto_edit|accept-edits/.test(roles[0]), 'o planejador recebeu opções sem escrita')
+})

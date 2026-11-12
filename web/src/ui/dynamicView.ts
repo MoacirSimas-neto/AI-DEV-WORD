@@ -71,6 +71,7 @@ export const TRIGGER_LABEL: Record<string, string> = {
 export const BLOCK_REASON_LABEL: Record<string, string> = {
   interrupted: 'O app foi fechado durante a execução',
   dirty_repo: 'Há alterações no repositório que a missão não registrou',
+  unauthorized_write: 'Uma etapa sem permissão de escrita alterou arquivos',
   limit_reached: 'Um limite da missão foi atingido',
   invalid_proposal: 'O Tech Lead não entregou uma proposta válida',
   proposal_rejected: 'Proposta rejeitada sem passo aprovado para seguir',

@@ -217,6 +217,11 @@ interface Running {
   git?: GitRef
 }
 
+/** Etapa sem permissão de escrita alterou arquivos (detectado pelo backend). */
+class UnauthorizedWriteError extends Error {}
+
+/** Opções de CLI que dão permissão de escrita (montadas por getStepCliAndArgs, nunca pelo modelo). */
+const WRITE_ARGS = new Set(['workspace-write', 'auto_edit', 'accept-edits'])
 const errorText = (error: unknown) => redact(error instanceof Error ? error.message : String(error))
 
 /**
@@ -230,6 +235,8 @@ export class TeamRunner extends EventEmitter {
   private readonly projects: ProjectStore
   private readonly registry: AgentRegistry
   private readonly git: GitService
+  /** Missões paradas por escrita sem permissão: não escalam para o Tech Lead. */
+  private readonly securityStops = new Set<number>()
   private readonly launch: AgentLauncher
   private readonly configs?: AgentConfigStore
   private readonly memory?: MemoryStore
@@ -952,6 +959,10 @@ export class TeamRunner extends EventEmitter {
     const startedAt = Date.now()
     let launched = false
     let exited = false
+    // Permissão de escrita vem só do papel (args montados pelo backend). Sem ela, o backend confere
+    // depois se algum arquivo mudou: a garantia não depende de o CLI obedecer ao prompt.
+    const writes = args.some((a) => WRITE_ARGS.has(a))
+    const before = writes ? null : await this.fileSnapshot(cwd)
     try {
       const fullPrompt = cli === 'agy' ? prompt + AGY_HEADLESS_NOTICE : prompt
       if (passPromptAsArg && fullPrompt.length > 30_000) {
@@ -986,6 +997,22 @@ export class TeamRunner extends EventEmitter {
       const result = await run.proc.done.finally(() => live.end())
       run.proc = undefined
       exited = true
+      if (before && !run.cancelled) {
+        const touched = await this.changedSince(cwd, before)
+        if (touched.length) {
+          this.track(mission, 'files.changed', 'observed', `${touched.length} arquivo(s) mudaram durante uma etapa sem permissão de escrita (${name}).`, {
+            agentId,
+            trace,
+            key: '',
+            state: 'failed',
+            data: { stage, unauthorized: true, filesTotal: touched.length, files: touched.slice(0, MAX_EVENT_FILES), attribution: 'step-window' },
+          })
+          throw new UnauthorizedWriteError(
+            `${name}: a etapa não tinha permissão de escrita, mas ${touched.length} arquivo(s) mudaram enquanto ela rodava (${listPaths(touched)}). ` +
+              'Nada foi desfeito. Pode ter sido o CLI ou outro programa: confira as alterações antes de continuar.',
+          )
+        }
+      }
       const ok = result.code === 0 && !result.timedOut
       stepEvent(
         'cli.finished',
@@ -1026,9 +1053,33 @@ export class TeamRunner extends EventEmitter {
         stepEvent('cli.finished', run.cancelled ? 'cancelled' : 'failed', launched ? `CLI ${cli} falhou durante a execução.` : `CLI ${cli} não chegou a iniciar.`, { cli, launched, error: reason })
       }
       stepEvent(`${role}.finished`, run.cancelled ? 'cancelled' : 'failed', run.cancelled ? `${name}: etapa interrompida pelo cancelamento da missão.` : reason)
-      if (!run.cancelled) this.fail(missionId, agentId, errorText(error), trace)
+      if (!run.cancelled) {
+        // Sinal de segurança: para para o usuário, sem consultar outro agente nem seguir o plano.
+        if (error instanceof UnauthorizedWriteError && mission.mode === 'dynamic') {
+          this.securityStops.add(missionId)
+          this.block(missionId, errorText(error), 'unauthorized_write', agentId, trace)
+        } else this.fail(missionId, agentId, errorText(error), trace)
+      }
       return null
     }
+  }
+
+  /** Impressão dos arquivos com alterações no Git agora (null = sem Git: não há como conferir). */
+  private async fileSnapshot(cwd: string): Promise<Record<string, string> | null> {
+    try {
+      const status = await this.git.status(cwd)
+      return contentHashes(cwd, status.files.map((f) => f.path))
+    } catch {
+      return null
+    }
+  }
+
+  /** Arquivos que entraram, saíram ou mudaram de conteúdo desde a impressão. */
+  private async changedSince(cwd: string, before: Record<string, string>): Promise<string[]> {
+    const after = await this.fileSnapshot(cwd)
+    if (!after) return []
+    const paths = new Set([...Object.keys(before), ...Object.keys(after)])
+    return [...paths].filter((p) => before[p] !== after[p]).sort()
   }
 
   private fail(missionId: number, agentId: string, message: string, trace?: Trace) {
@@ -1531,6 +1582,10 @@ export class TeamRunner extends EventEmitter {
     const text = await this.step(mission.id, agentId, cli.cli, cli.args, cwd, prompt, cli.model, cli.effort, cli.passPromptAsArg, trace)
     if (text === null) {
       if (run.cancelled || !OPEN_PHASES.includes(this.requireMission(mission.id).phase)) return false
+      if (this.securityStops.delete(mission.id)) {
+        if (plans.getStep(step.id)?.status === 'running') plans.finishStep(step.id, 'failed', { error: this.requireMission(mission.id).error ?? 'Escrita sem permissão.' })
+        return false
+      }
       if (plans.getStep(step.id)?.status === 'running') plans.finishStep(step.id, 'failed', { error: 'O passo terminou sem resposta.' })
       // A falha foi observada pelo backend; o passo não é repetido sozinho: o Tech Lead propõe e o usuário decide.
       const failed = plans.getStep(step.id)!
