@@ -527,7 +527,13 @@ export function ConceptOfficeStudio() {
                     title={`${meta.name} (${meta.role}) · Clique para ver terminal`}
                   >
                     <div className="dock-mini-portrait">
-                      <AgentPortrait agentId={ag.id} fullBody={false} animMode="idle" />
+                      <AgentPortrait
+                        agentId={ag.id}
+                        preset={ag.avatarPreset}
+                        roleOrName={meta.role ? `${meta.name} ${meta.role}` : meta.name}
+                        fullBody={false}
+                        animMode="idle"
+                      />
                       <span className={`status-mini-dot state-${ag.state}`} />
                     </div>
                     <div className="dock-pill-info">
@@ -579,7 +585,12 @@ export function ConceptOfficeStudio() {
                 {/* Cabeçalho do Agente */}
                 <div className="agent-clean-head">
                   <div className="agent-clean-portrait">
-                    <AgentPortrait agentId={selectedDetail.id} fullBody animMode="idle" />
+                    <AgentPortrait
+                      agentId={selectedDetail.id}
+                      roleOrName={selectedDetail.role ? `${selectedDetail.name} ${selectedDetail.role}` : selectedDetail.name}
+                      fullBody
+                      animMode="idle"
+                    />
                   </div>
                   <div className="agent-clean-info">
                     <div className="info-row-top">

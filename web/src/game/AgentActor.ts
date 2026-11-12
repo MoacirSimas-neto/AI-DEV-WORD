@@ -62,7 +62,7 @@ export class AgentActor {
     this.agent = agent
     this.station = station
     this.id = agent.id
-    this.currentPreset = agent.avatarPreset ?? agent.id
+    this.currentPreset = `${agent.avatarPreset ?? ''}:${agent.id}:${agent.role ?? ''}:${agent.name ?? ''}`
 
     this.rebuildTextures()
     if (!scene.anims.exists(this.key('walk'))) {
@@ -168,7 +168,7 @@ export class AgentActor {
     }
     this.label.setText(agent.name)
     this.syncPlate()
-    const nextPreset = agent.avatarPreset ?? agent.id
+    const nextPreset = `${agent.avatarPreset ?? ''}:${agent.id}:${agent.role ?? ''}:${agent.name ?? ''}`
     if (nextPreset !== this.currentPreset) {
       this.currentPreset = nextPreset
       this.rebuildTextures()
@@ -186,7 +186,8 @@ export class AgentActor {
   }
 
   private rebuildTextures() {
-    const look = lookFor(this.agent.id, this.agent.avatarPreset)
+    const roleOrName = this.agent.role ? `${this.agent.name} ${this.agent.role}` : this.agent.name
+    const look = lookFor(this.agent.id, this.agent.avatarPreset, roleOrName)
     for (const frame of ['stand', 'step', 'stepAlt', 'blink', 'work1', 'work2'] as Frame[]) {
       makePixelTexture(this.scene, this.key(frame), characterRows(look, frame), paletteFor(look))
     }

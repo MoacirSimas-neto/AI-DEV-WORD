@@ -382,6 +382,7 @@ export function TaskPanel({
                       <AgentPortrait
                         agentId={ag.id}
                         preset={cfg?.avatarPreset ?? ag.avatarPreset}
+                        roleOrName={`${ag.name} ${ag.role} ${cfg?.specializationId ?? ag.specializationId ?? ''}`}
                         dimmed={isOffline}
                       />
                       <div className="team-slot-meta">

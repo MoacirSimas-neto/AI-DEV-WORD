@@ -156,7 +156,13 @@ export function StudioOfficeView({
                   title={`${ag.name} (${roleDisplay}) · Clique para abrir terminal`}
                 >
                   <div className="dock-mini-portrait">
-                    <AgentPortrait agentId={ag.id} fullBody={false} animMode="idle" />
+                    <AgentPortrait
+                      agentId={ag.id}
+                      preset={ag.avatarPreset}
+                      roleOrName={ag.role ? `${ag.name} ${ag.role}` : ag.name}
+                      fullBody={false}
+                      animMode="idle"
+                    />
                     <span className={`status-mini-dot state-${ag.state}`} />
                   </div>
                   <div className="dock-pill-info">

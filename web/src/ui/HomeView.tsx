@@ -267,6 +267,7 @@ export function HomeView({
                     <AgentPortrait
                       agentId={agent.id}
                       preset={cfg?.avatarPreset ?? agent.avatarPreset}
+                      roleOrName={`${agent.name} ${agent.role}`}
                       dimmed={agent.state === 'offline'}
                     />
                     <div className="cc-agent-id">

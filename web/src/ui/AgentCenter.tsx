@@ -664,6 +664,7 @@ export function AgentCenter({
                   <AgentPortrait
                     agentId={editingAgentId ?? 'specialist'}
                     preset={avatarPreset}
+                    roleOrName={`${name} ${role}`}
                     fullBody
                     animMode={previewAnim}
                     className="portrait-fullbody"
@@ -753,6 +754,7 @@ export function AgentCenter({
                 <AgentPortrait
                   agentId={cfg.agentId}
                   preset={cfg.avatarPreset}
+                  roleOrName={`${cfg.name ?? ''} ${cfg.role ?? ''}`}
                   dimmed={!isAct || liveAgent?.state === 'offline'}
                 />
                 <div className="agent-card-title-col">

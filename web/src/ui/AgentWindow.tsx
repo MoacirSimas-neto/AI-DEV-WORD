@@ -43,6 +43,7 @@ export function AgentWindow({
         <AgentPortrait
           agentId={agent.id}
           preset={config?.avatarPreset ?? agent.avatarPreset}
+          roleOrName={`${agent.name} ${agent.role} ${config?.specializationId ?? agent.specializationId ?? ''}`}
           dimmed={agent.state === 'offline'}
         />
         <div className="window-id">

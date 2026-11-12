@@ -16,6 +16,7 @@ const ANIM_FRAMES: Record<Exclude<PreviewAnimMode, 'static'>, { frames: Frame[];
 interface Props {
   agentId: string
   preset?: AvatarPreset
+  roleOrName?: string
   dimmed?: boolean
   fullBody?: boolean
   animMode?: PreviewAnimMode
@@ -26,6 +27,7 @@ interface Props {
 export function AgentPortrait({
   agentId,
   preset,
+  roleOrName,
   dimmed = false,
   fullBody = false,
   animMode = 'static',
@@ -37,7 +39,7 @@ export function AgentPortrait({
   useEffect(() => {
     const ctx = canvas.current?.getContext('2d')
     if (!ctx) return
-    const look = lookFor(agentId, preset)
+    const look = lookFor(agentId, preset, roleOrName)
     const palette = paletteFor(look)
 
     const drawFrame = (frame: Frame) => {
@@ -57,7 +59,7 @@ export function AgentPortrait({
     }, seq.intervalMs)
 
     return () => clearInterval(timer)
-  }, [agentId, preset, height, fullBody, animMode])
+  }, [agentId, preset, roleOrName, height, fullBody, animMode])
 
   const baseClass = fullBody ? 'portrait portrait-fullbody' : 'portrait'
   return (
