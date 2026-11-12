@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { isOpenMission } from '../../shared/missionPhases.ts'
 import type { WorldAction } from './game/WorldBridge.ts'
 import { useGitStatus } from './net/useGitStatus.ts'
 import { useServer } from './net/useServer.ts'
@@ -88,7 +89,7 @@ function App() {
       : []
   const activeMissionsCount = Array.isArray(missions)
     ? missions.filter((m) =>
-        ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
+        isOpenMission(m),
       ).length
     : 0
 

@@ -31,10 +31,14 @@ export class OfficeScene extends Phaser.Scene {
     this.bridge.on('agents', this.syncAgents, this)
     this.bridge.on('page', this.onPageChange, this)
     this.bridge.on('selected', this.syncSelection, this)
+    this.bridge.on('team', this.syncTeam, this)
+    this.bridge.on('forward', this.showForward, this)
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.bridge.off('agents', this.syncAgents, this)
       this.bridge.off('page', this.onPageChange, this)
       this.bridge.off('selected', this.syncSelection, this)
+      this.bridge.off('team', this.syncTeam, this)
+      this.bridge.off('forward', this.showForward, this)
     })
 
     this.syncAgents(this.bridge.agents)
@@ -68,7 +72,23 @@ export class OfficeScene extends Phaser.Scene {
       this.actors.set(agent.id, actor)
     }
     this.syncSelection(this.bridge.selectedId)
+    this.syncTeam(this.bridge.team)
     this.renderDebug(placement)
+  }
+
+  private syncTeam(team: string[]) {
+    for (const actor of this.actors.values()) actor.setTeamMember(team.includes(actor.id))
+  }
+
+  /** Linha breve entre quem entregou e quem recebeu um resultado; some sozinha. Agentes fora da página não aparecem. */
+  private showForward(from: string, to: string) {
+    const a = this.actors.get(from)
+    const b = this.actors.get(to)
+    if (!a || !b) return
+    const line = this.add.graphics().setDepth(10_400)
+    line.lineStyle(3, 0x38bdf8, 0.9).lineBetween(a.position.x, a.position.y - 30, b.position.x, b.position.y - 30)
+    line.fillStyle(0x38bdf8, 1).fillCircle(b.position.x, b.position.y - 30, 5)
+    this.tweens.add({ targets: line, alpha: 0, delay: 700, duration: 900, onComplete: () => line.destroy() })
   }
 
   private renderDebug(placement: ReturnType<typeof computeOfficePlacement>) {

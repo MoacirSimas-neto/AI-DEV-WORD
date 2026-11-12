@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
+import { isOpenMission } from '../../../shared/missionPhases.ts'
 import { computeMissionProgress } from '../../../shared/missionProgress.ts'
 import type { AgentConfig, AgentInfo, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 import { ClarificationBox } from './ClarificationBox.tsx'
+import { DynamicMissionMonitor } from './DynamicMissionMonitor.tsx'
+import { DYNAMIC_PHASE_LABEL } from './dynamicView.ts'
 
 interface Props {
   missions: MissionInfo[]
@@ -54,7 +57,7 @@ export function MissionMonitor({
     : missions
 
   const runningMission = projectMissions.find((m) =>
-    ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
+    isOpenMission(m),
   )
 
   const currentMission =
@@ -87,7 +90,12 @@ export function MissionMonitor({
         <button type="button" className="btn-expand-sidebar" onClick={onToggleCollapse}>
           <span className="expand-icon">»</span>
           <span className="expand-text">
-            Missão {runningMission ? `#${runningMission.id} (${progress.percent}%)` : ''}
+            Missão{' '}
+            {runningMission
+              ? runningMission.mode === 'dynamic'
+                ? `#${runningMission.id} (${DYNAMIC_PHASE_LABEL[runningMission.phase] ?? runningMission.phase})`
+                : `#${runningMission.id} (${progress.percent}%)`
+              : ''}
           </span>
         </button>
       </aside>
@@ -138,12 +146,25 @@ export function MissionMonitor({
         <div className="mission-empty-state">
           <p className="mission-empty-title">Nenhuma missão iniciada neste projeto</p>
           <p className="mission-empty-desc">
-            Crie uma tarefa e acione o <strong>Modo Equipe</strong> para que Arquiteto, Dev e QA trabalhem em sequência supervisionada.
+            Crie uma tarefa e inicie uma missão no modo <strong>Clássico</strong> (Arquiteto, Dev e QA em sequência) ou{' '}
+            <strong>Dinâmico</strong> (o Tech Lead propõe a equipe e os passos para a sua aprovação).
           </p>
           <button type="button" onClick={onOpenTasks}>
             Abrir Tarefas / Iniciar Missão
           </button>
         </div>
+      ) : currentMission.mode === 'dynamic' ? (
+        <DynamicMissionMonitor
+          mission={currentMission}
+          task={linkedTask ?? null}
+          agents={agents}
+          configs={configs}
+          online={online}
+          send={send}
+          subscribe={subscribe}
+          liveOutput={liveOutput[currentMission.id]}
+          onOpenObservability={onOpenObservability ? () => onOpenObservability(currentMission.id) : undefined}
+        />
       ) : (
         <>
           {/* Cabeçalho da missão selecionada */}

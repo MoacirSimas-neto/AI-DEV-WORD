@@ -46,6 +46,7 @@ export class AgentActor {
   private readonly bubble: Phaser.GameObjects.Text
   private readonly label: Phaser.GameObjects.Text
   private readonly hoverTip: Phaser.GameObjects.Text
+  private readonly teamBadge: Phaser.GameObjects.Text
   private readonly overlay: Phaser.GameObjects.Container
   private readonly blinkTimer: Phaser.Time.TimerEvent
   private state: AgentState | null = null
@@ -139,10 +140,23 @@ export class AgentActor {
       .setOrigin(0.5, 1)
       .setVisible(false)
 
+    this.teamBadge = scene.add
+      .text(0, 6, 'EQUIPE', {
+        fontFamily: FONT,
+        fontSize: '8.5px',
+        fontStyle: '800',
+        color: '#052e16',
+        backgroundColor: '#34d399',
+        padding: { x: 4, y: 1 },
+        resolution: 2,
+      })
+      .setOrigin(0.5, 0)
+      .setVisible(false)
+
     // Agentes sempre nascem posicionados corretamente no assento da estação
     this.root = scene.add.container(station.seat.x, station.seat.y, [this.ring, shadow, this.sprite])
     this.root.setDepth(station.seat.y)
-    this.overlay = scene.add.container(this.root.x, this.root.y, [this.label, this.bubble, this.hoverTip]).setDepth(10_500)
+    this.overlay = scene.add.container(this.root.x, this.root.y, [this.label, this.bubble, this.hoverTip, this.teamBadge]).setDepth(10_500)
 
     this.syncPlate()
 
@@ -182,6 +196,16 @@ export class AgentActor {
     }
     if (this.hovered) this.updateHoverTip()
     this.setState(agent.state)
+  }
+
+  /** Participa da missão dinâmica aberta (vem das propostas aprovadas gravadas no backend). */
+  setTeamMember(member: boolean) {
+    this.teamBadge.setVisible(member)
+  }
+
+  /** Posição atual no mundo (para indicadores entre agentes). */
+  get position() {
+    return { x: this.root.x, y: this.root.y }
   }
 
   setSelected(selected: boolean) {

@@ -1,4 +1,5 @@
 import { computeMissionProgress } from '../../../shared/missionProgress.ts'
+import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type {
   ActivityEntry,
   AgentConfig,
@@ -53,7 +54,7 @@ export function HomeView({
     (a) => a.session || ['working', 'planning', 'reviewing'].includes(a.state),
   ).length
   const activeMissions = missions.filter((m) =>
-    ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
+    isOpenMission(m),
   )
   const completedMissionsCount = missions.filter((m) => m.phase === 'done').length
   const pendingTasksCount = tasks.filter((t) => t.status !== 'done').length

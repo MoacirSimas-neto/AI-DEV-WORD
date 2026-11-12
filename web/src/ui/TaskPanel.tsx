@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useState } from 'react'
+import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type {
   AgentConfig,
   AgentInfo,
@@ -16,6 +17,8 @@ import { MAX_MISSION_SPECIALISTS } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
 import { ClarificationBox } from './ClarificationBox.tsx'
+import { DynamicMissionMonitor } from './DynamicMissionMonitor.tsx'
+import { DYNAMIC_PHASE_LABEL, startMessage } from './dynamicView.ts'
 
 interface Props {
   tasks: TaskInfo[]
@@ -57,6 +60,10 @@ export function TaskPanel({
   const [liveOutput, setLiveOutput] = useState<{ missionId: number; text: string } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
+  // Modo da missão: clássico (pipeline) ou dinâmico (Tech Lead propõe a equipe e os passos).
+  const [missionMode, setMissionMode] = useState<'pipeline' | 'dynamic'>('pipeline')
+  const [leadId, setLeadId] = useState<string>('architect')
+
   // Seleção de equipe para Modo Equipe
   const [useDefaultTeam, setUseDefaultTeam] = useState<boolean>(true)
   const [plannerId, setPlannerId] = useState<string>('architect')
@@ -86,7 +93,7 @@ export function TaskPanel({
   const activeMission = missions.find(
     (m) =>
       m.projectId === activeProjectId &&
-      ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
+      isOpenMission(m),
   )
 
   const planners = agents.filter(
@@ -133,7 +140,9 @@ export function TaskPanel({
     !agents.some((a) => a.id === effectiveDevId) ||
     !agents.some((a) => a.id === effectiveQaId)
 
-  const teamReady = !missingRoleSelection && offlineTeamAgents.length === 0
+  const lead = agents.find((a) => a.id === leadId)
+  const dynamic = missionMode === 'dynamic'
+  const teamReady = dynamic ? Boolean(lead && lead.state !== 'offline') : !missingRoleSelection && offlineTeamAgents.length === 0
 
   const verifyTeamClis = () => {
     for (const id of new Set([effectivePlannerId, effectiveDevId, effectiveQaId, ...specialists.map(s => s.agentId)])) {
@@ -143,6 +152,10 @@ export function TaskPanel({
 
   const startMissionForTask = (taskId: number) => {
     setNotice(null)
+    if (dynamic) {
+      send(startMessage(taskId, 'dynamic', leadId))
+      return
+    }
     const team: MissionTeamSelection | undefined = useDefaultTeam
       ? undefined
       : {
@@ -239,8 +252,24 @@ export function TaskPanel({
         </div>
       )}
 
+      {/* Missão dinâmica ativa: propostas, passos e decisões */}
+      {activeMission?.mode === 'dynamic' && (
+        <section className="mission-card">
+          <DynamicMissionMonitor
+            mission={activeMission}
+            task={tasks.find((t) => t.id === activeMission.taskId) ?? null}
+            agents={agents}
+            configs={configs}
+            online={online}
+            send={send}
+            subscribe={subscribe}
+            liveOutput={liveOutput?.missionId === activeMission.id ? liveOutput.text : undefined}
+          />
+        </section>
+      )}
+
       {/* Missao Ativa / Modo Equipe */}
-      {activeMission && (
+      {activeMission && activeMission.mode !== 'dynamic' && (
         <section className="mission-card">
           <div className="mission-head">
             <h3>Missão em Andamento #{activeMission.id}</h3>
@@ -326,8 +355,52 @@ export function TaskPanel({
         </section>
       )}
 
-      {/* Seletor de Equipe Responsável para Modo Equipe */}
+      {/* Modo da missão */}
       {activeProjectId && !activeMission && (
+        <section className="mode-selector" aria-label="Modo da missão">
+          <h3>Como a equipe vai trabalhar</h3>
+          <div className="mode-options" role="radiogroup">
+            <label className={`mode-option ${!dynamic ? 'is-selected' : ''}`}>
+              <input type="radio" name="mission-mode" checked={!dynamic} onChange={() => setMissionMode('pipeline')} />
+              <span>
+                <strong>Clássico</strong>
+                <small>Equipe fixa em sequência: planejamento, desenvolvimento e revisão QA. Você aprova o plano uma vez.</small>
+              </span>
+            </label>
+            <label className={`mode-option ${dynamic ? 'is-selected' : ''}`}>
+              <input type="radio" name="mission-mode" checked={dynamic} onChange={() => setMissionMode('dynamic')} />
+              <span>
+                <strong>Dinâmico</strong>
+                <small>
+                  O Tech Lead propõe a equipe e os passos, e replaneja quando algo trava. Toda mudança de equipe e todo plano novo
+                  esperam a sua aprovação. Pode fazer mais chamadas aos CLIs que o modo clássico.
+                </small>
+              </span>
+            </label>
+          </div>
+          {dynamic && (
+            <div className="mode-lead-row">
+              <label htmlFor="dyn-lead">Tech Lead</label>
+              <select id="dyn-lead" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
+                {planners.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.state === 'offline' ? 'CLI offline' : 'disponível'})
+                  </option>
+                ))}
+              </select>
+              {!teamReady && (
+                <button type="button" className="btn-quiet btn-xs" disabled={!online} onClick={() => send({ type: 'check-cli', agentId: leadId })}>
+                  Verificar CLI
+                </button>
+              )}
+              <p className="dyn-dim">O objetivo da missão é a tarefa escolhida abaixo (título e descrição).</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Seletor de Equipe Responsável para Modo Equipe */}
+      {activeProjectId && !activeMission && !dynamic && (
         <section className="team-selector-box" aria-label="Equipe responsável pela missão">
           <div className="team-selector-head">
             <div>
@@ -610,13 +683,15 @@ export function TaskPanel({
                         type="button"
                         disabled={!online || !teamReady}
                         title={
-                          teamReady
-                            ? `Iniciar missão com ${effectivePlannerId} → ${effectiveDevId} → ${effectiveQaId}`
-                            : 'Verifique a disponibilidade do CLI da equipe selecionada antes de iniciar'
+                          !teamReady
+                            ? 'Verifique a disponibilidade do CLI antes de iniciar'
+                            : dynamic
+                              ? `Iniciar missão dinâmica com ${lead?.name ?? leadId} como Tech Lead`
+                              : `Iniciar missão com ${effectivePlannerId} → ${effectiveDevId} → ${effectiveQaId}`
                         }
                         onClick={() => startMissionForTask(t.id)}
                       >
-                        Modo Equipe
+                        {dynamic ? 'Missão dinâmica' : 'Modo Equipe'}
                       </button>
                     )}
                     <button type="button" className="btn-quiet" onClick={() => startEdit(t)}>
@@ -659,7 +734,7 @@ function phaseLabel(mission: MissionInfo) {
     case 'reviewing':
       return `Revisando (${qaName})`
     default:
-      return mission.phase
+      return DYNAMIC_PHASE_LABEL[mission.phase] ?? mission.phase
   }
 }
 

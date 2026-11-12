@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { DynamicTopTrack } from './DynamicTopTrack.tsx'
+import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type { AgentInfo, GitStatus, MissionInfo, TaskInfo, Workspace, ProjectInfo } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 
@@ -63,7 +65,7 @@ export function StudioTopBar({
 
   // Identifica missão ativa para exibir na esteira
   const activeMission = missions.find((m) =>
-    ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
+    isOpenMission(m),
   )
   const activeTask = activeMission ? tasks.find((t) => t.id === activeMission.taskId) : null
 
@@ -212,7 +214,16 @@ export function StudioTopBar({
 
       {/* 2. Centro: Esteira Visual de Missão / CI-CD */}
       <div className="topbar-center">
-        {activeMission ? (
+        {activeMission?.mode === 'dynamic' ? (
+          <DynamicTopTrack
+            mission={activeMission}
+            title={activeTask?.title ?? 'Missão dinâmica'}
+            online={online}
+            send={send}
+            subscribe={subscribe}
+            onSelectAgent={onSelectAgent}
+          />
+        ) : activeMission ? (
           <div className="pipeline-container">
             <div className="pipeline-meta-row">
               <span className="pipeline-title">

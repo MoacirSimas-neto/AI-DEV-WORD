@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type { AgentConfig, AgentInfo, GitStatus, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
 import type { WorldAction } from '../game/WorldBridge.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
@@ -8,6 +9,8 @@ import { AgentWindow } from './AgentWindow.tsx'
 import { GitPanel } from './GitPanel.tsx'
 import { MissionMonitor } from './MissionMonitor.tsx'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
+import { useMissionEvents, usePlan } from '../net/useMission.ts'
+import { agentForwards, teamView } from './dynamicView.ts'
 
 interface Props {
   agents: AgentInfo[]
@@ -81,8 +84,34 @@ export function StudioOfficeView({
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null
   const selectedAgentConfig = selectedAgent ? configs.find((c) => c.agentId === selectedAgent.id) : undefined
   const activeMission = missions.find((m) =>
-    ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
+    isOpenMission(m),
   )
+
+  // Equipe da missão dinâmica aberta: derivada das propostas aprovadas que o backend gravou.
+  const dynamicMission = activeMission?.mode === 'dynamic' ? activeMission : null
+  const plan = usePlan(send, subscribe, online, dynamicMission?.projectId ?? null, dynamicMission?.id ?? null)
+  const events = useMissionEvents(send, subscribe, online, dynamicMission?.projectId ?? null, dynamicMission?.id ?? null)
+  const team = dynamicMission && plan.loaded ? teamView(dynamicMission.plannerId || 'architect', plan.proposals) : { active: [], released: [] }
+  const lastForward = agentForwards(events).at(-1) ?? null
+  const seenForward = useRef<{ mission: number | null; id: number | null }>({ mission: null, id: null })
+  const [forward, setForward] = useState<typeof lastForward>(null)
+  useEffect(() => {
+    const seen = seenForward.current
+    const missionId = dynamicMission?.id ?? null
+    if (seen.mission !== missionId) {
+      // Outra missão: o histórico já carregado não vira animação.
+      seenForward.current = { mission: missionId, id: events.length ? (lastForward?.id ?? 0) : null }
+      return
+    }
+    if (seen.id === null) {
+      if (events.length) seen.id = lastForward?.id ?? 0
+      return
+    }
+    if (lastForward && lastForward.id > seen.id) {
+      seen.id = lastForward.id
+      setForward(lastForward)
+    }
+  }, [dynamicMission?.id, events.length, lastForward])
 
   const handleSelectAgent = useCallback(
     (id: string) => {
@@ -162,6 +191,8 @@ export function StudioOfficeView({
             selectedId={selectedAgentId}
             onSelect={handleSelectAgent}
             onAction={onAction}
+            team={team.active}
+            forward={forward}
           />
         </ErrorBoundary>
 
@@ -171,14 +202,16 @@ export function StudioOfficeView({
             {agents.map((ag) => {
               const isSelected = selectedAgentId === ag.id
               const roleDisplay = formatDockRole(ag)
+              const inTeam = team.active.includes(ag.id)
+              const released = team.released.includes(ag.id)
 
               return (
                 <button
                   key={ag.id}
                   type="button"
-                  className={`dock-agent-pill ${isSelected ? 'is-selected' : ''} state-${ag.state}`}
+                  className={`dock-agent-pill ${isSelected ? 'is-selected' : ''} state-${ag.state} ${inTeam ? 'is-team' : ''} ${released ? 'is-released' : ''}`}
                   onClick={() => handleSelectAgent(ag.id)}
-                  title={`${ag.name} · ${ag.role || roleDisplay} (Clique para abrir terminal)`}
+                  title={`${ag.name} · ${ag.role || roleDisplay}${inTeam ? ' · na equipe da missão' : released ? ' · dispensado da missão' : ''} (Clique para abrir terminal)`}
                 >
                   <div className="dock-mini-portrait">
                     <AgentPortrait
@@ -195,7 +228,11 @@ export function StudioOfficeView({
                       <strong className="dock-pill-name">{ag.name}</strong>
                       {ag.state === 'working' && <span className="dock-sparkle">⚡</span>}
                     </div>
-                    <span className="dock-pill-role">{roleDisplay}</span>
+                    <span className="dock-pill-role">
+                      {roleDisplay}
+                      {inTeam && <span className="dock-team-tag">equipe</span>}
+                      {released && <span className="dock-team-tag dock-team-released">dispensado</span>}
+                    </span>
                   </div>
                 </button>
               )

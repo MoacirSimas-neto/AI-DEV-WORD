@@ -12,6 +12,8 @@ export class WorldBridge extends Phaser.Events.EventEmitter {
   agents: AgentInfo[] = []
   selectedId: string | null = null
   specialistPage = 0
+  /** Participantes da missão dinâmica aberta (vazio = nenhuma missão dinâmica). */
+  team: string[] = []
 
   setAgents(agents: AgentInfo[]) {
     this.agents = agents
@@ -26,6 +28,16 @@ export class WorldBridge extends Phaser.Events.EventEmitter {
   setSpecialistPage(page: number) {
     this.specialistPage = page
     this.emit('page', page)
+  }
+
+  setTeam(team: string[]) {
+    this.team = team
+    this.emit('team', team)
+  }
+
+  /** Um resultado real foi encaminhado de um agente para outro (evento result.forwarded). */
+  pulse(from: string, to: string) {
+    this.emit('forward', from, to)
   }
 
   triggerAction(action: WorldAction) {

@@ -11,10 +11,14 @@ interface Props {
   /** Precisa ser estável (ex.: useCallback), pois recria o jogo se mudar. */
   onSelect: (id: string) => void
   onAction?: (action: WorldAction) => void
+  /** Participantes da missão dinâmica aberta. */
+  team?: string[]
+  /** Último encaminhamento real de contexto entre dois agentes. */
+  forward?: { id: number; from: string; to: string } | null
 }
 
 /** Monta o jogo Phaser uma vez e repassa as props para a cena pela WorldBridge. */
-export function PhaserGame({ agents, selectedId, onSelect, onAction }: Props) {
+export function PhaserGame({ agents, selectedId, onSelect, onAction, team, forward }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const bridgeRef = useRef<WorldBridge | null>(null)
   const onSelectRef = useRef(onSelect)
@@ -33,6 +37,7 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction }: Props) {
     bridge.agents = agents
     bridge.selectedId = selectedId
     bridge.specialistPage = placement.page
+    bridge.team = team ?? []
     bridge.on('select', (id: string) => onSelectRef.current?.(id))
     bridge.on('action', (action: WorldAction) => onActionRef.current?.(action))
     bridgeRef.current = bridge
@@ -74,6 +79,16 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction }: Props) {
   useEffect(() => {
     bridgeRef.current?.setSelected(selectedId)
   }, [selectedId])
+
+  // Só muda a cena quando a composição muda de fato (a lista chega como array novo a cada render).
+  const teamKey = (team ?? []).join(',')
+  useEffect(() => {
+    bridgeRef.current?.setTeam(teamKey ? teamKey.split(',') : [])
+  }, [teamKey])
+
+  useEffect(() => {
+    if (forward) bridgeRef.current?.pulse(forward.from, forward.to)
+  }, [forward])
 
   useEffect(() => {
     bridgeRef.current?.setSpecialistPage(placement.page)

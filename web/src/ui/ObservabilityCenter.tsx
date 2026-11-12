@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
+import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type {
   AgentConfig,
   AgentInfo,
@@ -10,7 +11,13 @@ import type {
   SkillInfo,
   Workspace,
 } from '../../../shared/protocol.ts'
+import { usePlan } from '../net/useMission.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
+import { COORDINATION_EVENTS, currentPlanSteps, EVENT_LABEL, MODE_LABEL, STEP_STATUS_LABEL } from './dynamicView.ts'
+
+/** Eventos que mostram quem entregou o quê a quem (aba Fluxo). */
+const FLOW_EVENTS = new Set(['task.delegated', 'result.forwarded', 'plan.revised', 'team.joined', 'team.released', 'replan.triggered'])
+const COORDINATION_FILTER = '__coordination'
 
 interface Props {
   workspace: Workspace
@@ -94,7 +101,7 @@ export function ObservabilityCenter({
   const defaultMissionId = useMemo(() => {
     if (initialMissionId) return initialMissionId
     const running = projectMissions.find((m) =>
-      ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
+      isOpenMission(m),
     )
     return running?.id ?? projectMissions[0]?.id ?? null
   }, [initialMissionId, projectMissions])
@@ -154,6 +161,8 @@ export function ObservabilityCenter({
   const currentMission = useMemo(() => {
     return projectMissions.find((m) => m.id === selectedMissionId) ?? null
   }, [projectMissions, selectedMissionId])
+  // Passos reais da missão dinâmica (a aba Fluxo não usa sequência fixa para ela).
+  const plan = usePlan(send, subscribe, online, selectedProjectId, currentMission?.mode === 'dynamic' ? currentMission.id : null)
 
   // Lista de Agentes participantes da missão atual
   const participatingAgentIds = useMemo(() => {
@@ -165,6 +174,8 @@ export function ObservabilityCenter({
     if (currentMission.specialists) {
       for (const s of currentMission.specialists) ids.add(s.agentId)
     }
+    // Inclui quem entrou durante uma missão dinâmica.
+    for (const id of Object.keys(currentMission.teamSnapshot ?? {})) ids.add(id)
     // Eventos podem ter agentes que participaram
     for (const e of events) {
       if (e.agentId) ids.add(e.agentId)
@@ -183,7 +194,9 @@ export function ObservabilityCenter({
     return list.filter((ev) => {
       if (selectedAgentId && ev.agentId !== selectedAgentId) return false
       if (selectedEvidenceFilter !== 'all' && ev.evidence !== selectedEvidenceFilter) return false
-      if (selectedTypeFilter !== 'all' && ev.type !== selectedTypeFilter) return false
+      if (selectedTypeFilter === COORDINATION_FILTER) {
+        if (!COORDINATION_EVENTS.has(ev.type)) return false
+      } else if (selectedTypeFilter !== 'all' && ev.type !== selectedTypeFilter) return false
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase()
         const matchSummary = ev.summary.toLowerCase().includes(q)
@@ -405,9 +418,10 @@ export function ObservabilityCenter({
                 onChange={(e) => setSelectedTypeFilter(e.target.value)}
               >
                 <option value="all">Todos os tipos ({availableEventTypes.length})</option>
+                <option value={COORDINATION_FILTER}>Coordenação dinâmica (propostas, decisões, equipe, passos)</option>
                 {availableEventTypes.map((t) => (
                   <option key={t} value={t}>
-                    {t}
+                    {EVENT_LABEL[t] ? `${EVENT_LABEL[t]} · ${t}` : t}
                   </option>
                 ))}
               </select>
@@ -480,7 +494,9 @@ export function ObservabilityCenter({
                                 {agentCfg?.name || ev.agentId}
                               </span>
                             )}
-                            <span className="obs-type-tag">{ev.type}</span>
+                            <span className="obs-type-tag" title={ev.type}>
+                              {EVENT_LABEL[ev.type] ?? ev.type}
+                            </span>
                             <span className={`tag tag-${stLabel.tone}`}>{stLabel.label}</span>
                             <span
                               className={`obs-evidence-badge ${evMeta.badgeClass}`}
@@ -703,75 +719,94 @@ export function ObservabilityCenter({
             Sequência verificada de participantes, correlação de tarefas e encaminhamento de contexto.
           </p>
 
-          <div className="obs-flow-track">
-            {/* Arquiteto */}
-            <div className="obs-flow-node">
-              <div className="obs-node-badge">1. Planejamento</div>
-              <h4>{currentMission?.plannerId || 'Arquiteto'}</h4>
-              <p>Elaboração do plano & critérios</p>
-              <span className="tag">
-                {currentMission?.plan ? 'Plano Produzido' : 'Pendente'}
-              </span>
+          {currentMission?.mode === 'dynamic' ? (
+            <div className="obs-flow-track">
+              {currentPlanSteps(plan.steps).map((st, i) => (
+                <Fragment key={st.id}>
+                  {i > 0 && <div className="obs-flow-arrow">→</div>}
+                  <div className="obs-flow-node">
+                    <div className="obs-node-badge">
+                      r{st.revision}/{st.key} · {MODE_LABEL[st.mode].label}
+                    </div>
+                    <h4>{currentMission.teamSnapshot?.[st.agentId]?.name ?? st.agentId}</h4>
+                    <p>{st.objective}</p>
+                    <span className="tag">{STEP_STATUS_LABEL[st.status]}</span>
+                  </div>
+                </Fragment>
+              ))}
+              {plan.steps.length === 0 && <p className="obs-dim">Nenhum passo aprovado nesta missão.</p>}
             </div>
-
-            <div className="obs-flow-arrow" title="Encaminhado após aprovação">→</div>
-
-            {/* Especialistas Pré-Dev */}
-            {currentMission?.specialists?.filter((s) => s.timing === 'pre-dev').map((s) => (
-              <div key={s.agentId} className="obs-flow-node obs-node-specialist">
-                <div className="obs-node-badge">Pré-Dev Especialista</div>
-                <h4>{s.agentId}</h4>
-                <p>{s.expectedContribution || s.role}</p>
-                <span className="tag tag-sky">Análise Injetada no Dev</span>
+          ) : (
+            <div className="obs-flow-track">
+              {/* Arquiteto */}
+              <div className="obs-flow-node">
+                <div className="obs-node-badge">1. Planejamento</div>
+                <h4>{currentMission?.plannerId || 'Arquiteto'}</h4>
+                <p>Elaboração do plano & critérios</p>
+                <span className="tag">
+                  {currentMission?.plan ? 'Plano Produzido' : 'Pendente'}
+                </span>
               </div>
-            ))}
 
-            {currentMission?.specialists?.some((s) => s.timing === 'pre-dev') && (
-              <div className="obs-flow-arrow">→</div>
-            )}
+              <div className="obs-flow-arrow" title="Encaminhado após aprovação">→</div>
 
-            {/* Dev */}
-            <div className="obs-flow-node">
-              <div className="obs-node-badge">2. Implementação</div>
-              <h4>{currentMission?.devId || 'Dev'}</h4>
-              <p>Código & Testes automatizados</p>
-              <span className="tag">
-                {currentMission?.devReport ? 'Implementado' : 'Pendente'}
-              </span>
-            </div>
+              {/* Especialistas Pré-Dev */}
+              {currentMission?.specialists?.filter((s) => s.timing === 'pre-dev').map((s) => (
+                <div key={s.agentId} className="obs-flow-node obs-node-specialist">
+                  <div className="obs-node-badge">Pré-Dev Especialista</div>
+                  <h4>{s.agentId}</h4>
+                  <p>{s.expectedContribution || s.role}</p>
+                  <span className="tag tag-sky">Análise Injetada no Dev</span>
+                </div>
+              ))}
 
-            <div className="obs-flow-arrow">→</div>
+              {currentMission?.specialists?.some((s) => s.timing === 'pre-dev') && (
+                <div className="obs-flow-arrow">→</div>
+              )}
 
-            {/* Especialistas Pós-Dev */}
-            {currentMission?.specialists?.filter((s) => s.timing === 'post-dev').map((s) => (
-              <div key={s.agentId} className="obs-flow-node obs-node-specialist">
-                <div className="obs-node-badge">Pós-Dev Auditoria</div>
-                <h4>{s.agentId}</h4>
-                <p>{s.expectedContribution || s.role}</p>
-                <span className="tag tag-purple">Revisão Injetada no QA</span>
+              {/* Dev */}
+              <div className="obs-flow-node">
+                <div className="obs-node-badge">2. Implementação</div>
+                <h4>{currentMission?.devId || 'Dev'}</h4>
+                <p>Código & Testes automatizados</p>
+                <span className="tag">
+                  {currentMission?.devReport ? 'Implementado' : 'Pendente'}
+                </span>
               </div>
-            ))}
 
-            {currentMission?.specialists?.some((s) => s.timing === 'post-dev') && (
               <div className="obs-flow-arrow">→</div>
-            )}
 
-            {/* QA */}
-            <div className="obs-flow-node">
-              <div className="obs-node-badge">3. Revisão QA</div>
-              <h4>{currentMission?.qaId || 'QA'}</h4>
-              <p>Inspeção independente & Veredito</p>
-              <span className="tag">
-                {currentMission?.verdict || 'Aguardando'}
-              </span>
+              {/* Especialistas Pós-Dev */}
+              {currentMission?.specialists?.filter((s) => s.timing === 'post-dev').map((s) => (
+                <div key={s.agentId} className="obs-flow-node obs-node-specialist">
+                  <div className="obs-node-badge">Pós-Dev Auditoria</div>
+                  <h4>{s.agentId}</h4>
+                  <p>{s.expectedContribution || s.role}</p>
+                  <span className="tag tag-purple">Revisão Injetada no QA</span>
+                </div>
+              ))}
+
+              {currentMission?.specialists?.some((s) => s.timing === 'post-dev') && (
+                <div className="obs-flow-arrow">→</div>
+              )}
+
+              {/* QA */}
+              <div className="obs-flow-node">
+                <div className="obs-node-badge">3. Revisão QA</div>
+                <h4>{currentMission?.qaId || 'QA'}</h4>
+                <p>Inspeção independente & Veredito</p>
+                <span className="tag">
+                  {currentMission?.verdict || 'Aguardando'}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="obs-delegation-evidence-box">
             <h4>Evidências de Encaminhamento de Contexto</h4>
             <ul>
               {events
-                .filter((e) => e.type.startsWith('delegation.') || e.type.startsWith('context.'))
+                .filter((e) => FLOW_EVENTS.has(e.type))
                 .map((e) => (
                   <li key={e.id}>
                     <span className="obs-dim">[{new Date(e.at).toLocaleTimeString()}]</span>{' '}
@@ -781,7 +816,7 @@ export function ObservabilityCenter({
                     </span>
                   </li>
                 ))}
-              {events.filter((e) => e.type.startsWith('delegation.') || e.type.startsWith('context.')).length === 0 && (
+              {events.filter((e) => FLOW_EVENTS.has(e.type)).length === 0 && (
                 <li className="obs-dim">Sem registros específicos de delegação nesta missão.</li>
               )}
             </ul>
