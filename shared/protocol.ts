@@ -750,7 +750,76 @@ export interface MissionEvent {
   correlationId: string | null
 }
 
+
+// ---------- Chat com o Tech Lead (Etapa 12.1) ----------
+// Conversar não executa nada: o agente roda com o papel de planejamento (somente leitura) e
+// nenhuma resposta vira proposta, aprovação ou missão nesta etapa.
+
+export type ChatRole = 'user' | 'assistant'
+/** streaming = resposta chegando; interrupted = parada pelo usuário ou pelo fechamento do app. */
+export type ChatMessageStatus = 'complete' | 'streaming' | 'interrupted' | 'error'
+
+export interface ChatConversation {
+  id: number
+  projectId: number
+  title: string
+  /** Agente que responde nesta conversa (um planejador cadastrado). */
+  agentId: string
+  createdAt: string
+  updatedAt: string
+  messageCount: number
+}
+
+/** O que foi enviado ao modelo nesta resposta: as mensagens antigas ficam fora da janela. */
+export interface ChatContextInfo {
+  sentMessages: number
+  omittedMessages: number
+}
+
+export interface ChatMessage {
+  id: number
+  conversationId: number
+  projectId: number
+  role: ChatRole
+  /** 'user' ou o id do agente que respondeu. */
+  author: string
+  agentId: string | null
+  cli: CliId | null
+  content: string
+  status: ChatMessageStatus
+  /** Operação do usuário que gerou a mensagem (envio repetido com o mesmo opId não duplica). */
+  opId: string | null
+  /** Resposta: id da mensagem do usuário respondida. */
+  replyTo: number | null
+  error: string | null
+  context: ChatContextInfo | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Limites do chat (o backend é a autoridade; a interface só os mostra). */
+export const CHAT_LIMITS = {
+  maxMessageChars: 8000,
+  maxTitleChars: 120,
+  /** Janela de contexto: no máximo estas mensagens anteriores... */
+  contextMessages: 20,
+  /** ...e no máximo estes caracteres de histórico no prompt. */
+  contextChars: 16_000,
+  pageSize: 100,
+} as const
+
+export type ChatAction = 'create' | 'send' | 'rename' | 'delete' | 'cancel'
+
 export type ServerMessage =
+  | { type: 'chat-conversations'; projectId: number; conversations: ChatConversation[] }
+  /** Página de mensagens (mais antigas primeiro). hasMore = há mensagens antes da primeira. */
+  | { type: 'chat-messages'; projectId: number; conversationId: number; messages: ChatMessage[]; hasMore: boolean; beforeId: number | null }
+  /** Mensagem nova ou atualizada (inclusive o fim de uma resposta). */
+  | { type: 'chat-message'; message: ChatMessage }
+  /** Pedaço de resposta em andamento, já redigido. */
+  | { type: 'chat-delta'; projectId: number; conversationId: number; messageId: number; text: string }
+  | { type: 'chat-deleted'; projectId: number; conversationId: number }
+  | { type: 'chat-result'; action: ChatAction; opId: string | null; ok: boolean; message: string; conversationId: number | null }
   /** Resposta a events-list: em ordem de id. */
   | { type: 'mission-events'; projectId: number; missionId: number | null; events: MissionEvent[] }
   /** Evento novo, ao vivo. */
@@ -819,6 +888,14 @@ export type ServerMessage =
   | { type: 'memory-changed'; projectId: number }
 
 export type ClientMessage =
+  | { type: 'chat-list'; projectId: number }
+  | { type: 'chat-create'; projectId: number; agentId: string; opId: string }
+  | { type: 'chat-rename'; projectId: number; conversationId: number; title: string; opId: string }
+  /** Exclusão definitiva: a interface pede confirmação antes de enviar. */
+  | { type: 'chat-delete'; projectId: number; conversationId: number; opId: string }
+  | { type: 'chat-open'; projectId: number; conversationId: number; beforeId?: number }
+  | { type: 'chat-send'; projectId: number; conversationId: number; content: string; opId: string }
+  | { type: 'chat-cancel'; projectId: number; conversationId: number; opId: string }
   | { type: 'check-cli'; agentId: string }
   | { type: 'dialog-open-folder' }
   | { type: 'project-validate'; path: string }

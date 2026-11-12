@@ -105,11 +105,11 @@ export const MAX_ATTEMPTS = 3
 /** Quantas vezes o planejador pode perguntar ao usuário antes de ter de planejar com o que há. */
 export const MAX_CLARIFICATION_ROUNDS = 2
 // O Windows limita a linha de comando a ~32 mil caracteres (o agy recebe o prompt como argumento).
-const MAX_ARG_PROMPT = 26_000
-const LIMIT_PATTERN = /rate.?limit|quota|usage limit|too many requests|\b429\b|resource.?exhausted/i
+export const MAX_ARG_PROMPT = 26_000
+export const LIMIT_PATTERN = /rate.?limit|quota|usage limit|too many requests|\b429\b|resource.?exhausted/i
 // O Antigravity headless não consegue pedir permissão de comando: a tentativa é
 // negada e o turno inteiro sai vazio (código 0). O aviso evita a tentativa.
-const AGY_HEADLESS_NOTICE = `
+export const AGY_HEADLESS_NOTICE = `
 
 Restrição do ambiente (prevalece sobre qualquer outra instrução, inclusive o plano): nesta execução você NÃO pode executar comandos de terminal; qualquer tentativa é negada e a etapa termina sem resposta. Use apenas leitura de arquivos e análise estática (e edição de arquivos, se esta etapa permitir), e declare como "não executado" tudo o que dependeria de um comando.`
 const AGY_COMMAND_DENIED = /auto-denied|headless mode cannot prompt/i

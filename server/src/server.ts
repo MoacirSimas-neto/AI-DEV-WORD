@@ -3,10 +3,14 @@ import { realpathSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import path from 'node:path'
 import { WebSocket, WebSocketServer } from 'ws'
+import type { ChatService } from './chat/service.ts'
+import type { ChatStore } from './chat/store.ts'
 import { describeDatabaseError } from './db/database.ts'
 import { redact } from './security/redact.ts'
 import type {
   AgentConfig,
+  ChatAction,
+  ChatMessage,
   AgentInfo,
   AgentProfileId,
   CliId,
@@ -55,6 +59,8 @@ export interface AppServerOptions {
   events?: EventStore
   /** Propostas e passos das missões dinâmicas. Sem ele, plan-list devolve listas vazias. */
   plans?: PlanStore
+  /** Chat com o Tech Lead. Sem ele, as mensagens de chat respondem com erro. */
+  chat?: { store: ChatStore; service: ChatService }
   allowedOrigins: string[]
 }
 
@@ -69,6 +75,7 @@ function hasLocalHost(req: IncomingMessage): boolean {
 const isSize = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 2 && (n as number) <= 500
 const isId = (n: unknown): n is number => Number.isInteger(n) && (n as number) > 0
 const isOpId = (v: unknown): v is string => typeof v === 'string' && /^[\w-]{1,80}$/.test(v)
+const isAgentId = (v: unknown): v is string => typeof v === 'string' && /^[\w-]{1,80}$/.test(v)
 const DECISIONS = new Set(['approve', 'reject', 'adjust'])
 const RESUME_ACTIONS = new Set(['continue', 'retry_step', 'replan'])
 const isPathList = (v: unknown): v is string[] =>
@@ -136,6 +143,25 @@ export function parseClientMessage(raw: string): ClientMessage | null {
   const { agentId } = msg
 
   switch (msg.type) {
+    case 'chat-list':
+      return isId(msg.projectId) ? { type: 'chat-list', projectId: msg.projectId } : null
+    case 'chat-create':
+      return isId(msg.projectId) && isAgentId(msg.agentId) && isOpId(msg.opId) ? { type: 'chat-create', projectId: msg.projectId, agentId: msg.agentId, opId: msg.opId } : null
+    case 'chat-rename':
+      return isId(msg.projectId) && isId(msg.conversationId) && isOpId(msg.opId) && typeof msg.title === 'string' && msg.title.length <= 500
+        ? { type: 'chat-rename', projectId: msg.projectId, conversationId: msg.conversationId, title: msg.title, opId: msg.opId }
+        : null
+    case 'chat-delete':
+    case 'chat-cancel':
+      return isId(msg.projectId) && isId(msg.conversationId) && isOpId(msg.opId) ? { type: msg.type, projectId: msg.projectId, conversationId: msg.conversationId, opId: msg.opId } : null
+    case 'chat-open':
+      if (!isId(msg.projectId) || !isId(msg.conversationId) || (msg.beforeId !== undefined && !isId(msg.beforeId))) return null
+      return { type: 'chat-open', projectId: msg.projectId, conversationId: msg.conversationId, ...(msg.beforeId !== undefined ? { beforeId: msg.beforeId as number } : {}) }
+    case 'chat-send':
+      // O limite de conteúdo é do serviço (devolve erro legível); aqui só o formato e um teto.
+      return isId(msg.projectId) && isId(msg.conversationId) && isOpId(msg.opId) && typeof msg.content === 'string' && msg.content.length <= 65_536
+        ? { type: 'chat-send', projectId: msg.projectId, conversationId: msg.conversationId, content: msg.content, opId: msg.opId }
+        : null
     case 'check-cli':
     case 'term-close':
       return typeof agentId === 'string' ? { type: msg.type, agentId } : null
@@ -406,6 +432,18 @@ export function parseClientMessage(raw: string): ClientMessage | null {
   }
 }
 
+type ChatClientMessage = Extract<ClientMessage, { type: 'chat-list' | 'chat-create' | 'chat-rename' | 'chat-delete' | 'chat-open' | 'chat-send' | 'chat-cancel' }>
+const isChatMessage = (m: ClientMessage): m is ChatClientMessage => m.type.startsWith('chat-')
+const CHAT_ACTIONS: Record<string, ChatAction> = { 'chat-create': 'create', 'chat-send': 'send', 'chat-rename': 'rename', 'chat-delete': 'delete', 'chat-cancel': 'cancel' }
+const actionOf = (type: string): ChatAction => CHAT_ACTIONS[type] ?? 'send'
+const safeJson = (text: string): Record<string, unknown> | null => {
+  try {
+    const v = JSON.parse(text)
+    return v && typeof v === 'object' ? v : null
+  } catch {
+    return null
+  }
+}
 const errorText = (error: unknown) => describeDatabaseError(error) ?? redact(error instanceof Error ? error.message : String(error))
 
 export function createAppServer({
@@ -421,6 +459,7 @@ export function createAppServer({
   skills,
   events,
   plans,
+  chat,
   allowedOrigins,
 }: AppServerOptions): Server {
   for (const cfg of agentConfigs.list()) {
@@ -499,7 +538,66 @@ export function createAppServer({
   })
   const broadcastGitStatus = async (cwd: string) => broadcast({ type: 'git-status', status: await git.status(cwd) })
 
+  const chatResult = (socket: WebSocket, action: ChatAction, opId: string | null, ok: boolean, text: string, conversationId: number | null = null) =>
+    send(socket, { type: 'chat-result', action, opId, ok, message: text, conversationId })
+  const conversationsMessage = (projectId: number): ServerMessage => ({ type: 'chat-conversations', projectId, conversations: chat?.store.listConversations(projectId) ?? [] })
+
+  const handleChat = (socket: WebSocket, message: ChatClientMessage) => {
+    if (!chat) {
+      chatResult(socket, actionOf(message.type), 'opId' in message ? message.opId : null, false, 'Chat indisponível neste backend.')
+      return
+    }
+    const { store, service } = chat
+    try {
+      if (!projects.get(message.projectId)) throw new Error('Projeto desconhecido.')
+      switch (message.type) {
+        case 'chat-list':
+          send(socket, conversationsMessage(message.projectId))
+          return
+        case 'chat-open': {
+          const page = store.listMessages(message.projectId, message.conversationId, { beforeId: message.beforeId })
+          send(socket, { type: 'chat-messages', projectId: message.projectId, conversationId: message.conversationId, ...page, beforeId: message.beforeId ?? null })
+          return
+        }
+        case 'chat-create': {
+          if (!service.isChatAgent(message.agentId)) throw new Error('Escolha um planejador ativo para conversar.')
+          const conv = store.createConversation(message.projectId, message.agentId)
+          chatResult(socket, 'create', message.opId, true, 'Conversa criada.', conv.id)
+          return
+        }
+        case 'chat-rename': {
+          const conv = store.rename(message.projectId, message.conversationId, message.title)
+          chatResult(socket, 'rename', message.opId, true, 'Conversa renomeada.', conv.id)
+          return
+        }
+        case 'chat-delete': {
+          const busy = service.busyWith()
+          if (busy && busy.projectId === message.projectId && busy.conversationId === message.conversationId) throw new Error('Interrompa a resposta em andamento antes de excluir a conversa.')
+          store.delete(message.projectId, message.conversationId)
+          broadcast({ type: 'chat-deleted', projectId: message.projectId, conversationId: message.conversationId })
+          chatResult(socket, 'delete', message.opId, true, 'Conversa excluída.', message.conversationId)
+          return
+        }
+        case 'chat-cancel': {
+          store.requireConversation(message.projectId, message.conversationId)
+          const stopped = service.cancel(message.projectId, message.conversationId)
+          chatResult(socket, 'cancel', message.opId, true, stopped ? 'Resposta interrompida.' : 'Não havia resposta em andamento.', message.conversationId)
+          return
+        }
+        case 'chat-send':
+          service
+            .send(message)
+            .then(({ applied }) => chatResult(socket, 'send', message.opId, true, applied ? 'Mensagem enviada.' : 'Esta mensagem já tinha sido enviada: nada foi repetido.', message.conversationId))
+            .catch((error) => chatResult(socket, 'send', message.opId, false, errorText(error), message.conversationId))
+          return
+      }
+    } catch (error) {
+      chatResult(socket, actionOf(message.type), 'opId' in message ? message.opId : null, false, errorText(error), 'conversationId' in message ? message.conversationId : null)
+    }
+  }
+
   const handle = (socket: WebSocket, message: ClientMessage) => {
+    if (isChatMessage(message)) return handleChat(socket, message)
     switch (message.type) {
       case 'check-cli':
         void registry.check(message.agentId)
@@ -927,8 +1025,14 @@ export function createAppServer({
       skillOverrides: skills?.overrides() ?? [],
     })
     socket.on('message', (raw) => {
-      const message = parseClientMessage(raw.toString())
-      if (message) handle(socket, message)
+      const text = raw.toString()
+      const message = parseClientMessage(text)
+      if (message) return handle(socket, message)
+      // Mensagem de chat fora do formato: responde com erro em vez de silêncio (a tela não fica esperando).
+      const loose = safeJson(text)
+      if (typeof loose?.type === 'string' && loose.type.startsWith('chat-')) {
+        chatResult(socket, actionOf(loose.type), isOpId(loose.opId) ? loose.opId : null, false, 'Mensagem de chat inválida (formato ou tamanho).')
+      }
     })
   })
 
@@ -976,6 +1080,12 @@ export function createAppServer({
   plans?.on('change', onPlan)
   team.on('output', onMissionOutput)
   team.on('git-change', onGitChange)
+  const onChatMessage = (message: ChatMessage) => broadcast({ type: 'chat-message', message })
+  const onChatDelta = (delta: { projectId: number; conversationId: number; messageId: number; text: string }) => broadcast({ type: 'chat-delta', ...delta })
+  const onChatConversations = (projectId: number) => broadcast(conversationsMessage(projectId))
+  chat?.service.on('message', onChatMessage)
+  chat?.service.on('delta', onChatDelta)
+  chat?.store.on('conversations', onChatConversations)
 
   server.on('close', () => {
     registry.off('change', onAgent)
@@ -992,6 +1102,9 @@ export function createAppServer({
     plans?.off('change', onPlan)
     team.off('output', onMissionOutput)
     team.off('git-change', onGitChange)
+    chat?.service.off('message', onChatMessage)
+    chat?.service.off('delta', onChatDelta)
+    chat?.store.off('conversations', onChatConversations)
     for (const client of wss.clients) client.terminate()
   })
 
