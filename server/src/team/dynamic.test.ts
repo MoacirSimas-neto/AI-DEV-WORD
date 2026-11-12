@@ -21,6 +21,7 @@ import { TaskStore } from '../tasks/store.ts'
 import { TerminalManager } from '../terminal/manager.ts'
 import { DEFAULT_LIMITS, replanLimit, resolveLimits, retryableSteps, stepBlocker, validateProposal } from './coordinator.ts'
 import { parseStepSignals } from './prompts.ts'
+import { decisionMessage, groupSteps, resumeMessage, startMessage, teamView } from '../../../web/src/ui/dynamicView.ts'
 import { PlanStore } from './planStore.ts'
 import { PROPOSAL_CLOSE, PROPOSAL_OPEN } from './proposal.ts'
 import { TeamRunner } from './runner.ts'
@@ -1097,4 +1098,155 @@ test('protocolo de recuperação: mensagens validadas; missão clássica não ac
   await assert.rejects(w.runner.recoveryState(w.project.id, classic.id), /fluxo clássico/)
   // O reinício continua falhando só as missões clássicas que tinham CLI rodando.
   w.runner.cancel(classic.id)
+})
+
+// =====================================================================
+// Etapa 10.5 — as mensagens que a interface constrói (web/src/ui/dynamicView.ts) passam pelo WebSocket real.
+// As decisões aqui são SIMULADAS pelo teste, não aprovações reais.
+// =====================================================================
+
+async function serve(w: World) {
+  const terminals = new TerminalManager(w.registry, () => ({ onData: () => {}, onExit: () => {}, write: () => {}, resize: () => {}, kill: () => {} }), () => w.dir)
+  const server = createAppServer({ registry: w.registry, terminals, projects: w.projects, git: new GitService(), tasks: w.tasks, history: w.history, team: w.runner, agentConfigs: w.configs, memory: w.memory, skills: w.skills, events: w.events, plans: w.plans, allowedOrigins: [ORIGIN] })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const port = (server.address() as AddressInfo).port
+  const sockets: WebSocket[] = []
+  const connect = async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: ORIGIN })
+    sockets.push(socket)
+    const received: ServerMessage[] = []
+    socket.on('message', (raw) => received.push(JSON.parse(String(raw)) as ServerMessage))
+    await once(socket, 'open')
+    const take = async <T extends ServerMessage['type']>(type: T, match: (m: Extract<ServerMessage, { type: T }>) => boolean = () => true) => {
+      let found: Extract<ServerMessage, { type: T }> | undefined
+      await until(() => {
+        const i = received.findIndex((m) => m.type === type && match(m as Extract<ServerMessage, { type: T }>))
+        if (i >= 0) found = received.splice(i, 1)[0] as Extract<ServerMessage, { type: T }>
+        return found !== undefined
+      }, `mensagem ${type}`)
+      return found!
+    }
+    return { send: (m: ClientMessage) => socket.send(JSON.stringify(m)), take }
+  }
+  const close = () => {
+    for (const s of sockets) s.terminate()
+    server.close()
+  }
+  return { connect, close }
+}
+
+test('interface ↔ backend: iniciar dinâmica, revisão obsoleta, ajuste, reconexão, clique repetido, equipe e cancelamento', async () => {
+  const w = await world()
+  const { connect, close } = await serve(w)
+  try {
+    const ui = await connect()
+    w.lead.length = 0
+    w.lead.push(proposalText())
+    ui.send(startMessage(w.task.id, 'dynamic', 'architect'))
+    await until(() => w.tasks.listMissions()[0]?.phase === 'awaiting_approval', 'proposta')
+    const mission = w.tasks.listMissions()[0]
+    assert.equal(mission.mode, 'dynamic')
+    const first = (await ui.take('mission-plan', (m) => m.missionId === mission.id && m.proposals.length === 1)).proposals[0]
+
+    // Revisão que o usuário não viu: recusada, nada muda.
+    ui.send(decisionMessage({ ...first, revision: first.revision + 1 }, 'approve', 'op-stale'))
+    const stale = await ui.take('proposal-result', (m) => m.opId === 'op-stale')
+    assert.equal(stale.ok, false)
+    assert.equal(w.pending(mission.id).status, 'pending')
+
+    // Pedir ajustes com o texto do usuário: o Tech Lead refaz incluindo Dados.
+    w.lead.push(
+      proposalText({
+        baseRevision: 1,
+        teamChanges: [change('convene', 'dados'), change('convene', 'dev'), change('convene', 'qa')],
+        steps: [stepJson('modelo', 'dados', 'analyze'), stepJson('impl', 'dev', 'implement', ['modelo'], [{ kind: 'step', key: 'modelo' }]), stepJson('teste', 'qa', 'verify', ['impl'])],
+      }),
+    )
+    ui.send(decisionMessage(first, 'adjust', 'op-adjust', 'Não quero Segurança agora. Consulte Dados primeiro.'))
+    assert.equal((await ui.take('proposal-result', (m) => m.opId === 'op-adjust')).applied, true)
+    await waitProposals(w, mission.id, 2, 'proposta ajustada')
+    assert.match(w.calls.at(-1)!.prompt, /Texto do usuário: Não quero Segurança agora\. Consulte Dados primeiro\./)
+
+    // Reconexão: a proposta pendente continua disponível, e a anterior fica no histórico.
+    const again = await connect()
+    again.send({ type: 'plan-list', projectId: w.project.id, missionId: mission.id })
+    const recovered = await again.take('mission-plan', (m) => m.missionId === mission.id)
+    assert.deepEqual(recovered.proposals.map((p) => [p.revision, p.status]), [[1, 'adjust_requested'], [2, 'pending']])
+    assert.equal(recovered.proposals[0].feedback, 'Não quero Segurança agora. Consulte Dados primeiro.')
+    // Isolamento: outro projeto não vê nada desta missão.
+    again.send({ type: 'plan-list', projectId: w.project.id + 50, missionId: mission.id })
+    const foreign = await again.take('mission-plan', (m) => m.projectId === w.project.id + 50)
+    assert.deepEqual([foreign.proposals.length, foreign.steps.length], [0, 0])
+
+    // Clique repetido (mesmo opId, de duas abas): aplica uma vez só.
+    const second = recovered.proposals[1]
+    w.lead.push(closureText(2))
+    again.send(decisionMessage(second, 'approve', 'op-approve'))
+    ui.send(decisionMessage(second, 'approve', 'op-approve'))
+    const results = [await again.take('proposal-result', (m) => m.opId === 'op-approve'), await ui.take('proposal-result', (m) => m.opId === 'op-approve')]
+    assert.deepEqual(results.map((r) => r.applied).sort(), [false, true])
+
+    // Passos e equipe atualizados pelo backend chegam ao vivo.
+    await waitProposals(w, mission.id, 3, 'recomendação de encerramento')
+    assert.equal(w.calls.filter((c) => c.key === 'impl').length, 1)
+    const live = await ui.take('mission-plan', (m) => m.missionId === mission.id && m.proposals.length === 3)
+    assert.deepEqual(groupSteps(live.steps).completed.map((s) => s.key), ['modelo', 'impl', 'teste'])
+    assert.deepEqual(teamView('architect', live.proposals).active.sort(), ['architect', 'dados', 'dev', 'qa'])
+
+    // Cancelar: a recomendação pendente deixa de valer e a aprovação atrasada é recusada.
+    ui.send({ type: 'mission-cancel', missionId: mission.id })
+    await until(() => w.phase(mission.id) === 'cancelled', 'cancelamento')
+    const closure = w.plans.listProposals(w.q(mission.id)).at(-1)!
+    assert.equal(closure.status, 'superseded')
+    ui.send(decisionMessage(closure, 'approve', 'op-late'))
+    assert.equal((await ui.take('proposal-result', (m) => m.opId === 'op-late')).ok, false)
+    assert.equal(trailOf(w, mission.id).filter((e) => e.type === 'approval.received').length, 2)
+  } finally {
+    close()
+  }
+})
+
+test('interface ↔ backend: recuperação mostra o que o backend permite e só aceita alterações com confirmação explícita', async () => {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'aidw-ui-rec-')), 'app.db')
+  const first = await world({ file })
+  first.steps.impl = () => {
+    writeFileSync(path.join(first.dir, 'api.ts'), 'parcial\n')
+    return new Promise<Reply>(() => {})
+  }
+  const mission = await first.startPending()
+  first.decide(mission.id, 'approve')
+  await until(() => first.calls.some((c) => c.key === 'impl'), 'Dev rodando')
+
+  const second = await world({ file, dir: first.dir })
+  second.runner.recover()
+  const { connect, close } = await serve(second)
+  try {
+    const ui = await connect()
+    ui.send({ type: 'mission-recovery', projectId: second.project.id, missionId: mission.id })
+    const { state } = await ui.take('mission-recovery', (m) => m.state.missionId === mission.id)
+    assert.deepEqual(state.files.unknown, ['api.ts'])
+    assert.deepEqual(state.actions, ['continue', 'retry_step', 'replan', 'close', 'cancel'])
+
+    // Sem marcar a caixa: a interface não manda acceptChanges, e o backend não escreve por cima.
+    second.steps.impl = () => ({ stdout: 'Terminei.' })
+    ui.send(resumeMessage(mission.id, 'retry_step', 'op-r1', { stepId: state.retryable[0].id, acceptChanges: false }))
+    assert.equal((await ui.take('mission-resume-result', (m) => m.opId === 'op-r1')).ok, true)
+    await until(() => second.phase(mission.id) === 'awaiting_decision', 'bloqueio por alterações')
+    assert.ok(!second.calls.some((c) => c.key === 'impl'))
+
+    // Com a confirmação explícita: segue preservando o arquivo.
+    second.lead.push(closureText(1))
+    ui.send(resumeMessage(mission.id, 'continue', 'op-r2', { acceptChanges: true }))
+    assert.equal((await ui.take('mission-resume-result', (m) => m.opId === 'op-r2')).applied, true)
+    await waitProposals(second, mission.id, 2, 'continuação')
+    assert.deepEqual(keys(second), ['impl', 'teste', 'lead'])
+    const accepted = trailOf(second, mission.id).findLast((e) => e.type === 'mission.resumed')!
+    assert.deepEqual(accepted.data.acceptedFiles, ['api.ts'])
+    // Outro projeto não consulta a recuperação desta missão.
+    ui.send({ type: 'mission-recovery', projectId: second.project.id + 9, missionId: mission.id })
+    assert.match((await ui.take('notice')).message, /não encontrada neste projeto/)
+  } finally {
+    close()
+  }
 })
