@@ -2611,3 +2611,622 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
+
+
+/* ==========================================================================
+   CONCEITO PRINCIPAL: ESCRITÓRIO REAL 2D (CONCEPT OFFICE STUDIO)
+   O escritório 2D clássico com Phaser em destaque + Moldura moderna (Linear/VS Code)
+   ========================================================================== */
+
+.proto-office-studio-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #080c14;
+  color: #f1f5f9;
+  overflow: hidden;
+}
+
+/* 1. TOP BAR SLIM */
+.proto-office-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #0d1322;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 40;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.brand-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+}
+
+.brand-tag {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.project-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.branch-tag {
+  font-size: 10px;
+  color: #10b981;
+  font-family: monospace;
+}
+
+/* Stepper Central */
+.mission-stepper-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stepper-mission-name {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.stepper-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.st-step {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.st-done {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.st-active {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+  animation: pulse-step 2s infinite ease-in-out;
+}
+
+@keyframes pulse-step {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+.st-waiting {
+  background: rgba(255, 255, 255, 0.05);
+  color: #64748b;
+}
+
+.st-sep {
+  font-size: 10px;
+  color: #475569;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.skills-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #cbd5e1;
+  background: #111827;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.skill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+.tag-live-status {
+  font-size: 11px;
+  font-weight: 600;
+  color: #10b981;
+}
+
+/* 2. LAYOUT DO PALCO COM ESCRITÓRIO E DRAWER */
+.proto-office-stage-layout {
+  position: relative;
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  background: #090e1a;
+}
+
+/* Área do Mundo do Escritório (Phaser) */
+.office-world-viewport {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 50%, #0d1527 0%, #060911 100%);
+}
+
+.office-world-viewport canvas {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.office-canvas-hint {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(13, 20, 36, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-size: 11px;
+  color: #94a3b8;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* Dock Flutuante Inferior (Roster dos Agentes) */
+.office-bottom-dock {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(13, 20, 36, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  z-index: 30;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 90%;
+  transition: all 0.25s ease;
+}
+
+.office-bottom-dock.is-collapsed {
+  padding: 4px 12px;
+}
+
+.dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dock-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+}
+
+.btn-dock-toggle {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.btn-dock-toggle:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dock-cards {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.dock-agent-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 140px;
+}
+
+.dock-agent-card:hover {
+  background: #1e293b;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.dock-agent-card.is-selected {
+  background: #1e293b;
+  border-color: #38bdf8;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.3);
+}
+
+.dock-portrait {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f172a;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.status-indicator {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid #0f172a;
+}
+
+.status-indicator.state-working {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.status-indicator.state-idle {
+  background: #38bdf8;
+}
+
+.status-indicator.state-waiting {
+  background: #f59e0b;
+}
+
+.dock-meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.dock-meta strong {
+  font-size: 12px;
+  color: #f8fafc;
+}
+
+.dock-meta span {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.dock-activity-pulse {
+  font-size: 13px;
+  margin-left: auto;
+  animation: char-bounce 1s infinite alternate;
+}
+
+/* 3. GAVETA LATERAL DO AGENTE (DRAWER RETRÁTIL) */
+.office-agent-drawer {
+  width: 380px;
+  max-width: 40%;
+  height: 100%;
+  background: #0d1322;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.6);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  animation: slide-in-drawer 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+@keyframes slide-in-drawer {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #090e1a;
+}
+
+.drawer-agent-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.drawer-avatar {
+  width: 42px;
+  height: 48px;
+  border-radius: 8px;
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.drawer-agent-hero h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.drawer-agent-hero p {
+  margin: 2px 0 6px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.drawer-tags {
+  display: flex;
+  gap: 6px;
+}
+
+.badge-state {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.badge-state.state-working {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.badge-state.state-idle {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+}
+
+.badge-state.state-waiting {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fcd34d;
+}
+
+.badge-cli {
+  font-size: 9px;
+  font-family: monospace;
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.btn-drawer-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.btn-drawer-close:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.drawer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.section-eyebrow {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.section-head-split {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.session-status {
+  font-size: 10px;
+  color: #10b981;
+  font-family: monospace;
+}
+
+.thought-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e2e8f0;
+  background: #111827;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.drawer-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.progress-track {
+  width: 100%;
+  height: 5px;
+  background: #1e293b;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981, #38bdf8);
+}
+
+/* Terminal no Drawer */
+.drawer-terminal-box {
+  background: #050811;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.terminal-log-content {
+  padding: 10px 12px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #cbd5e1;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.terminal-line {
+  margin-bottom: 2px;
+}
+
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #090e1a;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.term-prompt {
+  font-family: monospace;
+  font-size: 11px;
+  color: #10b981;
+  font-weight: 700;
+}
+
+.term-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 11px;
+  font-family: monospace;
+  outline: none;
+}
+
+/* Skills Pills */
+.skills-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skill-pill {
+  font-size: 10px;
+  padding: 3px 8px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border-radius: 4px;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+/* Métricas */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.metric-box {
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 8px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.metric-num {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.metric-lbl {
+  font-size: 9px;
+  color: #64748b;
+  margin-top: 2px;
+}

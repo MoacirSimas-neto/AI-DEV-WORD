@@ -1,8 +1,9 @@
 import { useState } from 'react'
+import { ConceptOfficeStudio } from './ConceptOfficeStudio.tsx'
+import { ConceptHybridWorkspace } from './ConceptHybridWorkspace.tsx'
 import { ConceptCommandCenter } from './ConceptCommandCenter.tsx'
 import { ConceptLivingWorkspace } from './ConceptLivingWorkspace.tsx'
 import { ConceptHybridStudio } from './ConceptHybridStudio.tsx'
-import { ConceptHybridWorkspace } from './ConceptHybridWorkspace.tsx'
 import './prototypes.css'
 
 interface Props {
@@ -10,7 +11,7 @@ interface Props {
 }
 
 export function PrototypeShowcase({ onBackToApp }: Props) {
-  const [selectedConcept, setSelectedConcept] = useState<'A' | 'B' | 'C' | 'D'>('D')
+  const [selectedConcept, setSelectedConcept] = useState<'OFFICE' | 'D' | 'B' | 'C' | 'A'>('OFFICE')
 
   return (
     <div className="proto-showcase-shell">
@@ -27,19 +28,19 @@ export function PrototypeShowcase({ onBackToApp }: Props) {
         <div className="proto-nav-selector">
           <button
             type="button"
-            className={`proto-nav-tab ${selectedConcept === 'D' ? 'is-active' : ''}`}
-            onClick={() => setSelectedConcept('D')}
+            className={`proto-nav-tab ${selectedConcept === 'OFFICE' ? 'is-active' : ''}`}
+            onClick={() => setSelectedConcept('OFFICE')}
           >
-            <strong>✨ Conceito D (Mix B+C)</strong>
-            <span>Living Studio 2.5D</span>
+            <strong>🏢 Escritório Real 2D</strong>
+            <span>Phaser + Moldura Moderna</span>
           </button>
           <button
             type="button"
-            className={`proto-nav-tab ${selectedConcept === 'B' ? 'is-active' : ''}`}
-            onClick={() => setSelectedConcept('B')}
+            className={`proto-nav-tab ${selectedConcept === 'D' ? 'is-active' : ''}`}
+            onClick={() => setSelectedConcept('D')}
           >
-            <strong>Conceito B</strong>
-            <span>Living Workspace 2.5D</span>
+            <strong>Conceito D</strong>
+            <span>Living Studio 2.5D</span>
           </button>
           <button
             type="button"
@@ -55,7 +56,7 @@ export function PrototypeShowcase({ onBackToApp }: Props) {
             onClick={() => setSelectedConcept('A')}
           >
             <strong>Conceito A</strong>
-            <span>AI Command Center</span>
+            <span>Command Center</span>
           </button>
         </div>
 
@@ -66,9 +67,10 @@ export function PrototypeShowcase({ onBackToApp }: Props) {
 
       {/* Renderização do Conceito Selecionado */}
       <main className="proto-stage-area">
+        {selectedConcept === 'OFFICE' && <ConceptOfficeStudio />}
         {selectedConcept === 'D' && <ConceptHybridWorkspace />}
-        {selectedConcept === 'B' && <ConceptLivingWorkspace />}
         {selectedConcept === 'C' && <ConceptHybridStudio />}
+        {selectedConcept === 'B' && <ConceptLivingWorkspace />}
         {selectedConcept === 'A' && <ConceptCommandCenter />}
       </main>
     </div>
