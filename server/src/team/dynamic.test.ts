@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -19,7 +19,8 @@ import { createAppServer, parseClientMessage } from '../server.ts'
 import { SkillStore } from '../skills/store.ts'
 import { TaskStore } from '../tasks/store.ts'
 import { TerminalManager } from '../terminal/manager.ts'
-import { DEFAULT_LIMITS, stepBlocker, validateProposal } from './coordinator.ts'
+import { DEFAULT_LIMITS, replanLimit, resolveLimits, retryableSteps, stepBlocker, validateProposal } from './coordinator.ts'
+import { parseStepSignals } from './prompts.ts'
 import { PlanStore } from './planStore.ts'
 import { PROPOSAL_CLOSE, PROPOSAL_OPEN } from './proposal.ts'
 import { TeamRunner } from './runner.ts'
@@ -80,6 +81,9 @@ const PLAN = {
   completionCriteria: ['QA aprova.'],
 }
 const proposalText = (extra: Record<string, unknown> = {}) => `Analisei a tarefa.\n${PROPOSAL_OPEN}\n${JSON.stringify({ ...PLAN, ...extra })}\n${PROPOSAL_CLOSE}`
+/** Recomendação de encerramento sobre a revisão `base`. */
+const closureText = (base: number) => proposalText({ kind: 'closure', baseRevision: base, teamChanges: [], steps: [], reason: 'Critérios atendidos.' })
+const CLOSURE = closureText(1)
 
 // ---------- mundo de teste ----------
 
@@ -113,7 +117,8 @@ async function world(options: { file?: string; dir?: string; limits?: Partial<Dy
   registry.syncFromConfigs(configs.list())
   for (const agent of registry.list()) await registry.check(agent.id)
 
-  const lead: string[] = []
+  /** Respostas do Tech Lead, em ordem. Uma Promise pendente simula o CLI ainda pensando. */
+  const lead: (string | Promise<string>)[] = []
   const steps: Record<string, (prompt: string) => Reply | Promise<Reply>> = {}
   const calls: Call[] = []
   const runner = new TeamRunner({
@@ -134,7 +139,8 @@ async function world(options: { file?: string; dir?: string; limits?: Partial<Dy
       let kill = () => {}
       const done = new Promise<{ code: number; stdout: string; stderr: string; timedOut: boolean }>((resolve) => {
         kill = () => resolve({ code: 1, stdout: '', stderr: 'encerrado', timedOut: false })
-        const reply = key === 'lead' ? { stdout: lead.shift() ?? 'Sem proposta.' } : (steps[key]?.(prompt) ?? { stdout: `Feito: ${key}.` })
+        const reply =
+          key === 'lead' ? Promise.resolve(lead.shift() ?? 'Sem proposta.').then((stdout): Reply => ({ stdout })) : (steps[key]?.(prompt) ?? { stdout: `Feito: ${key}.` })
         void Promise.resolve(reply).then((r) => resolve({ code: r.code ?? 0, stdout: r.stdout, stderr: r.stderr ?? '', timedOut: false }))
       })
       return { done, kill: () => kill() }
@@ -196,8 +202,8 @@ test('demonstração: Tech Lead propõe → backend valida → pendente → apro
 
   try {
     const user = await connect()
-    // 1. O usuário pede a missão dinâmica.
-    w.lead.push(proposalText())
+    // 1. O usuário pede a missão dinâmica. O Tech Lead falso também já tem a recomendação de encerrar (fila vazia).
+    w.lead.push(proposalText(), CLOSURE)
     user.send({ type: 'mission-start', taskId: w.task.id, mode: 'dynamic' })
     await until(() => w.tasks.listMissions().length === 1 && w.tasks.listMissions()[0].phase === 'awaiting_approval', 'proposta pendente')
     const mission = w.tasks.listMissions()[0]
@@ -232,9 +238,9 @@ test('demonstração: Tech Lead propõe → backend valida → pendente → apro
     const repeated = await user.take('proposal-result', (m) => m.opId === 'demo-op-1')
     assert.deepEqual([repeated.ok, repeated.applied], [true, false])
 
-    // 5. Dev executa e QA verifica, em sequência; depois a missão espera a confirmação do usuário.
-    await until(() => w.phase(mission.id) === 'awaiting_decision', 'fila concluída')
-    assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'teste'])
+    // 5. Dev executa e QA verifica, em sequência; com a fila vazia o Tech Lead recomenda encerrar (10.4).
+    await until(() => w.phase(mission.id) === 'awaiting_approval' && w.plans.listProposals(w.q(mission.id)).length === 2, 'recomendação de encerramento')
+    assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'teste', 'lead'])
     const [, dev, qa] = w.calls
     assert.equal(dev.cli, 'codex')
     assert.ok(dev.args.includes('workspace-write'), 'só implement recebe sandbox de escrita')
@@ -273,7 +279,8 @@ test('demonstração: Tech Lead propõe → backend valida → pendente → apro
       at('step.finished', (e) => e.agentId === 'dev'),
       at('result.forwarded', (e) => e.data.from === 'dev' && e.data.to === 'qa'),
       at('verdict.declared'),
-      at('mission.blocked', (e) => e.data.reason === 'queue_empty'),
+      at('replan.triggered', (e) => e.data.trigger === 'queue_empty'),
+      at('closure.recommended'),
     ]
     assert.deepEqual(order, [...order].sort((a, b) => a - b))
     const one = (type: string) => trail.find((e) => e.type === type)!
@@ -290,10 +297,12 @@ test('demonstração: Tech Lead propõe → backend valida → pendente → apro
     // Nenhum prompt completo vai para a trilha.
     assert.doesNotMatch(JSON.stringify(trail), /Você é o Tech Lead de uma equipe dinâmica|Objetivo deste passo/)
 
-    // 7. O usuário confirma o encerramento.
-    user.send({ type: 'mission-close', missionId: mission.id })
+    // 7. O usuário SIMULADO aprova a recomendação de encerramento.
+    const closure = w.pending(mission.id)
+    assert.equal(closure.kind, 'closure')
+    user.send({ type: 'proposal-decide', missionId: mission.id, proposalId: closure.id, revision: closure.revision, decision: 'approve', opId: 'demo-op-close' })
     await until(() => w.phase(mission.id) === 'done', 'encerramento')
-    assert.equal(w.events.list({ projectId: w.project.id, missionId: mission.id }).find((e) => e.type === 'mission.completed')!.data.basedOn, 'human-confirmation')
+    assert.equal(w.events.list({ projectId: w.project.id, missionId: mission.id }).find((e) => e.type === 'mission.completed')!.data.basedOn, 'approved-closure-proposal')
 
     // Decisão dinâmica sobre missão clássica é recusada pelo backend.
     const classic = w.tasks.createMission(w.tasks.create(w.project.id, { title: 'Clássica', description: '', priority: 'low', status: 'todo', agentId: null }).id, w.project.id)
@@ -543,33 +552,39 @@ test('stepBlocker: passo não aprovado, dependência pendente, agente inválido,
   assert.equal(stepBlocker(ok, ctx([...done, ok], { ...DEFAULT_LIMITS, maxSteps: 2 }))?.reason, 'limit_reached')
 })
 
-test('falha de CLI: o passo falha, os dependentes não rodam, nada é repetido e a missão espera o usuário', async () => {
+test('cota esgotada: o passo falha, nada é repetido nem trocado de provedor, e o Tech Lead é consultado (cli_unavailable)', async () => {
   const w = await world()
   w.steps.impl = () => ({ code: 1, stdout: '', stderr: 'rate limit exceeded (429)' })
   const mission = await w.startPending()
+  w.lead.push(CLOSURE)
   w.decide(mission.id, 'approve')
-  await until(() => w.phase(mission.id) === 'awaiting_decision', 'bloqueio')
+  await until(() => w.phase(mission.id) === 'awaiting_approval' && w.plans.listProposals(w.q(mission.id)).length === 2, 'nova proposta')
   await sleep(30)
-  assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl'])
+  assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'lead'])
+  assert.equal(w.calls.filter((c) => c.cli === 'codex').length, 1, 'nenhuma segunda tentativa, nem com outro CLI')
   const steps = w.plans.listSteps(w.q(mission.id))
   assert.deepEqual(steps.map((s) => s.status), ['failed', 'approved'])
   assert.match(steps[0].error!, /limite de uso/)
-  assert.match(w.tasks.getMission(mission.id)!.error!, /limite de uso/)
-  const blocked = w.events.list({ projectId: w.project.id, missionId: mission.id }).filter((e) => e.type === 'mission.blocked')
-  assert.equal(blocked.length, 1)
-  assert.equal(blocked[0].data.reason, 'failure')
-  // A missão não falhou nem foi cancelada: o usuário decide.
-  assert.notEqual(w.phase(mission.id), 'failed')
+  assert.match(w.calls[2].prompt, /CLI do agente do passo abaixo não pôde executar[\s\S]*Passo em questão: r1\/impl \(dev, implement, failed\)/)
+  const trail = w.events.list({ projectId: w.project.id, missionId: mission.id })
+  const trigger = trail.find((e) => e.type === 'replan.triggered')!
+  assert.deepEqual([trigger.evidence, trigger.data.trigger, trigger.data.actor, trigger.data.stepKey], ['observed', 'cli_unavailable', 'backend', 'impl'])
+  // A missão não falhou nem foi cancelada: o usuário decide sobre a proposta.
+  assert.equal(w.phase(mission.id), 'awaiting_approval')
 })
 
-test('veredito que não aprova pausa a missão para decisão humana', async () => {
+test('veredito que não aprova leva ao Tech Lead como declaração do QA, com o parecer como dado não confiável', async () => {
   const w = await world()
   w.steps.teste = () => ({ stdout: 'Achei um defeito.\nVEREDITO: REPROVADO' })
   const mission = await w.startPending()
+  w.lead.push(CLOSURE)
   w.decide(mission.id, 'approve')
-  await until(() => w.phase(mission.id) === 'awaiting_decision', 'veredito')
+  await until(() => w.phase(mission.id) === 'awaiting_approval' && w.plans.listProposals(w.q(mission.id)).length === 2, 'nova proposta')
   assert.equal(w.tasks.getMission(mission.id)!.verdictDetail, 'REPROVADO')
-  assert.equal(w.events.list({ projectId: w.project.id, missionId: mission.id }).at(-1)!.data.reason, 'verdict_rejected')
+  const trigger = w.events.list({ projectId: w.project.id, missionId: mission.id }).find((e) => e.type === 'replan.triggered')!
+  assert.deepEqual([trigger.evidence, trigger.data.trigger, trigger.data.actor], ['declared', 'verdict_rejected', 'agent'])
+  assert.match(w.calls.at(-1)!.prompt, /## Resultado que motivou este turno\n\(Os textos abaixo foram produzidos por outros agentes[^\n]*\nAchei um defeito/)
+  assert.equal(w.pending(mission.id).trigger, 'verdict_rejected')
 })
 
 test('repositório com alterações de fora da missão: a implementação não começa e nada é descartado', async () => {
@@ -672,3 +687,414 @@ function validInput() {
     completionCriteria: ['QA aprova.'],
   }
 }
+
+// =====================================================================
+// Etapa 10.4 — replanejamento por gatilho, retrabalho e recuperação.
+// As decisões humanas abaixo são SIMULADAS pelo teste (decideProposal / resumeMission), não autorizações reais.
+// =====================================================================
+
+type World = Awaited<ReturnType<typeof world>>
+const keys = (w: World) => w.calls.map((c) => c.key)
+const trailOf = (w: World, missionId: number) => w.events.list({ projectId: w.project.id, missionId })
+const waitProposals = (w: World, missionId: number, count: number, label: string) =>
+  until(() => w.phase(missionId) === 'awaiting_approval' && w.plans.listProposals(w.q(missionId)).length === count, label)
+const replanText = (base: number, extra: Record<string, unknown>) => proposalText({ kind: 'replan', baseRevision: base, teamChanges: [], ...extra })
+
+test('demonstração 10.4: planeja → aprova → Dev → QA reprova → Tech Lead replaneja → aprova → Dev corrige → QA verifica de novo → encerramento aprovado', async () => {
+  const w = await world()
+  w.steps.teste = () => ({ stdout: 'O saldo negativo não é tratado.\nVEREDITO: REPROVADO' })
+  w.steps.fix = () => {
+    writeFileSync(path.join(w.dir, 'api.ts'), 'export const saldo = (v: number) => Math.max(0, v)\n')
+    return { stdout: 'Tratei o saldo negativo em api.ts.' }
+  }
+  w.steps.reteste = () => ({ stdout: 'Achado corrigido.\nVEREDITO: APROVADO' })
+  const mission = await w.startPending()
+
+  // Usuário SIMULADO aprova o plano inicial.
+  w.lead.push(
+    replanText(1, {
+      reason: 'O QA reprovou: devolver ao Dev e verificar de novo.',
+      steps: [
+        stepJson('fix', 'dev', 'implement', [], [{ kind: 'plan' }, { kind: 'step', key: 'teste', revision: 1 }]),
+        stepJson('reteste', 'qa', 'verify', ['fix'], [{ kind: 'step', key: 'fix' }, { kind: 'step', key: 'teste', revision: 1 }, { kind: 'git-diff' }]),
+      ],
+    }),
+  )
+  w.decide(mission.id, 'approve')
+  await waitProposals(w, mission.id, 2, 'proposta de retrabalho')
+  assert.deepEqual(keys(w), ['lead', 'impl', 'teste', 'lead'])
+  const rework = w.pending(mission.id)
+  assert.deepEqual([rework.kind, rework.trigger, rework.status], ['replan', 'verdict_rejected', 'pending'])
+  // Nada da correção roda antes da aprovação.
+  assert.equal(w.plans.listSteps(w.q(mission.id)).length, 2)
+
+  // Usuário SIMULADO aprova o retrabalho; o Tech Lead falso já tem a recomendação de encerrar.
+  w.lead.push(closureText(2))
+  w.decide(mission.id, 'approve')
+  await waitProposals(w, mission.id, 3, 'recomendação de encerramento')
+  assert.deepEqual(keys(w), ['lead', 'impl', 'teste', 'lead', 'fix', 'reteste', 'lead'])
+
+  // A correção recebeu o parecer do QA; a nova verificação recebeu a correção, o parecer anterior e o diff.
+  const fix = w.calls.find((c) => c.key === 'fix')!
+  assert.ok(fix.args.includes('workspace-write'))
+  assert.match(fix.prompt, /Resultado de qa no passo r1\/teste \(verify\):\nO saldo negativo não é tratado/)
+  const reteste = w.calls.find((c) => c.key === 'reteste')!
+  for (const flag of ['workspace-write', 'auto_edit', 'accept-edits']) assert.ok(!reteste.args.includes(flag))
+  assert.match(reteste.prompt, /Resultado de dev no passo r2\/fix/)
+  assert.match(reteste.prompt, /Math\.max/)
+
+  // Histórico preservado: a revisão 1 continua com os resultados originais.
+  const steps = w.plans.listSteps(w.q(mission.id))
+  assert.deepEqual(steps.map((s) => [s.revision, s.key, s.status]), [[1, 'impl', 'completed'], [1, 'teste', 'completed'], [2, 'fix', 'completed'], [2, 'reteste', 'completed']])
+  assert.match(steps[1].result, /REPROVADO/)
+
+  // O terceiro turno do Tech Lead recebeu um resumo compacto, não o histórico bruto.
+  const third = w.calls.at(-1)!.prompt
+  assert.ok(third.length <= 24_000)
+  assert.match(third, /Todos os passos aprovados terminaram/)
+  assert.match(third, /Objetivo aprovado: API financeira com testes\./)
+  assert.match(third, /- r1\/teste · qa · verify · completed/)
+  assert.match(third, /- r2\/reteste · qa · verify · completed/)
+  assert.match(third, /retrabalho 1\/3/)
+  assert.match(third, /seus turnos 3\/8/)
+
+  // Usuário SIMULADO aprova o encerramento.
+  w.decide(mission.id, 'approve')
+  assert.equal(w.phase(mission.id), 'done')
+
+  const trail = trailOf(w, mission.id)
+  const at = (type: string, match: (e: (typeof trail)[number]) => boolean = () => true) => {
+    const i = trail.findIndex((e) => e.type === type && match(e))
+    assert.ok(i >= 0, `faltou ${type}`)
+    return i
+  }
+  const order = [
+    at('verdict.declared', (e) => e.data.verdictDetail === 'REPROVADO'),
+    at('replan.triggered', (e) => e.data.trigger === 'verdict_rejected'),
+    at('approval.requested', (e) => e.data.revision === 2),
+    at('approval.received', (e) => e.data.revision === 2),
+    at('plan.revised', (e) => e.data.revision === 2),
+    at('step.started', (e) => e.agentId === 'dev' && e.data.stage === 'step' && trail.some((d) => d.type === 'task.delegated' && d.correlationId === e.correlationId && d.data.key === 'fix')),
+    at('verdict.declared', (e) => e.data.verdictDetail === 'APROVADO'),
+    at('replan.triggered', (e) => e.data.trigger === 'queue_empty'),
+    at('closure.recommended'),
+    at('approval.received', (e) => e.data.revision === 3),
+    at('mission.completed'),
+  ]
+  assert.deepEqual(order, [...order].sort((a, b) => a - b))
+  const qaTrigger = trail.find((e) => e.type === 'replan.triggered' && e.data.trigger === 'verdict_rejected')!
+  assert.equal(qaTrigger.evidence, 'declared', 'o gatilho veio de um veredito declarado pelo QA')
+  assert.equal(qaTrigger.data.sourceCorrelationId, steps[1].correlationId)
+  assert.equal(trail.find((e) => e.type === 'closure.recommended')!.evidence, 'declared')
+  // Nenhum veredito virou teste verificado.
+  assert.ok(trail.filter((e) => e.type === 'tests.executed').every((e) => e.evidence === 'unavailable'))
+})
+
+test('Dev bloqueado: só a linha BLOQUEIO conta; o Tech Lead reconvoca Dados e passos futuros são substituídos, sem apagar o histórico', async () => {
+  const w = await world()
+  w.lead.length = 0
+  w.lead.push(
+    proposalText({
+      teamChanges: [change('convene', 'dados'), change('convene', 'dev'), change('convene', 'qa')],
+      steps: [stepJson('modelo', 'dados', 'analyze'), stepJson('impl', 'dev', 'implement', ['modelo'], [{ kind: 'step', key: 'modelo' }]), stepJson('teste', 'qa', 'verify', ['impl'])],
+    }),
+  )
+  // Frase solta não pede replanejamento.
+  w.steps.modelo = () => ({ stdout: 'Fiquei bloqueado um tempo pensando, mas o modelo tem duas tabelas.' })
+  w.steps.impl = () => {
+    writeFileSync(path.join(w.dir, 'api.ts'), 'export const parcial = true\n')
+    return { stdout: 'Comecei a API.\nBLOQUEIO: a modelagem não cobre parcelas de financiamento.' }
+  }
+  const mission = await w.runner.start(w.task.id, {}, { mode: 'dynamic' })
+  await waitProposals(w, mission.id, 1, 'plano')
+  w.lead.push(
+    replanText(1, {
+      reason: 'O Dev relatou bloqueio de modelagem: consultar Dados de novo.',
+      steps: [
+        stepJson('modelo2', 'dados', 'analyze', [], [{ kind: 'step', key: 'impl', revision: 1 }, { kind: 'step', key: 'modelo', revision: 1 }]),
+        stepJson('impl2', 'dev', 'implement', ['modelo2'], [{ kind: 'step', key: 'modelo2' }]),
+        stepJson('teste2', 'qa', 'verify', ['impl2'], [{ kind: 'git-diff' }]),
+      ],
+    }),
+  )
+  w.decide(mission.id, 'approve')
+  await waitProposals(w, mission.id, 2, 'replanejamento')
+  assert.deepEqual(keys(w), ['lead', 'modelo', 'impl', 'lead'])
+  const trigger = trailOf(w, mission.id).find((e) => e.type === 'replan.triggered')!
+  assert.deepEqual([trigger.evidence, trigger.data.trigger, trigger.data.actor, trigger.data.stepKey], ['declared', 'step_blocked', 'agent', 'impl'])
+  assert.match(w.calls.at(-1)!.prompt, /relatou um bloqueio[\s\S]*BLOQUEIO: a modelagem não cobre parcelas/)
+
+  w.decide(mission.id, 'approve')
+  await until(() => keys(w).includes('teste2') && w.phase(mission.id) !== 'executing', 'nova rodada')
+  assert.deepEqual(keys(w).slice(0, 7), ['lead', 'modelo', 'impl', 'lead', 'modelo2', 'impl2', 'teste2'])
+  // Dados foi consultado de novo com o bloqueio do Dev e a análise anterior.
+  assert.match(w.calls.find((c) => c.key === 'modelo2')!.prompt, /Resultado de dev no passo r1\/impl[\s\S]*BLOQUEIO[\s\S]*Resultado de dados no passo r1\/modelo/)
+  const steps = w.plans.listSteps(w.q(mission.id))
+  assert.deepEqual(
+    steps.map((s) => [s.revision, s.key, s.status]),
+    [[1, 'modelo', 'completed'], [1, 'impl', 'completed'], [1, 'teste', 'superseded'], [2, 'modelo2', 'completed'], [2, 'impl2', 'completed'], [2, 'teste2', 'completed']],
+  )
+  // A equipe não mudou: reconsultar um participante não é convocação.
+  assert.equal(trailOf(w, mission.id).filter((e) => e.type === 'team.joined' && e.data.revision === 2).length, 0)
+})
+
+test('sinais de passo: só linhas marcadas contam', () => {
+  assert.deepEqual(parseStepSignals('Tudo certo.'), { blocked: '', risk: '' })
+  assert.deepEqual(parseStepSignals('Estou bloqueado e vejo um risco grande.'), { blocked: '', risk: '' })
+  assert.deepEqual(parseStepSignals('Feito.\n**BLOQUEIO:** falta a chave da API de pagamentos'), { blocked: 'falta a chave da API de pagamentos', risk: '' })
+  assert.deepEqual(parseStepSignals('- RISCO: senhas guardadas sem hash'), { blocked: '', risk: 'senhas guardadas sem hash' })
+})
+
+test('risco de especialista: o Tech Lead propõe convocar Segurança; rejeitado, o plano vigente continua sem convocar ninguém', async () => {
+  const w = await world()
+  w.lead.length = 0
+  w.lead.push(
+    proposalText({
+      teamChanges: [change('convene', 'dados'), change('convene', 'dev'), change('convene', 'qa')],
+      steps: [stepJson('modelo', 'dados', 'analyze'), stepJson('impl', 'dev', 'implement', ['modelo']), stepJson('teste', 'qa', 'verify', ['impl'])],
+    }),
+  )
+  w.steps.modelo = () => ({ stdout: 'Modelo pronto.\nRISCO: as senhas seriam guardadas sem hash.' })
+  const mission = await w.runner.start(w.task.id, {}, { mode: 'dynamic' })
+  await waitProposals(w, mission.id, 1, 'plano')
+  w.lead.push(replanText(1, { teamChanges: [change('convene', 'seguranca', 'Auditar o armazenamento de senhas.')], steps: [stepJson('auditoria', 'seguranca', 'review', [], [{ kind: 'step', key: 'modelo', revision: 1 }])] }))
+  w.decide(mission.id, 'approve')
+  await waitProposals(w, mission.id, 2, 'proposta de convocação')
+  assert.equal(trailOf(w, mission.id).find((e) => e.type === 'replan.triggered')!.data.trigger, 'risk_flagged')
+
+  // Usuário SIMULADO rejeita: nada de Segurança, e os passos aprovados da revisão 1 seguem.
+  w.lead.push(closureText(2))
+  w.decide(mission.id, 'reject', { feedback: 'Vamos tratar senhas depois.' })
+  await waitProposals(w, mission.id, 3, 'encerramento')
+  assert.deepEqual(keys(w), ['lead', 'modelo', 'lead', 'impl', 'teste', 'lead'])
+  assert.ok(!w.calls.some((c) => c.key === 'auditoria'))
+  assert.deepEqual(w.plans.listSteps(w.q(mission.id)).map((s) => s.status), ['completed', 'completed', 'completed'])
+  assert.equal(w.tasks.getMission(mission.id)!.teamSnapshot!.seguranca, undefined)
+  // A rejeição aparece para o Tech Lead no turno seguinte.
+  assert.match(w.calls.at(-1)!.prompt, /revisão 2 REJEITADA \(convene seguranca\)\. Usuário: "Vamos tratar senhas depois\."/)
+})
+
+test('replanejamento pedido pelo usuário: o texto vai ao Tech Lead, a origem fica registrada e o reenvio não consulta de novo', async () => {
+  const w = await world()
+  const mission = await w.startPending()
+  w.decide(mission.id, 'approve')
+  // Fila vazia: o Tech Lead falso não responde com proposta (duas vezes) e a missão para.
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'parada')
+  const before = keys(w).length
+  w.lead.push(closureText(1))
+  const first = await w.runner.resumeMission({ missionId: mission.id, action: 'replan', detail: 'Troque o banco para PostgreSQL.', opId: 'op-replan-1' })
+  assert.equal(first.applied, true)
+  await waitProposals(w, mission.id, 2, 'nova proposta')
+  assert.equal(keys(w).length, before + 1)
+  assert.match(w.calls.at(-1)!.prompt, /pediu uma alteração na missão[\s\S]*Texto do usuário: Troque o banco para PostgreSQL\./)
+  const trail = trailOf(w, mission.id)
+  assert.equal(trail.findLast((e) => e.type === 'mission.resumed')!.data.actor, 'user')
+  const trigger = trail.findLast((e) => e.type === 'replan.triggered')!
+  assert.deepEqual([trigger.data.trigger, trigger.data.actor, trigger.evidence], ['user_request', 'user', 'observed'])
+  // Reenvio (reconexão): nada é consultado de novo.
+  assert.equal((await w.runner.resumeMission({ missionId: mission.id, action: 'replan', opId: 'op-replan-1' })).applied, false)
+  await sleep(30)
+  assert.equal(keys(w).length, before + 1)
+})
+
+test('retrabalho com limite: depois de maxReworkRounds o Tech Lead não é consultado de novo e a missão para', async () => {
+  const w = await world({ limits: { maxReworkRounds: 1 } })
+  w.steps.teste = () => ({ stdout: 'Defeito A.\nVEREDITO: REPROVADO' })
+  w.steps.reteste = () => ({ stdout: 'Defeito B.\nVEREDITO: REPROVADO' })
+  const mission = await w.startPending()
+  w.lead.push(replanText(1, { steps: [stepJson('fix', 'dev', 'implement', [], [{ kind: 'step', key: 'teste', revision: 1 }]), stepJson('reteste', 'qa', 'verify', ['fix'])] }))
+  w.decide(mission.id, 'approve')
+  await waitProposals(w, mission.id, 2, 'retrabalho 1')
+  w.decide(mission.id, 'approve')
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'limite')
+  assert.deepEqual(keys(w), ['lead', 'impl', 'teste', 'lead', 'fix', 'reteste'])
+  const hit = trailOf(w, mission.id).find((e) => e.type === 'limit.reached')!
+  assert.deepEqual([hit.data.limit, hit.data.value, hit.data.max], ['maxReworkRounds', 1, 1])
+  assert.match(w.tasks.getMission(mission.id)!.error!, /maxReworkRounds: 1\/1/)
+  // Mesmo uma proposta de retrabalho já pronta seria recusada pelas regras.
+  const ctx = { techLeadId: 'architect', agents: w.configs.list(), steps: w.plans.listSteps(w.q(mission.id)), proposals: w.plans.listProposals(w.q(mission.id)), limits: resolveLimits({ maxReworkRounds: 1 }), trigger: 'verdict_rejected' }
+  const more = { ...validInput(), kind: 'replan' as const, steps: [{ key: 'fix2', agentId: 'dev', mode: 'implement' as const, objective: 'Corrigir B.', dependsOn: [], inputs: [] }] }
+  assert.match(validateProposal(more, ctx).join(' '), /maxReworkRounds = 2 \(máximo 1\)/)
+  assert.ok(replanLimit(ctx, 'verdict_rejected'))
+  // Outro gatilho (pedido do usuário) ainda pode consultar o Tech Lead.
+  assert.equal(replanLimit(ctx, 'user_request'), null)
+})
+
+test('controle de laço: respostas recusadas gastam turnos; sem turnos, nem o pedido do usuário chama o CLI', async () => {
+  const w = await world({ limits: { maxTechLeadTurns: 2 } })
+  const mission = await w.runner.start(w.task.id, {}, { mode: 'dynamic', limits: { maxTechLeadTurns: 2 } })
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'duas respostas inválidas')
+  assert.deepEqual(keys(w), ['lead', 'lead'])
+  assert.equal(w.tasks.getMission(mission.id)!.leadTurns, 2)
+  await w.runner.resumeMission({ missionId: mission.id, action: 'replan', opId: 'op-x' })
+  await sleep(30)
+  assert.deepEqual(keys(w), ['lead', 'lead'])
+  assert.equal(trailOf(w, mission.id).findLast((e) => e.type === 'limit.reached')!.data.limit, 'maxTechLeadTurns')
+  assert.equal(w.phase(mission.id), 'awaiting_decision')
+  const state = await w.runner.recoveryState(w.project.id, mission.id)
+  assert.ok(!state.actions.includes('replan'))
+})
+
+test('falha comum (step_failed) e dependência que não terminou (dependency_failed) consultam o Tech Lead', async () => {
+  const w = await world()
+  w.steps.impl = () => ({ code: 1, stdout: '', stderr: 'SyntaxError: token inesperado' })
+  const mission = await w.startPending()
+  w.decide(mission.id, 'approve')
+  // Sem proposta válida do Tech Lead falso, a missão para.
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'falha')
+  assert.equal(trailOf(w, mission.id).find((e) => e.type === 'replan.triggered')!.data.trigger, 'step_failed')
+  assert.equal(w.calls.filter((c) => c.key === 'impl').length, 1)
+
+  // "Continuar" com o QA dependendo do passo que falhou: o backend reconhece o bloqueio e consulta o Tech Lead.
+  w.lead.push(closureText(1))
+  const resumed = await w.runner.resumeMission({ missionId: mission.id, action: 'continue', opId: 'op-c' })
+  assert.match(resumed.message, /dependem de um passo que não terminou/)
+  await waitProposals(w, mission.id, 2, 'proposta')
+  assert.equal(trailOf(w, mission.id).findLast((e) => e.type === 'replan.triggered')!.data.trigger, 'dependency_failed')
+  assert.ok(!w.calls.some((c) => c.key === 'teste'), 'o passo dependente não rodou')
+})
+
+test('esclarecimento no modo dinâmico: a pergunta para a missão e a resposta volta ao Tech Lead', async () => {
+  const w = await world()
+  w.lead.length = 0
+  w.lead.push('Preciso saber antes.\nESCLARECIMENTO NECESSÁRIO: Qual banco de dados devo usar?', proposalText())
+  const mission = await w.runner.start(w.task.id, {}, { mode: 'dynamic' })
+  await until(() => w.phase(mission.id) === 'awaiting_clarification', 'pergunta')
+  assert.deepEqual(w.plans.listProposals(w.q(mission.id)), [])
+  await w.runner.clarify(mission.id, 'PostgreSQL 16.')
+  await waitProposals(w, mission.id, 1, 'proposta depois da resposta')
+  assert.match(w.calls[1].prompt, /Pergunta: Qual banco de dados devo usar\?\nResposta: PostgreSQL 16\./)
+  assert.equal(w.tasks.getMission(mission.id)!.clarifications![0].answer, 'PostgreSQL 16.')
+})
+
+// ---------- recuperação ----------
+
+test('demonstração de recuperação: execução → interrupção → reinício → estado recuperado → decisão humana → continuação segura', async () => {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'aidw-rec-')), 'app.db')
+  const first = await world({ file })
+  first.steps.impl = () => {
+    writeFileSync(path.join(first.dir, 'api.ts'), 'export const parcial = true // escrito antes da queda\n')
+    return new Promise<Reply>(() => {}) // o processo "morre" aqui
+  }
+  const mission = await first.startPending()
+  first.decide(mission.id, 'approve')
+  await until(() => first.calls.some((c) => c.key === 'impl'), 'Dev rodando')
+
+  // Reinício: outra instância abre o mesmo banco e o mesmo repositório.
+  const second = await world({ file, dir: first.dir })
+  second.runner.recover()
+  assert.equal(second.phase(mission.id), 'awaiting_decision')
+  assert.deepEqual(keys(second), [], 'nada é relançado sozinho')
+  const interrupted = trailOf(second, mission.id).find((e) => e.type === 'step.interrupted')!
+  assert.deepEqual([interrupted.evidence, interrupted.data.key, interrupted.data.mayHaveWrittenFiles], ['observed', 'impl', true])
+  // Eventos, proposta e decisão da primeira instância continuam lá.
+  assert.ok(trailOf(second, mission.id).some((e) => e.type === 'approval.received'))
+
+  const state = await second.runner.recoveryState(second.project.id, mission.id)
+  assert.deepEqual(state.retryable.map((s) => [s.key, s.status]), [['impl', 'interrupted']])
+  assert.deepEqual(state.files, { available: true, known: [], unknown: ['api.ts'] })
+  assert.deepEqual(state.actions, ['continue', 'retry_step', 'replan', 'close', 'cancel'])
+  assert.equal(state.reason, 'interrupted')
+  await assert.rejects(second.runner.recoveryState(second.project.id + 1, mission.id), /não encontrada neste projeto/)
+
+  // Usuário SIMULADO autoriza reexecutar o passo, sem aceitar as alterações: a escrita não começa.
+  second.steps.impl = () => ({ stdout: 'Terminei a API em cima do que já existia.' })
+  await second.runner.resumeMission({ missionId: mission.id, action: 'retry_step', stepId: state.retryable[0].id, opId: 'op-retry' })
+  await until(() => second.phase(mission.id) === 'awaiting_decision', 'bloqueio por alterações')
+  assert.deepEqual(keys(second), [])
+  assert.match(second.tasks.getMission(mission.id)!.error!, /alterações que a missão não registrou \(api\.ts\)/)
+  assert.match(readFileSync(path.join(second.dir, 'api.ts'), 'utf8'), /escrito antes da queda/, 'nada foi descartado')
+  // O reenvio da mesma autorização não cria outra tentativa.
+  assert.equal((await second.runner.resumeMission({ missionId: mission.id, action: 'retry_step', stepId: state.retryable[0].id, opId: 'op-retry' })).applied, false)
+
+  // Usuário SIMULADO aceita preservar as alterações e continua.
+  second.lead.push(closureText(1))
+  await second.runner.resumeMission({ missionId: mission.id, action: 'continue', acceptChanges: true, opId: 'op-continue' })
+  await waitProposals(second, mission.id, 2, 'recomendação de encerramento')
+  assert.deepEqual(keys(second), ['impl', 'teste', 'lead'])
+  const impl = second.plans.listSteps(second.q(mission.id)).filter((s) => s.key === 'impl')
+  assert.deepEqual(impl.map((s) => [s.attempt, s.status]), [[1, 'interrupted'], [2, 'completed']])
+  const resumed = trailOf(second, mission.id).filter((e) => e.type === 'mission.resumed')
+  assert.deepEqual(resumed.map((e) => [e.data.action, e.data.acceptedFiles]), [['retry_step', []], ['continue', ['api.ts']]])
+  assert.ok(second.tasks.getMission(mission.id)!.files.includes('api.ts'))
+
+  second.decide(mission.id, 'approve')
+  assert.equal(second.phase(mission.id), 'done')
+})
+
+test('reinício durante a análise do Tech Lead: nada é relançado; só replanejar, encerrar ou cancelar', async () => {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'aidw-rec-tl-')), 'app.db')
+  const first = await world({ file })
+  first.lead.push(new Promise<string>(() => {}))
+  const mission = await first.runner.start(first.task.id, {}, { mode: 'dynamic' })
+  await until(() => first.calls.length === 1, 'Tech Lead pensando')
+
+  const second = await world({ file, dir: first.dir })
+  second.runner.recover()
+  assert.equal(second.phase(mission.id), 'awaiting_decision')
+  const state = await second.runner.recoveryState(second.project.id, mission.id)
+  assert.deepEqual(state.actions, ['replan', 'close', 'cancel'])
+  assert.deepEqual(keys(second), [])
+  await assert.rejects(second.runner.resumeMission({ missionId: mission.id, action: 'continue', opId: 'op-1' }), /Não há passo aprovado/)
+
+  second.lead.push(proposalText())
+  await second.runner.resumeMission({ missionId: mission.id, action: 'replan', opId: 'op-2' })
+  await waitProposals(second, mission.id, 1, 'proposta')
+  assert.deepEqual(keys(second), ['lead'])
+  assert.equal(second.pending(mission.id).trigger, 'user_request')
+})
+
+test('cancelar durante a recuperação: nada roda depois, e o passo interrompido continua registrado', async () => {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'aidw-rec-cancel-')), 'app.db')
+  const first = await world({ file })
+  first.steps.impl = () => new Promise<Reply>(() => {})
+  const mission = await first.startPending()
+  first.decide(mission.id, 'approve')
+  await until(() => first.calls.some((c) => c.key === 'impl'), 'Dev rodando')
+
+  const second = await world({ file, dir: first.dir })
+  second.runner.recover()
+  const step = (await second.runner.recoveryState(second.project.id, mission.id)).retryable[0]
+  second.runner.cancel(mission.id)
+  assert.equal(second.phase(mission.id), 'cancelled')
+  await assert.rejects(second.runner.resumeMission({ missionId: mission.id, action: 'retry_step', stepId: step.id, opId: 'op-late' }), /não está aguardando a sua decisão/)
+  assert.throws(() => second.plans.retryStep(step.id), /não está aguardando a sua decisão/)
+  assert.deepEqual(second.plans.listSteps(second.q(mission.id)).map((s) => s.status), ['interrupted', 'cancelled'])
+  assert.deepEqual((await second.runner.recoveryState(second.project.id, mission.id)).actions, [])
+  await sleep(30)
+  assert.deepEqual(keys(second), [])
+})
+
+test('reexecução: só passo interrompido ou que falhou, uma tentativa por vez, e retryableSteps acompanha', async () => {
+  const w = await world()
+  w.steps.impl = () => ({ code: 1, stdout: '', stderr: 'erro qualquer' })
+  const mission = await w.startPending()
+  w.decide(mission.id, 'approve')
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'falha')
+  const [impl, teste] = w.plans.listSteps(w.q(mission.id))
+  assert.deepEqual(retryableSteps(w.plans.listSteps(w.q(mission.id))).map((s) => s.key), ['impl'])
+  // Passo ainda aprovado: nada a reexecutar, nenhuma linha nova.
+  assert.equal(w.plans.retryStep(teste.id).applied, false)
+  const retry = w.plans.retryStep(impl.id)
+  assert.deepEqual([retry.applied, retry.step.attempt, retry.step.status], [true, 2, 'approved'])
+  assert.equal(w.plans.retryStep(impl.id).applied, false)
+  assert.deepEqual(retryableSteps(w.plans.listSteps(w.q(mission.id))), [])
+})
+
+test('protocolo de recuperação: mensagens validadas; missão clássica não aceita retomada dinâmica', async () => {
+  const base = { type: 'mission-resume', missionId: 1, action: 'continue', opId: 'op-1' }
+  assert.deepEqual(parseClientMessage(JSON.stringify(base)), base)
+  assert.deepEqual(parseClientMessage(JSON.stringify({ ...base, action: 'retry_step', stepId: 3, acceptChanges: true })), { ...base, action: 'retry_step', stepId: 3, acceptChanges: true })
+  for (const bad of [{ action: 'retry_step' }, { action: 'force' }, { opId: '' }, { acceptChanges: 'sim' }, { stepId: 0 }, { detail: 'x'.repeat(2001) }]) {
+    assert.equal(parseClientMessage(JSON.stringify({ ...base, ...bad })), null, JSON.stringify(bad))
+  }
+  assert.equal(parseClientMessage(JSON.stringify({ type: 'mission-recovery', projectId: 1 })), null)
+
+  const w = await world()
+  const classic = await w.runner.start(w.task.id)
+  await until(() => w.phase(classic.id) === 'awaiting_approval', 'plano clássico')
+  await assert.rejects(w.runner.resumeMission({ missionId: classic.id, action: 'continue', opId: 'x' }), /fluxo clássico/)
+  await assert.rejects(w.runner.recoveryState(w.project.id, classic.id), /fluxo clássico/)
+  // O reinício continua falhando só as missões clássicas que tinham CLI rodando.
+  w.runner.cancel(classic.id)
+})
