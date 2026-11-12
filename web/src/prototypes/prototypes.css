@@ -3307,6 +3307,12 @@
 }
 
 /* Container de Páginas do Studio (Tarefas, Agentes, Memória, Observabilidade) */
+.studio-chat-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .studio-page-view {
   flex: 1;
   overflow-y: auto;

@@ -12,6 +12,7 @@ const loaders = {
   observability: () => import('./ui/ObservabilityCenter.tsx'),
   home: () => import('./ui/HomeView.tsx'),
   prototypes: () => import('./prototypes/PrototypeShowcase.tsx'),
+  chat: () => import('./ui/chat/ChatView.tsx'),
 }
 
 export const LazyPhaserGame = lazy(() => loaders.phaser().then((m) => ({ default: m.PhaserGame })))
@@ -22,6 +23,7 @@ export const LazyAgentCenter = lazy(() => loaders.agents().then((m) => ({ defaul
 export const LazyMemoryCenter = lazy(() => loaders.memory().then((m) => ({ default: m.MemoryCenter })))
 export const LazyObservabilityCenter = lazy(() => loaders.observability().then((m) => ({ default: m.ObservabilityCenter })))
 export const LazyHomeView = lazy(() => loaders.home().then((m) => ({ default: m.HomeView })))
+export const LazyChatView = lazy(() => loaders.chat().then((m) => ({ default: m.ChatView })))
 export const LazyPrototypeShowcase = lazy(() => loaders.prototypes().then((m) => ({ default: m.PrototypeShowcase })))
 
 /**

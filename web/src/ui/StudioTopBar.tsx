@@ -4,7 +4,7 @@ import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type { AgentInfo, GitStatus, MissionInfo, TaskInfo, Workspace, ProjectInfo } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 
-export type StudioTab = 'office' | 'tasks' | 'history' | 'agents' | 'memory' | 'observability'
+export type StudioTab = 'chat' | 'office' | 'tasks' | 'history' | 'agents' | 'memory' | 'observability'
 
 interface Props {
   workspace: Workspace
@@ -317,6 +317,13 @@ export function StudioTopBar({
       <div className="topbar-right">
         {/* Navegação Global para Painéis */}
         <nav className="studio-nav-tabs">
+          <button
+            type="button"
+            className={`btn-studio-nav ${activeTab === 'chat' ? 'active' : ''}`}
+            onClick={() => onSelectTab('chat')}
+          >
+            💬 Chat
+          </button>
           <button
             type="button"
             className={`btn-studio-nav ${activeTab === 'office' ? 'active' : ''}`}

@@ -8,6 +8,7 @@ import { StudioTopBar, type StudioTab } from './ui/StudioTopBar.tsx'
 import { StudioOfficeView } from './ui/StudioOfficeView.tsx'
 import {
   LazyAgentCenter,
+  LazyChatView,
   LazyHistoryPanel,
   LazyHomeView,
   LazyMemoryCenter,
@@ -40,8 +41,8 @@ function App() {
     subscribe,
   } = useServer()
 
-  // O Escritório 2D Studio é agora a tela inicial e padrão do sistema
-  const [activeTab, setActiveTab] = useState<NavTab>('office')
+  // Etapa 12.1: o chat com o Tech Lead é a porta de entrada; o escritório segue a uma aba.
+  const [activeTab, setActiveTab] = useState<NavTab>('chat')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [observabilityMissionId, setObservabilityMissionId] = useState<number | null>(null)
   const [observabilityAgentId, setObservabilityAgentId] = useState<string | null>(null)
@@ -132,6 +133,26 @@ function App() {
         {status === 'offline' && (
           <div className="banner" style={{ margin: '8px 16px', background: '#ef444422', borderColor: '#ef4444' }}>
             Sem conexão com o backend local. Inicie com <code>npm run dev</code>.
+          </div>
+        )}
+
+        {/* 1b. Chat com o Tech Lead (entrada principal) */}
+        {activeTab === 'chat' && (
+          <div className="studio-chat-view">
+            <ErrorBoundary fallbackTitle="Falha no chat">
+              <Suspense fallback={pageFallback}>
+                <LazyChatView
+                  projectId={workspace.activeProjectId}
+                  projectName={activeProject?.name}
+                  agents={agents}
+                  configs={allConfigs.length > 0 ? allConfigs : configs}
+                  online={online}
+                  send={send}
+                  subscribe={subscribe}
+                  onOpenTasks={() => setActiveTab('tasks')}
+                />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         )}
 
