@@ -2670,18 +2670,236 @@
   border-radius: 4px;
 }
 
-.project-pill {
+/* Seletor Rápido de Projeto & Explorador de Pastas do PC */
+.project-selector-wrapper {
+  position: relative;
+}
+
+.project-pill-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   background: #111827;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 4px 10px;
-  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 5px 12px;
+  border-radius: 8px;
   font-size: 12px;
+  color: #f1f5f9;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.project-pill-btn:hover {
+  background: #1e293b;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.pill-caret {
+  font-size: 9px;
+  color: #94a3b8;
+  margin-left: 2px;
 }
 
 .branch-tag {
+  font-size: 10px;
+  color: #10b981;
+  font-family: monospace;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Popover do Seletor de Pastas */
+.project-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 380px;
+  background: #0d1322;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(16px);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: popover-drop 0.15s ease-out;
+}
+
+@keyframes popover-drop {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.popover-head {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.popover-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #060911;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.popover-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #f1f5f9;
+  font-size: 12px;
+  outline: none;
+}
+
+/* Botão de Procurar no Computador (Windows Explorer) */
+.popover-browse-action {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.btn-browse-computer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(37, 99, 235, 0.15) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.btn-browse-computer:hover {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(37, 99, 235, 0.25) 100%);
+  border-color: #38bdf8;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
+}
+
+.browse-icon {
+  font-size: 22px;
+}
+
+.browse-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.browse-text strong {
+  font-size: 13px;
+  color: #38bdf8;
+}
+
+.browse-text span {
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 1px;
+}
+
+.browse-arrow {
+  color: #38bdf8;
+  font-size: 14px;
+}
+
+/* Atalhos Comuns */
+.popover-shortcuts {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shortcuts-lbl, .recent-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
+.shortcuts-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shortcut-tag {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.shortcut-tag:hover {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Lista de Recentes */
+.popover-recent-list {
+  padding: 8px 12px;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recent-project-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.recent-project-row:hover {
+  background: #1e293b;
+}
+
+.recent-project-row.is-current {
+  background: rgba(56, 189, 248, 0.1);
+  border-left: 2px solid #38bdf8;
+}
+
+.row-icon {
+  font-size: 14px;
+  color: #38bdf8;
+}
+
+.row-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.row-info strong {
+  font-size: 12px;
+  color: #f8fafc;
+}
+
+.row-path {
+  font-size: 10px;
+  color: #64748b;
+  font-family: monospace;
+}
+
+.row-branch {
   font-size: 10px;
   color: #10b981;
   font-family: monospace;

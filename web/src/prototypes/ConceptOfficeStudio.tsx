@@ -154,11 +154,53 @@ export function ConceptOfficeStudio() {
   const [selectedGitFile, setSelectedGitFile] = useState('src/estoque.js')
   const [commitMessage, setCommitMessage] = useState('')
 
+  // Estado do Seletor Rápido de Projetos / Pastas
+  const [projectModalOpen, setProjectModalOpen] = useState(false)
+  const [projectSearch, setProjectSearch] = useState('')
+  const [activeProject, setActiveProject] = useState({
+    name: 'aidw-e2e-etapa8',
+    path: 'C:\\AI DEV WORD\\repos\\aidw-e2e-etapa8',
+    branch: 'main'
+  })
+
+  const RECENT_PROJECTS = [
+    { name: 'aidw-e2e-etapa8', path: 'C:\\AI DEV WORD\\repos\\aidw-e2e-etapa8', branch: 'main', isGit: true, lastOpened: 'Ativo agora' },
+    { name: 'ai-dev-world-core', path: 'C:\\AI DEV WORD', branch: 'etapa-9-redesign-prototipos', isGit: true, lastOpened: 'Há 1 hora' },
+    { name: 'ecommerce-backend', path: 'C:\\Projetos\\ecommerce-backend', branch: 'feat/checkout', isGit: true, lastOpened: 'Ontem' },
+    { name: 'fintech-api', path: 'D:\\Dev\\fintech-api', branch: 'main', isGit: true, lastOpened: 'Há 3 dias' }
+  ]
+
+  const filteredProjects = RECENT_PROJECTS.filter(p =>
+    p.name.toLowerCase().includes(projectSearch.toLowerCase()) ||
+    p.path.toLowerCase().includes(projectSearch.toLowerCase())
+  )
+
   const handleSelectAgent = useCallback((id: string) => {
     setSelectedAgentId(id)
     setSideTab('agent')
     setSidePanelOpen(true)
   }, [])
+
+  const handleBrowseNativeFolder = async () => {
+    try {
+      if ('showDirectoryPicker' in window) {
+        // @ts-expect-error File System Access API
+        const dirHandle = await window.showDirectoryPicker()
+        if (dirHandle?.name) {
+          setActiveProject({
+            name: dirHandle.name,
+            path: `C:\\...\\${dirHandle.name}`,
+            branch: 'main'
+          })
+          setProjectModalOpen(false)
+        }
+      } else {
+        alert('Janela de navegação nativa do Windows Explorer aberta.')
+      }
+    } catch {
+      // cancelado pelo usuário
+    }
+  }
 
   const selectedDetail = selectedAgentId ? AGENTS_DETAILS[selectedAgentId] : AGENTS_DETAILS.dev
 
@@ -173,10 +215,113 @@ export function ConceptOfficeStudio() {
             <span className="brand-tag">STUDIO 2D</span>
           </div>
 
-          <div className="project-pill" title="Repositório ativo">
-            <span className="pill-icon">📁</span>
-            <span>aidw-e2e-etapa8</span>
-            <span className="branch-tag">main</span>
+          {/* Botão de Projeto Ativo com Seletor Rápido */}
+          <div className="project-selector-wrapper">
+            <button
+              type="button"
+              className="project-pill-btn"
+              onClick={() => setProjectModalOpen(!projectModalOpen)}
+              title="Clique para trocar de pasta ou procurar no PC"
+            >
+              <span className="pill-icon">📁</span>
+              <strong className="pill-name">{activeProject.name}</strong>
+              <span className="branch-tag">{activeProject.branch}</span>
+              <span className="pill-caret">{projectModalOpen ? '▲' : '▼'}</span>
+            </button>
+
+            {/* Modal / Popover de Busca Simples no PC Inteiro */}
+            {projectModalOpen && (
+              <div className="project-popover">
+                <div className="popover-head">
+                  <div className="popover-search-box">
+                    <span className="search-icon">🔍</span>
+                    <input
+                      type="text"
+                      className="popover-search-input"
+                      placeholder="Buscar projetos recentes ou digite o caminho..."
+                      value={projectSearch}
+                      onChange={e => setProjectSearch(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                {/* Botão de Ação Direta no Sistema de Arquivos */}
+                <div className="popover-browse-action">
+                  <button
+                    type="button"
+                    className="btn-browse-computer"
+                    onClick={handleBrowseNativeFolder}
+                  >
+                    <span className="browse-icon">📂</span>
+                    <div className="browse-text">
+                      <strong>Procurar Pasta no Computador...</strong>
+                      <span>Abre o Windows Explorer para escolher qualquer diretório</span>
+                    </div>
+                    <span className="browse-arrow">➔</span>
+                  </button>
+                </div>
+
+                {/* Atalhos Rápidos de Pastas Comuns */}
+                <div className="popover-shortcuts">
+                  <span className="shortcuts-lbl">Atalhos Comuns:</span>
+                  <div className="shortcuts-list">
+                    <button
+                      type="button"
+                      className="shortcut-tag"
+                      onClick={() => {
+                        setActiveProject({ name: 'AI DEV WORD', path: 'C:\\AI DEV WORD', branch: 'main' })
+                        setProjectModalOpen(false)
+                      }}
+                    >
+                      🏠 C:\AI DEV WORD
+                    </button>
+                    <button
+                      type="button"
+                      className="shortcut-tag"
+                      onClick={() => {
+                        setActiveProject({ name: 'Projetos', path: 'C:\\Projetos', branch: 'main' })
+                        setProjectModalOpen(false)
+                      }}
+                    >
+                      📁 C:\Projetos
+                    </button>
+                    <button
+                      type="button"
+                      className="shortcut-tag"
+                      onClick={() => {
+                        setActiveProject({ name: 'Desktop', path: 'C:\\Users\\Desktop', branch: 'main' })
+                        setProjectModalOpen(false)
+                      }}
+                    >
+                      💻 Área de Trabalho
+                    </button>
+                  </div>
+                </div>
+
+                {/* Lista de Projetos Recentes */}
+                <div className="popover-recent-list">
+                  <span className="recent-lbl">Projetos Recentes:</span>
+                  {filteredProjects.map(p => (
+                    <div
+                      key={p.path}
+                      className={`recent-project-row ${activeProject.name === p.name ? 'is-current' : ''}`}
+                      onClick={() => {
+                        setActiveProject({ name: p.name, path: p.path, branch: p.branch })
+                        setProjectModalOpen(false)
+                      }}
+                    >
+                      <span className="row-icon">{p.isGit ? '' : '📁'}</span>
+                      <div className="row-info">
+                        <strong>{p.name}</strong>
+                        <span className="row-path">{p.path}</span>
+                      </div>
+                      <span className="row-branch">{p.branch}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
