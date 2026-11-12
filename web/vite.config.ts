@@ -1,15 +1,17 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-const BACKEND = 'http://127.0.0.1:4517'
+// AIDW_PORT / AIDW_WEB_PORT permitem uma instância isolada (ex.: validação) ao lado da principal.
+const BACKEND = `http://127.0.0.1:${process.env.AIDW_PORT ?? 4517}`
+const WEB_PORT = Number(process.env.AIDW_WEB_PORT ?? 5173)
 
 // O navegador fala só com o Vite; /api e /ws são repassados ao backend local.
-// strictPort: a porta 5173 faz parte da lista de origens aceitas pelo backend.
+// strictPort: a porta da interface faz parte da lista de origens aceitas pelo backend.
 export default defineConfig({
   plugins: [react()],
   server: {
     host: '127.0.0.1',
-    port: 5173,
+    port: WEB_PORT,
     strictPort: true,
     proxy: {
       '/api': BACKEND,
