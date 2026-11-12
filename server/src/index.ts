@@ -7,6 +7,7 @@ import { ALLOWED_ORIGINS, DATA_DIR, DATABASE_FILE, HOST, PORT } from './config.t
 import { GitService } from './git/service.ts'
 import { HistoryStore } from './history/store.ts'
 import { MemoryStore } from './memory/store.ts'
+import { EventStore } from './observability/store.ts'
 import { ProjectStore } from './projects/store.ts'
 import { createAppServer } from './server.ts'
 import { SkillStore } from './skills/store.ts'
@@ -22,6 +23,7 @@ const tasks = new TaskStore(projects.db, history)
 const agentConfigs = new AgentConfigStore(projects.db)
 const memory = new MemoryStore(projects.db, history)
 const skills = new SkillStore(projects.db)
+const events = new EventStore(projects.db)
 const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
 
 // Sincroniza agentes personalizados e o CLI de cada agente conforme a configuração persistida
@@ -72,6 +74,7 @@ const team = new TeamRunner({
   configs: agentConfigs,
   memory,
   skills,
+  events,
   launch: (cli, args, options) => {
     const executable = findCli(cli)
     if (!executable) throw new Error(`CLI "${cli}" não encontrado no PATH.`)
@@ -92,6 +95,7 @@ const server = createAppServer({
   agentConfigs,
   memory,
   skills,
+  events,
   allowedOrigins: ALLOWED_ORIGINS,
 })
 

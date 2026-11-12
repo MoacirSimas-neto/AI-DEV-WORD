@@ -11,6 +11,7 @@ import type {
   ClientMessage,
   MemoryFilter,
   MemoryInput,
+  MissionEvent,
   CustomAgentInput,
   CustomAgentPatch,
   MissionSpecialistSelection,
@@ -28,6 +29,7 @@ import { defaultSpecializations } from './agents/specializations.ts'
 import type { GitService } from './git/service.ts'
 import type { HistoryStore } from './history/store.ts'
 import { HUMAN, type MemoryStore } from './memory/store.ts'
+import type { EventStore } from './observability/store.ts'
 import type { ProjectStore } from './projects/store.ts'
 import type { SkillStore } from './skills/store.ts'
 import type { TaskStore } from './tasks/store.ts'
@@ -46,6 +48,8 @@ export interface AppServerOptions {
   memory: MemoryStore
   /** Sem registro de skills, as mensagens de skill são ignoradas. */
   skills?: SkillStore
+  /** Sem trilha de eventos, events-list devolve lista vazia. */
+  events?: EventStore
   allowedOrigins: string[]
 }
 
@@ -333,6 +337,16 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         (msg.state === 'inherit' || msg.state === 'on' || msg.state === 'off')
         ? { type: 'skill-set-agent', agentId: msg.agentId, skillId: msg.skillId, state: msg.state }
         : null
+    case 'events-list':
+      if (!isId(msg.projectId)) return null
+      if (msg.missionId !== undefined && !isId(msg.missionId)) return null
+      if (msg.afterId !== undefined && !isId(msg.afterId)) return null
+      return {
+        type: 'events-list',
+        projectId: msg.projectId,
+        ...(msg.missionId !== undefined ? { missionId: msg.missionId } : {}),
+        ...(msg.afterId !== undefined ? { afterId: msg.afterId } : {}),
+      }
     default:
       return null
   }
@@ -351,6 +365,7 @@ export function createAppServer({
   agentConfigs,
   memory,
   skills,
+  events,
   allowedOrigins,
 }: AppServerOptions): Server {
   for (const cfg of agentConfigs.list()) {
@@ -748,6 +763,15 @@ export function createAppServer({
           specializations: defaultSpecializations.list(),
         })
         break
+      case 'events-list':
+        // A consulta é sempre por projeto: eventos de outro projeto nunca entram na resposta.
+        send(socket, {
+          type: 'mission-events',
+          projectId: message.projectId,
+          missionId: message.missionId ?? null,
+          events: events?.list({ projectId: message.projectId, missionId: message.missionId, afterId: message.afterId }) ?? [],
+        })
+        break
       case 'skills-list':
         if (skills) send(socket, { type: 'skills', skills: skills.list(), overrides: skills.overrides() })
         break
@@ -812,6 +836,7 @@ export function createAppServer({
     })
   }
   const onSkills = () => skills && broadcast({ type: 'skills', skills: skills.list(), overrides: skills.overrides() })
+  const onEvent = (event: MissionEvent) => broadcast({ type: 'mission-event', event })
   const onMemory = (projectId: number) => broadcast({ type: 'memory-changed', projectId })
   const onMissionOutput = (missionId: number, data: string) => broadcast({ type: 'mission-output', missionId, data })
   const onGitChange = async (event: { agentId?: string; cwd: string; files: string[]; summary: string }) => {
@@ -831,6 +856,7 @@ export function createAppServer({
   agentConfigs.on('change', onConfigs)
   memory.on('change', onMemory)
   skills?.on('change', onSkills)
+  events?.on('added', onEvent)
   team.on('output', onMissionOutput)
   team.on('git-change', onGitChange)
 
@@ -845,6 +871,7 @@ export function createAppServer({
     agentConfigs.off('change', onConfigs)
     memory.off('change', onMemory)
     skills?.off('change', onSkills)
+    events?.off('added', onEvent)
     team.off('output', onMissionOutput)
     team.off('git-change', onGitChange)
     for (const client of wss.clients) client.terminate()

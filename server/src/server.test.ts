@@ -14,6 +14,7 @@ import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { GitService } from './git/service.ts'
 import { HistoryStore } from './history/store.ts'
 import { MemoryStore } from './memory/store.ts'
+import { EventStore } from './observability/store.ts'
 import { ProjectStore } from './projects/store.ts'
 import { createAppServer, parseClientMessage } from './server.ts'
 import { SkillStore } from './skills/store.ts'
@@ -30,6 +31,7 @@ const tasks = new TaskStore(projects.db, history)
 const agentConfigs = new AgentConfigStore(projects.db)
 const memory = new MemoryStore(projects.db, history)
 const skills = new SkillStore(projects.db)
+const events = new EventStore(projects.db)
 const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: 'fake 1.0', auth: 'ok' }))
 const git = new GitService()
 const team = new TeamRunner({
@@ -71,6 +73,7 @@ const server = createAppServer({
   agentConfigs,
   memory,
   skills,
+  events,
   allowedOrigins: [ORIGIN],
 })
 let port = 0
@@ -514,5 +517,38 @@ test('WebSocket de skills: snapshot, ativação global, ajuste por agente, cria�
   assert.equal(parseClientMessage(JSON.stringify({ type: 'skill-set-enabled', id: 'ponytail', enabled: 'yes' })), null)
 
   skills.setEnabled('caveman-lite', true)
+  client.socket.close()
+})
+
+test('eventos: events-list responde só com a trilha do projeto pedido e eventos novos chegam ao vivo, sem credenciais', async () => {
+  const client = await connect()
+  await client.waitFor('snapshot')
+  const base = { type: 'cli.finished', evidence: 'observed', summary: 'CLI terminou' } as const
+  events.record({ ...base, projectId: 901, missionId: 11, data: { exitCode: 0 } })
+  events.record({ ...base, projectId: 901, missionId: 12 })
+  events.record({ ...base, projectId: 902, missionId: 13, summary: 'de outro projeto' })
+  for (let i = 0; i < 3; i++) await client.waitFor('mission-event')
+
+  client.send({ type: 'events-list', projectId: 901 })
+  const all = await client.waitFor('mission-events')
+  assert.equal(all.projectId, 901)
+  assert.deepEqual(all.events.map((e) => e.missionId), [11, 12])
+  assert.equal(all.events[0].data.exitCode, 0)
+
+  client.send({ type: 'events-list', projectId: 901, missionId: 12, afterId: all.events[0].id })
+  assert.deepEqual((await client.waitFor('mission-events')).events.map((e) => e.missionId), [12])
+  // Missão de outro projeto não vaza pelo id.
+  client.send({ type: 'events-list', projectId: 901, missionId: 13 })
+  assert.deepEqual((await client.waitFor('mission-events')).events, [])
+
+  events.record({ ...base, projectId: 901, missionId: 11, summary: 'falhou: token=abcd1234efgh', data: { apiKey: 'sk-live-1234567890abcdefgh' } })
+  const live = JSON.stringify(await client.waitFor('mission-event'))
+  assert.ok(!live.includes('abcd1234efgh') && !live.includes('sk-live'))
+
+  assert.equal(parseClientMessage(JSON.stringify({ type: 'events-list' })), null)
+  assert.equal(parseClientMessage(JSON.stringify({ type: 'events-list', projectId: '1' })), null)
+  assert.equal(parseClientMessage(JSON.stringify({ type: 'events-list', projectId: 1, missionId: -2 })), null)
+  assert.equal(parseClientMessage(JSON.stringify({ type: 'events-list', projectId: 1, afterId: 'x' })), null)
+  assert.deepEqual(parseClientMessage(JSON.stringify({ type: 'events-list', projectId: 1, missionId: 2, extra: 'x' })), { type: 'events-list', projectId: 1, missionId: 2 })
   client.socket.close()
 })
