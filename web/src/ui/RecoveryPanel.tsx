@@ -53,7 +53,22 @@ export function RecoveryPanel({ mission, nameOf, online, send, subscribe }: Prop
     if (!opId) return
     setBusy(true)
     setResult(null)
-    send(resumeMessage(mission.id, action, opId, { stepId, detail: action === 'replan' ? detail : undefined, acceptChanges: accept }))
+    send(
+      resumeMessage(mission.id, action, opId, {
+        stepId,
+        detail: action === 'replan' ? detail : undefined,
+        acceptChanges: accept && (state?.files.unknown.length ?? 0) > 0,
+        acceptFiles: state?.files.unknown,
+      }),
+    )
+  }
+
+  // A lista de alterações mudou: a confirmação anterior não cobre a lista nova.
+  const unknownKey = state?.files.unknown.join('\n') ?? ''
+  const [acceptedKey, setAcceptedKey] = useState(unknownKey)
+  if (unknownKey !== acceptedKey) {
+    setAcceptedKey(unknownKey)
+    setAccept(false)
   }
 
   if (!state) return <section className="dyn-recovery dyn-dim">Consultando o estado da missão…</section>

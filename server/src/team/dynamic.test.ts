@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -641,9 +641,19 @@ test('arquivo da missão editado por fora entre passos: a próxima escrita não 
   await until(() => w.phase(mission.id) === 'awaiting_decision', 'bloqueio de novo')
   assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'revisar'])
 
+  // Um arquivo muda depois que o usuário viu a lista: a confirmação não o cobre e nada roda.
+  writeFileSync(path.join(w.dir, 'surgiu-depois.ts'), 'export const x = 1\n')
+  await assert.rejects(
+    w.runner.resumeMission({ missionId: mission.id, action: 'continue', acceptChanges: true, acceptFiles: ['api.ts'], opId: 'op-lista-velha' }),
+    /que você não viu ao confirmar \(surgiu-depois\.ts\)/,
+  )
+  assert.equal(w.phase(mission.id), 'awaiting_decision')
+  assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'revisar'])
+  rmSync(path.join(w.dir, 'surgiu-depois.ts'))
+
   // Usuário SIMULADO aceita a edição: o conteúdo atual vira a nova referência e a escrita segue.
   w.lead.push(closureText(1))
-  await w.runner.resumeMission({ missionId: mission.id, action: 'continue', acceptChanges: true, opId: 'op-aceitar' })
+  await w.runner.resumeMission({ missionId: mission.id, action: 'continue', acceptChanges: true, acceptFiles: ['api.ts'], opId: 'op-aceitar' })
   await waitProposals(w, mission.id, 2, 'encerramento')
   assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'revisar', 'impl2', 'lead'])
   const resumed = trailOf(w, mission.id).filter((e) => e.type === 'mission.resumed').at(-1)!
@@ -1061,7 +1071,7 @@ test('demonstração de recuperação: execução → interrupção → reiníci
 
   // Usuário SIMULADO aceita preservar as alterações e continua.
   second.lead.push(closureText(1))
-  await second.runner.resumeMission({ missionId: mission.id, action: 'continue', acceptChanges: true, opId: 'op-continue' })
+  await second.runner.resumeMission({ missionId: mission.id, action: 'continue', acceptChanges: true, acceptFiles: ['api.ts'], opId: 'op-continue' })
   await waitProposals(second, mission.id, 2, 'recomendação de encerramento')
   assert.deepEqual(keys(second), ['impl', 'teste', 'lead'])
   const impl = second.plans.listSteps(second.q(mission.id)).filter((s) => s.key === 'impl')
@@ -1136,8 +1146,8 @@ test('reexecução: só passo interrompido ou que falhou, uma tentativa por vez,
 test('protocolo de recuperação: mensagens validadas; missão clássica não aceita retomada dinâmica', async () => {
   const base = { type: 'mission-resume', missionId: 1, action: 'continue', opId: 'op-1' }
   assert.deepEqual(parseClientMessage(JSON.stringify(base)), base)
-  assert.deepEqual(parseClientMessage(JSON.stringify({ ...base, action: 'retry_step', stepId: 3, acceptChanges: true })), { ...base, action: 'retry_step', stepId: 3, acceptChanges: true })
-  for (const bad of [{ action: 'retry_step' }, { action: 'force' }, { opId: '' }, { acceptChanges: 'sim' }, { stepId: 0 }, { detail: 'x'.repeat(2001) }]) {
+  assert.deepEqual(parseClientMessage(JSON.stringify({ ...base, action: 'retry_step', stepId: 3, acceptChanges: true, acceptFiles: ['a.ts'] })), { ...base, action: 'retry_step', stepId: 3, acceptChanges: true, acceptFiles: ['a.ts'] })
+  for (const bad of [{ action: 'retry_step' }, { action: 'force' }, { opId: '' }, { acceptChanges: 'sim' }, { acceptChanges: true, acceptFiles: 'a.ts' }, { acceptChanges: true, acceptFiles: [1] }, { acceptChanges: true }, { stepId: 0 }, { detail: 'x'.repeat(2001) }]) {
     assert.equal(parseClientMessage(JSON.stringify({ ...base, ...bad })), null, JSON.stringify(bad))
   }
   assert.equal(parseClientMessage(JSON.stringify({ type: 'mission-recovery', projectId: 1 })), null)
@@ -1288,7 +1298,7 @@ test('interface ↔ backend: recuperação mostra o que o backend permite e só 
 
     // Com a confirmação explícita: segue preservando o arquivo.
     second.lead.push(closureText(1))
-    ui.send(resumeMessage(mission.id, 'continue', 'op-r2', { acceptChanges: true }))
+    ui.send(resumeMessage(mission.id, 'continue', 'op-r2', { acceptChanges: true, acceptFiles: state.files.unknown }))
     assert.equal((await ui.take('mission-resume-result', (m) => m.opId === 'op-r2')).applied, true)
     await waitProposals(second, mission.id, 2, 'continuação')
     assert.deepEqual(keys(second), ['impl', 'teste', 'lead'])

@@ -100,8 +100,8 @@ test('interface: as mensagens construídas pela tela são aceitas pelo protocolo
   const plain = resumeMessage(1, 'continue', 'op-2')
   assert.deepEqual(parseClientMessage(JSON.stringify(plain)), { type: 'mission-resume', missionId: 1, action: 'continue', opId: 'op-2' })
   assert.equal('acceptChanges' in resumeMessage(1, 'continue', 'op-2', { acceptChanges: false }), false)
-  const retry = resumeMessage(1, 'retry_step', 'op-3', { stepId: 9, acceptChanges: true, detail: ' ' })
-  assert.deepEqual(parseClientMessage(JSON.stringify(retry)), { type: 'mission-resume', missionId: 1, action: 'retry_step', opId: 'op-3', stepId: 9, acceptChanges: true })
+  const retry = resumeMessage(1, 'retry_step', 'op-3', { stepId: 9, acceptChanges: true, acceptFiles: ['a.ts'], detail: ' ' })
+  assert.deepEqual(parseClientMessage(JSON.stringify(retry)), { type: 'mission-resume', missionId: 1, action: 'retry_step', opId: 'op-3', stepId: 9, acceptChanges: true, acceptFiles: ['a.ts'] })
 })
 
 test('interface: clique duplicado não envia duas decisões', () => {

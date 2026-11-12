@@ -258,6 +258,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (msg.action === 'retry_step' && msg.stepId === undefined) return null
       if (msg.detail !== undefined && (typeof msg.detail !== 'string' || msg.detail.length > 2000)) return null
       if (msg.acceptChanges !== undefined && typeof msg.acceptChanges !== 'boolean') return null
+      if (msg.acceptFiles !== undefined && !(Array.isArray(msg.acceptFiles) && msg.acceptFiles.length <= 1000 && msg.acceptFiles.every((f) => typeof f === 'string' && f.length > 0 && f.length <= 1000))) return null
+      if (msg.acceptChanges === true && msg.acceptFiles === undefined) return null
       return {
         type: 'mission-resume',
         missionId: msg.missionId,
@@ -266,6 +268,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         ...(msg.stepId !== undefined ? { stepId: msg.stepId } : {}),
         ...(typeof msg.detail === 'string' ? { detail: msg.detail } : {}),
         ...(msg.acceptChanges !== undefined ? { acceptChanges: msg.acceptChanges } : {}),
+        ...(msg.acceptFiles !== undefined ? { acceptFiles: msg.acceptFiles as string[] } : {}),
       }
     case 'plan-list':
       return isId(msg.projectId) && isId(msg.missionId) ? { type: 'plan-list', projectId: msg.projectId, missionId: msg.missionId } : null

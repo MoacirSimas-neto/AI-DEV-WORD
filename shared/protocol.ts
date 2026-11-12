@@ -856,8 +856,10 @@ export type ClientMessage =
    * Decisão humana sobre uma missão dinâmica parada. continue = rodar os passos aprovados elegíveis;
    * retry_step = executar de novo um passo interrompido ou que falhou (stepId); replan = consultar o Tech Lead.
    * acceptChanges = seguir preservando alterações no repositório que a missão não registrou.
+   * acceptFiles = a lista exata que o usuário viu ao confirmar (obrigatória com acceptChanges): o backend
+   * recusa se surgiu alteração fora dela, para o aceite não cobrir o que ninguém viu.
    */
-  | { type: 'mission-resume'; missionId: number; action: ResumeAction; stepId?: number; detail?: string; acceptChanges?: boolean; opId: string }
+  | { type: 'mission-resume'; missionId: number; action: ResumeAction; stepId?: number; detail?: string; acceptChanges?: boolean; acceptFiles?: string[]; opId: string }
   /** Propostas (com as decisões) e passos de uma missão dinâmica. Também serve para retomar depois de reconectar. */
   | { type: 'plan-list'; projectId: number; missionId: number }
   /** Aprova o plano e libera o Dev. */

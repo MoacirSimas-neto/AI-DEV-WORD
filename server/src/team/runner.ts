@@ -1756,7 +1756,7 @@ export class TeamRunner extends EventEmitter {
    * Decisão humana sobre uma missão dinâmica parada. Só a interface chama isto. O reenvio do mesmo opId
    * não executa de novo; nenhuma ação contorna as validações de passo, equipe, permissão e limites.
    */
-  async resumeMission(input: { missionId: number; action: ResumeAction; stepId?: number; detail?: string; acceptChanges?: boolean; opId: string }): Promise<{ applied: boolean; message: string }> {
+  async resumeMission(input: { missionId: number; action: ResumeAction; stepId?: number; detail?: string; acceptChanges?: boolean; acceptFiles?: string[]; opId: string }): Promise<{ applied: boolean; message: string }> {
     const plans = this.requirePlans()
     const mission = this.requireMission(input.missionId)
     if (mission.mode !== 'dynamic') throw new Error('Esta missão usa o fluxo clássico.')
@@ -1780,6 +1780,12 @@ export class TeamRunner extends EventEmitter {
         accepted = [...new Set([...status.files.map((f) => f.path).filter((path) => !mission.files.includes(path)), ...drifted])]
       } finally {
         this.preparing = false
+      }
+      // O aceite vale só para o que o usuário viu: algo que mudou depois da confirmação não entra calado.
+      const shown = new Set(input.acceptFiles ?? [])
+      const unseen = accepted.filter((p) => !shown.has(p))
+      if (unseen.length) {
+        throw new Error(`Há alterações que você não viu ao confirmar (${listPaths(unseen)}). Confira a lista atualizada e confirme de novo.`)
       }
     }
     // O mundo pode ter mudado durante a consulta ao Git.

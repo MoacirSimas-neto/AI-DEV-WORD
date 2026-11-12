@@ -316,7 +316,7 @@ export function resumeMessage(
   missionId: number,
   action: ResumeAction,
   opId: string,
-  options: { stepId?: number; detail?: string; acceptChanges?: boolean } = {},
+  options: { stepId?: number; detail?: string; acceptChanges?: boolean; acceptFiles?: string[] } = {},
 ): ClientMessage {
   const detail = options.detail?.trim()
   return {
@@ -326,7 +326,8 @@ export function resumeMessage(
     opId,
     ...(options.stepId !== undefined ? { stepId: options.stepId } : {}),
     ...(detail ? { detail: detail.slice(0, 2000) } : {}),
-    ...(options.acceptChanges ? { acceptChanges: true } : {}),
+    // O aceite sempre leva a lista que o usuário viu; o backend recusa o que estiver fora dela.
+    ...(options.acceptChanges ? { acceptChanges: true, acceptFiles: [...(options.acceptFiles ?? [])] } : {}),
   }
 }
 
