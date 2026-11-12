@@ -1,0 +1,411 @@
+import { useState } from 'react'
+
+interface StudioMember {
+  id: string
+  name: string
+  role: string
+  cli: string
+  model: string
+  state: 'active' | 'idle' | 'waiting' | 'error'
+  currentThought: string
+  avatarIcon: string
+  avatarColor: string
+  progress: number
+  skills: string[]
+  metrics: {
+    tasksCompleted: number
+    evidencesGenerated: number
+    lastActive: string
+  }
+}
+
+const MEMBERS: StudioMember[] = [
+  {
+    id: 'lead',
+    name: 'Ada Lovelace',
+    role: 'Tech Lead & Arquiteto',
+    cli: 'agy',
+    model: 'gemini-3.8-flash',
+    state: 'idle',
+    currentThought: 'Plano aprovado. Monitorando conformidade dos contratos da equipe.',
+    avatarIcon: '📐',
+    avatarColor: '#38bdf8',
+    progress: 100,
+    skills: ['Ponytail v5.3', 'Caveman Lite'],
+    metrics: { tasksCompleted: 14, evidencesGenerated: 28, lastActive: 'Há 5 min' }
+  },
+  {
+    id: 'dev',
+    name: 'Linus Torvalds',
+    role: 'Engenheiro de Software',
+    cli: 'codex',
+    model: 'gpt-4o',
+    state: 'active',
+    currentThought: 'Implementando src/estoque.js com Map privado e centavos inteiros...',
+    avatarIcon: '⚡',
+    avatarColor: '#10b981',
+    progress: 82,
+    skills: ['Ponytail v5.3', 'Clean Modules'],
+    metrics: { tasksCompleted: 32, evidencesGenerated: 94, lastActive: 'Agora' }
+  },
+  {
+    id: 'sec',
+    name: 'Bruce Schneier',
+    role: 'Auditor de Segurança',
+    cli: 'agy',
+    model: 'gemini-3.8-flash',
+    state: 'waiting',
+    currentThought: 'Aguardando diff do Dev para auditoria estática de integridade.',
+    avatarIcon: '🛡️',
+    avatarColor: '#a855f7',
+    progress: 0,
+    skills: ['Threat Modeling'],
+    metrics: { tasksCompleted: 9, evidencesGenerated: 18, lastActive: 'Há 12 min' }
+  },
+  {
+    id: 'qa',
+    name: 'Margaret Hamilton',
+    role: 'Engenheira de Qualidade',
+    cli: 'agy',
+    model: 'gemini-3.8-flash',
+    state: 'waiting',
+    currentThought: 'Pronta para verificação dos 51 testes e asserções de limite.',
+    avatarIcon: '🔍',
+    avatarColor: '#f59e0b',
+    progress: 0,
+    skills: ['Strict Assertions', 'Boundary Check'],
+    metrics: { tasksCompleted: 27, evidencesGenerated: 62, lastActive: 'Há 8 min' }
+  }
+]
+
+export function ConceptHybridWorkspace() {
+  const [activeTab, setActiveTab] = useState<'workspace' | 'operations' | 'terminal'>('workspace')
+  const [selectedMember, setSelectedMember] = useState<StudioMember>(MEMBERS[1])
+  const [isIsoPerspective, setIsIsoPerspective] = useState(true)
+  const [inspectorOpen, setInspectorOpen] = useState(true)
+
+  return (
+    <div className="proto-mix-container">
+      {/* 1. TOP BAR INTEGRADA */}
+      <div className="proto-concept-banner">
+        <div className="proto-mix-brand">
+          <span className="proto-badge" style={{ background: 'linear-gradient(135deg, #10b981, #38bdf8)', color: '#090d16' }}>
+            CONCEITO D — THE MIX
+          </span>
+          <strong>Living Studio & Command Center</strong>
+          <span className="proto-sub"> · Estações 2.5D Vivas + Dashboard Executivo + PTY Integrado</span>
+        </div>
+
+        <div className="proto-controls-group">
+          <div className="proto-mix-tabs">
+            <button
+              type="button"
+              className={activeTab === 'workspace' ? 'active' : ''}
+              onClick={() => setActiveTab('workspace')}
+            >
+              🏢 Workspace 2.5D
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'operations' ? 'active' : ''}
+              onClick={() => setActiveTab('operations')}
+            >
+              📊 Operações & Trilha
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'terminal' ? 'active' : ''}
+              onClick={() => setActiveTab('terminal')}
+            >
+              ⌨️ Terminal PTY
+            </button>
+          </div>
+          <span className="proto-mock-pill">PROTÓTIPO HÍBRIDO B + C</span>
+        </div>
+      </div>
+
+      {/* 2. BANNER DA MISSÃO EM ANDAMENTO (Visível em todos os modos) */}
+      <div className="proto-mix-mission-bar">
+        <div className="mission-bar-left">
+          <span className="proto-mission-pill">MISSÃO ATIVA #104</span>
+          <h3>Módulo de Cadastro e Cálculo Contábil</h3>
+          <span className="proto-mission-repo">aidw-e2e-etapa8 · branch: main</span>
+        </div>
+
+        {/* Stepper Compacto com Nós e Conectores */}
+        <div className="proto-mini-stepper">
+          <div className="mini-step step-done" title="Planejamento concluído">
+            <span className="mini-num">✓</span>
+            <span>Planejamento</span>
+          </div>
+          <div className="mini-line line-done" />
+          <div className="mini-step step-active" title="Desenvolvimento em execução">
+            <span className="mini-num">⚡</span>
+            <span>Dev (Linus)</span>
+          </div>
+          <div className="mini-line" />
+          <div className="mini-step step-waiting" title="Aguardando Dev">
+            <span className="mini-num">3</span>
+            <span>Segurança</span>
+          </div>
+          <div className="mini-line" />
+          <div className="mini-step step-waiting" title="Aguardando Auditoria">
+            <span className="mini-num">4</span>
+            <span>QA Review</span>
+          </div>
+        </div>
+
+        <div className="mission-bar-right">
+          <span className="tag tag-green">● Em Execução</span>
+          <span className="tag-evidences">74 Evidências</span>
+        </div>
+      </div>
+
+      {/* 3. CORPO PRINCIPAL COM CONTEÚDO DINÂMICO */}
+      <div className="proto-mix-body">
+        {/* ABA 1: LIVING WORKSPACE 2.5D MODERNO */}
+        {activeTab === 'workspace' && (
+          <div className="proto-mix-stage-area">
+            {/* Palco Espacial Isométrico */}
+            <div className={`proto-mix-iso-canvas ${isIsoPerspective ? 'is-iso' : 'is-flat'}`}>
+              <div className="proto-mix-grid-floor" />
+
+              {/* Linhas de Fluxo de Dados Animadas */}
+              <svg className="proto-flow-lines" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <path d="M 20 30 Q 35 25 50 50" className="flow-path flow-active" />
+                <path d="M 50 50 Q 65 75 80 40" className="flow-path flow-pending" />
+                <path d="M 80 40 Q 60 70 50 80" className="flow-path flow-pending" />
+              </svg>
+
+              {/* Estações 2.5D com Avatares Vivos */}
+              {MEMBERS.map((m, idx) => {
+                const isSelected = selectedMember.id === m.id
+                // Coordenadas das estações no plano
+                const positions = [
+                  { x: 20, y: 30 },
+                  { x: 50, y: 50 },
+                  { x: 80, y: 40 },
+                  { x: 50, y: 80 }
+                ]
+                const pos = positions[idx]
+
+                return (
+                  <div
+                    key={m.id}
+                    className={`proto-mix-pod ${isSelected ? 'is-selected' : ''} state-${m.state}`}
+                    style={{ left: `${pos.x}%`, top: `${pos.y}%`, borderColor: m.avatarColor }}
+                    onClick={() => setSelectedMember(m)}
+                  >
+                    {/* Personagem com Glow e Animação */}
+                    <div className="proto-mix-char-holder" style={{ background: `radial-gradient(circle, ${m.avatarColor}33 0%, transparent 70%)` }}>
+                      <div className={`proto-mix-char ${m.state === 'active' ? 'char-pulse' : ''}`}>
+                        <span className="char-emoji">{m.avatarIcon}</span>
+                        <span className={`status-beacon beacon-${m.state}`} />
+                      </div>
+                      {m.state === 'active' && (
+                        <div className="proto-coding-particles">
+                          <span className="cp1">⚡</span>
+                          <span className="cp2">💻</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Balão de Pensamento / Tarefa Ativa */}
+                    <div className="proto-mix-thought">
+                      <strong style={{ color: m.avatarColor }}>{m.name}</strong>
+                      <p>{m.currentThought}</p>
+                    </div>
+
+                    {/* Base da Estação com Progresso */}
+                    <div className="proto-mix-pod-base">
+                      <span className="pod-role">{m.role}</span>
+                      {m.progress > 0 && (
+                        <div className="pod-bar">
+                          <div className="pod-bar-fill" style={{ width: `${m.progress}%`, background: m.avatarColor }} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Alternador de Câmera 2.5D / 2D */}
+            <div className="proto-cam-switch">
+              <button 
+                type="button" 
+                onClick={() => setIsIsoPerspective(!isIsoPerspective)}
+                title="Alternar entre Perspectiva 2.5D e Planta Baixa"
+              >
+                {isIsoPerspective ? '📐 Visão 2.5D Ativa' : '📄 Planta Baixa 2D'}
+              </button>
+            </div>
+
+            {/* Inspector Lateral Retrátil Estilo Studio */}
+            {inspectorOpen ? (
+              <aside className="proto-mix-inspector">
+                <header className="inspector-head">
+                  <div className="inspector-avatar" style={{ borderColor: selectedMember.avatarColor }}>
+                    <span>{selectedMember.avatarIcon}</span>
+                  </div>
+                  <div>
+                    <h4>{selectedMember.name}</h4>
+                    <p>{selectedMember.role}</p>
+                  </div>
+                  <button type="button" className="btn-close" onClick={() => setInspectorOpen(false)}>✕</button>
+                </header>
+
+                <div className="inspector-body">
+                  <div className="inspector-box">
+                    <span className="box-tag">Status em Tempo Real</span>
+                    <p className="thought-focus">{selectedMember.currentThought}</p>
+                    <div className="progress-row">
+                      <span>Progresso:</span>
+                      <strong>{selectedMember.progress}%</strong>
+                    </div>
+                  </div>
+
+                  <div className="inspector-box">
+                    <span className="box-tag">Provedor & CLI</span>
+                    <p><strong>{selectedMember.cli}</strong> ({selectedMember.model})</p>
+                  </div>
+
+                  <div className="inspector-box">
+                    <span className="box-tag">Skills Injetadas</span>
+                    <div className="skills-row">
+                      {selectedMember.skills.map(s => (
+                        <span key={s} className="tag tag-skill">{s}</span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="inspector-box">
+                    <span className="box-tag">Métricas</span>
+                    <ul className="metrics-list">
+                      <li>Tarefas concluídas: <strong>{selectedMember.metrics.tasksCompleted}</strong></li>
+                      <li>Evidências gravadas: <strong>{selectedMember.metrics.evidencesGenerated}</strong></li>
+                      <li>Último ciclo: <strong>{selectedMember.metrics.lastActive}</strong></li>
+                    </ul>
+                  </div>
+
+                  <div className="inspector-actions">
+                    <button type="button" className="btn-action primary" onClick={() => setActiveTab('terminal')}>
+                      Abrir Terminal PTY
+                    </button>
+                    <button type="button" className="btn-action" onClick={() => setActiveTab('operations')}>
+                      Ver na Trilha de Evidências
+                    </button>
+                  </div>
+                </div>
+              </aside>
+            ) : (
+              <button type="button" className="btn-open-inspector" onClick={() => setInspectorOpen(true)}>
+                ◀ Inspecionar {selectedMember.name}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ABA 2: PAINEL OPERACIONAL & TRILHA DE EVIDÊNCIAS */}
+        {activeTab === 'operations' && (
+          <div className="proto-mix-ops-view">
+            <div className="ops-grid">
+              {/* Card 1: Roster Resumido */}
+              <div className="ops-card">
+                <h3>Agentes na Missão</h3>
+                <div className="ops-members-list">
+                  {MEMBERS.map(m => (
+                    <div 
+                      key={m.id} 
+                      className={`ops-member-row ${selectedMember.id === m.id ? 'active' : ''}`}
+                      onClick={() => setSelectedMember(m)}
+                    >
+                      <span className="ops-icon">{m.avatarIcon}</span>
+                      <div className="ops-member-meta">
+                        <strong>{m.name}</strong>
+                        <small>{m.role}</small>
+                      </div>
+                      <span className={`tag tag-status-${m.state}`}>{m.state}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Card 2: Trilha de Observabilidade ao Vivo */}
+              <div className="ops-card ops-evidence-col">
+                <div className="ops-card-head">
+                  <h3>Trilha de Evidências Reais</h3>
+                  <span className="proto-live-indicator">AO VIVO (WEBSOCKET)</span>
+                </div>
+                <div className="ops-timeline">
+                  <div className="ops-ev-item ev-observed">
+                    <span className="ev-bullet">●</span>
+                    <div>
+                      <div className="ev-top">
+                        <strong>Alteração Git Observada pelo Backend</strong>
+                        <time>22:42:15</time>
+                      </div>
+                      <p>Arquivo <code>src/estoque.js</code> criado (+68 linhas). Sem commit/push automático.</p>
+                      <span className="ev-badge-obs">● Observado pelo sistema</span>
+                    </div>
+                  </div>
+
+                  <div className="ops-ev-item ev-context">
+                    <span className="ev-bullet">▲</span>
+                    <div>
+                      <div className="ev-top">
+                        <strong>Skills Globais Injetadas no Prompt</strong>
+                        <time>22:41:50</time>
+                      </div>
+                      <p>Ponytail v5.3.3 + Caveman Lite aplicadas no contexto do Dev (Linus).</p>
+                      <span className="ev-badge-ctx">▲ Incluído no contexto</span>
+                    </div>
+                  </div>
+
+                  <div className="ops-ev-item ev-declared">
+                    <span className="ev-bullet">◆</span>
+                    <div>
+                      <div className="ev-top">
+                        <strong>Execução de Testes Declarada</strong>
+                        <time>22:41:30</time>
+                      </div>
+                      <p>"51 testes unitários criados com node:test" — execução de terminal não verificada pelo sistema.</p>
+                      <span className="ev-badge-dec">◆ Declarado pelo agente</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ABA 3: TERMINAL PTY HEADLESS INTEGRADO */}
+        {activeTab === 'terminal' && (
+          <div className="proto-mix-term-view">
+            <header className="term-bar">
+              <div className="term-bar-left">
+                <span className="term-dot green" />
+                <strong>Terminal PTY — {selectedMember.name}</strong>
+                <span className="term-cli-badge">{selectedMember.cli} · {selectedMember.model}</span>
+              </div>
+              <span className="term-cwd">~/aidw-e2e-etapa8</span>
+            </header>
+            <div className="term-screen">
+              <p className="dim">$ {selectedMember.cli} exec -p "Implementar classe Estoque com aritmética de inteiros"</p>
+              <p className="cyan">Codex: analisando diretrizes do Arquiteto e regras de dados...</p>
+              <p className="cyan">Codex: gerando src/estoque.js com Map privado...</p>
+              <p className="cyan">Codex: gerando test/estoque.test.js com 51 cenários de teste...</p>
+              <p className="yellow">▶ node --test test/estoque.test.js</p>
+              <p className="dim">  ✔ validarProduto (8.2ms)</p>
+              <p className="dim">  ✔ Estoque: soma em centavos (1.6ms)</p>
+              <p className="dim">  ✔ limites de precisão e Number.isSafeInteger (0.6ms)</p>
+              <p className="green">ℹ tests 51, pass 51, fail 0 (133ms)</p>
+              <p className="white">Codex: código e testes prontos. Liberando diff para auditoria de segurança.</p>
+              <p className="cursor-line">_</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
