@@ -461,7 +461,84 @@ export interface ActivityEntry {
   agentId: string | null
 }
 
+/**
+ * De onde vem a informação de um evento:
+ * observed    = registrada diretamente pelo backend ou por um processo que ele executou;
+ * declared    = está na resposta do modelo, sem comprovação independente;
+ * context     = foi entregue ao mecanismo de execução (prompt). Não prova que o modelo usou ou seguiu;
+ * unavailable = a ferramenta não oferece a informação.
+ */
+export type EvidenceKind = 'observed' | 'declared' | 'context' | 'unavailable'
+export type MissionEventState = 'started' | 'completed' | 'failed' | 'cancelled' | 'info'
+
+export type MissionEventType =
+  | 'mission.started'
+  | 'mission.completed'
+  | 'mission.cancelled'
+  /** Falha registrada (inclui missão interrompida pelo fechamento do app). */
+  | 'mission.failed'
+  | 'agent.selected'
+  /** Skills resolvidas para o agente no início da missão (ainda não entregues a nenhum CLI). */
+  | 'skills.configured'
+  /** data: from, to, stage, objective. O correlationId identifica a execução delegada. */
+  | 'task.delegated'
+  /** context: o texto da skill entrou no prompt. Nunca significa instalação nativa nem uso pelo modelo. */
+  | 'skill.included'
+  | 'skill.failed'
+  | 'memory.included'
+  /** context: resultado de um agente incluído no prompt de outro (data: from, to, artifact, ref). */
+  | 'result.forwarded'
+  | 'planner.started'
+  | 'planner.finished'
+  | 'specialist.started'
+  | 'specialist.finished'
+  | 'dev.started'
+  | 'dev.finished'
+  | 'qa.started'
+  | 'qa.finished'
+  | 'cli.started'
+  | 'cli.finished'
+  /** declared: o agente respondeu. O texto fica na missão (data.ref); aqui só tamanho e hash. */
+  | 'plan.produced'
+  | 'result.declared'
+  | 'verdict.declared'
+  | 'clarification.requested'
+  | 'clarification.received'
+  | 'approval.requested'
+  | 'approval.received'
+  /** observed: estado do Git antes/depois da etapa do Dev. */
+  | 'files.changed'
+  /** declared: a resposta do agente menciona testes. O sistema não os executou. */
+  | 'tests.declared'
+  /** observed quando o backend executa o comando (data: command, exitCode); unavailable quando não executou nenhum. */
+  | 'tests.executed'
+  /** A missão atingiu o limite de eventos: os seguintes não foram gravados. */
+  | 'log.truncated'
+
+/** Um fato da trilha de execução de uma missão. Textos passam por remoção de segredos; nunca traz prompts nem conteúdo de arquivos. */
+export interface MissionEvent {
+  /** Único e crescente: a ordem dos ids é a ordem dos fatos. */
+  id: number
+  projectId: number
+  missionId: number
+  taskId: number | null
+  agentId: string | null
+  type: MissionEventType
+  at: string
+  state: MissionEventState
+  evidence: EvidenceKind
+  summary: string
+  /** Metadados e referências às evidências (ex.: ref 'missions.plan', sha256, código de saída). */
+  data: Record<string, unknown>
+  /** Liga os eventos de uma mesma execução delegada (da delegação ao resultado). */
+  correlationId: string | null
+}
+
 export type ServerMessage =
+  /** Resposta a events-list: em ordem de id. */
+  | { type: 'mission-events'; projectId: number; missionId: number | null; events: MissionEvent[] }
+  /** Evento novo, ao vivo. */
+  | { type: 'mission-event'; event: MissionEvent }
   | {
       type: 'snapshot'
       agents: AgentInfo[]
@@ -579,3 +656,5 @@ export type ClientMessage =
   | { type: 'skill-save'; skill: SkillInput }
   | { type: 'skill-set-enabled'; id: string; enabled: boolean }
   | { type: 'skill-set-agent'; agentId: string; skillId: string; state: 'inherit' | 'on' | 'off' }
+  /** Trilha de eventos de um projeto (ou de uma missão dele). afterId pagina: só eventos com id maior. */
+  | { type: 'events-list'; projectId: number; missionId?: number; afterId?: number }
