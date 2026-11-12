@@ -46,6 +46,7 @@ export function StudioTopBar({
 }: Props) {
   const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [projectSearch, setProjectSearch] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
 
   // Escuta seleção de pasta nativa do Windows Explorer
   useEffect(() => {
@@ -340,34 +341,34 @@ export function StudioTopBar({
           </button>
           <button
             type="button"
-            className={`btn-studio-nav ${activeTab === 'agents' ? 'active' : ''}`}
+            className={`btn-studio-nav btn-nav-secondary ${activeTab === 'agents' ? 'active' : ''}`}
             onClick={() => onSelectTab('agents')}
           >
             👥 Agentes
           </button>
           <button
             type="button"
-            className={`btn-studio-nav ${activeTab === 'memory' ? 'active' : ''}`}
+            className={`btn-studio-nav btn-nav-secondary ${activeTab === 'memory' ? 'active' : ''}`}
             onClick={() => onSelectTab('memory')}
           >
             🧠 Memória
           </button>
           <button
             type="button"
-            className={`btn-studio-nav ${activeTab === 'observability' ? 'active' : ''}`}
+            className={`btn-studio-nav btn-nav-secondary ${activeTab === 'observability' ? 'active' : ''}`}
             onClick={() => onSelectTab('observability')}
           >
             📊 Observabilidade
           </button>
         </nav>
 
-        <div className="topbar-actions-sep" />
+        <div className="topbar-actions-sep btn-nav-secondary" />
 
         {/* Gavetas Rápidas: Missão, Git e Agente */}
         {activeMission && (
           <button
             type="button"
-            className={`btn-topbar-tab ${sidePanelOpen && sideTab === 'mission' ? 'active' : ''}`}
+            className={`btn-topbar-tab btn-nav-secondary ${sidePanelOpen && sideTab === 'mission' ? 'active' : ''}`}
             onClick={() => onToggleSidePanel('mission')}
             title="Alternar painel de missão ativa"
           >
@@ -376,7 +377,7 @@ export function StudioTopBar({
         )}
         <button
           type="button"
-          className={`btn-topbar-tab ${sidePanelOpen && sideTab === 'git' ? 'active' : ''}`}
+          className={`btn-topbar-tab btn-nav-secondary ${sidePanelOpen && sideTab === 'git' ? 'active' : ''}`}
           onClick={() => onToggleSidePanel('git')}
           title="Alternar painel Git Control"
         >
@@ -384,7 +385,7 @@ export function StudioTopBar({
         </button>
         <button
           type="button"
-          className={`btn-topbar-tab ${sidePanelOpen && sideTab === 'agent' ? 'active' : ''}`}
+          className={`btn-topbar-tab btn-nav-secondary ${sidePanelOpen && sideTab === 'agent' ? 'active' : ''}`}
           onClick={() => onToggleSidePanel('agent')}
           title="Alternar terminal do agente ativo"
         >
@@ -392,12 +393,53 @@ export function StudioTopBar({
         </button>
         <button
           type="button"
-          className="btn-topbar-toggle"
+          className="btn-topbar-toggle btn-nav-secondary"
           onClick={() => onToggleSidePanel()}
           title="Alternar painel lateral para maximizar o escritório"
         >
           {sidePanelOpen ? '⛶ Maximizar' : '☰ Painel'}
         </button>
+
+        {/* Menu compacto para telas <= 1120px (1024px, 390px) */}
+        <div className="topbar-overflow-wrap">
+          <button
+            type="button"
+            className={`btn-topbar-toggle topbar-more-btn ${menuOpen ? 'active' : ''}`}
+            aria-expanded={menuOpen}
+            aria-label="Mais opções de navegação"
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            ☰ Mais
+          </button>
+          {menuOpen && (
+            <div className="topbar-overflow-menu" role="menu" aria-label="Navegação secundária">
+              <button type="button" role="menuitem" className={activeTab === 'agents' ? 'active' : ''} onClick={() => { onSelectTab('agents'); setMenuOpen(false) }}>
+                👥 Agentes
+              </button>
+              <button type="button" role="menuitem" className={activeTab === 'memory' ? 'active' : ''} onClick={() => { onSelectTab('memory'); setMenuOpen(false) }}>
+                🧠 Memória
+              </button>
+              <button type="button" role="menuitem" className={activeTab === 'observability' ? 'active' : ''} onClick={() => { onSelectTab('observability'); setMenuOpen(false) }}>
+                📊 Observabilidade
+              </button>
+              <hr />
+              {activeMission && (
+                <button type="button" role="menuitem" onClick={() => { onToggleSidePanel('mission'); setMenuOpen(false) }}>
+                  🚀 Missão {activeMissionsCount > 0 ? `(${activeMissionsCount})` : ''}
+                </button>
+              )}
+              <button type="button" role="menuitem" onClick={() => { onToggleSidePanel('git'); setMenuOpen(false) }}>
+                🌿 Git {gitChangesCount > 0 ? `(${gitChangesCount})` : ''}
+              </button>
+              <button type="button" role="menuitem" onClick={() => { onToggleSidePanel('agent'); setMenuOpen(false) }}>
+                👤 Agente
+              </button>
+              <button type="button" role="menuitem" onClick={() => { onToggleSidePanel(); setMenuOpen(false) }}>
+                {sidePanelOpen ? '⛶ Maximizar escritório' : '☰ Abrir painel'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   )
