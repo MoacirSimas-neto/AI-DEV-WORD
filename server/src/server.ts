@@ -156,6 +156,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case 'chat-cancel':
     case 'chat-prepare-mission':
       return isId(msg.projectId) && isId(msg.conversationId) && isOpId(msg.opId) ? { type: msg.type, projectId: msg.projectId, conversationId: msg.conversationId, opId: msg.opId } : null
+    case 'chat-request-replan':
+      return isId(msg.projectId) && isId(msg.conversationId) && isId(msg.missionId) && isOpId(msg.opId) && typeof msg.detail === 'string' && msg.detail.length <= 4000
+        ? { type: 'chat-request-replan', projectId: msg.projectId, conversationId: msg.conversationId, missionId: msg.missionId, detail: msg.detail, opId: msg.opId }
+        : null
     case 'chat-open':
       if (!isId(msg.projectId) || !isId(msg.conversationId) || (msg.beforeId !== undefined && !isId(msg.beforeId))) return null
       return { type: 'chat-open', projectId: msg.projectId, conversationId: msg.conversationId, ...(msg.beforeId !== undefined ? { beforeId: msg.beforeId as number } : {}) }
@@ -434,9 +438,9 @@ export function parseClientMessage(raw: string): ClientMessage | null {
   }
 }
 
-type ChatClientMessage = Extract<ClientMessage, { type: 'chat-list' | 'chat-create' | 'chat-rename' | 'chat-delete' | 'chat-open' | 'chat-send' | 'chat-cancel' | 'chat-prepare-mission' | 'chat-links' }>
+type ChatClientMessage = Extract<ClientMessage, { type: 'chat-list' | 'chat-create' | 'chat-rename' | 'chat-delete' | 'chat-open' | 'chat-send' | 'chat-cancel' | 'chat-prepare-mission' | 'chat-request-replan' | 'chat-links' }>
 const isChatMessage = (m: ClientMessage): m is ChatClientMessage => m.type.startsWith('chat-')
-const CHAT_ACTIONS: Record<string, ChatAction> = { 'chat-create': 'create', 'chat-send': 'send', 'chat-rename': 'rename', 'chat-delete': 'delete', 'chat-cancel': 'cancel', 'chat-prepare-mission': 'prepare-mission' }
+const CHAT_ACTIONS: Record<string, ChatAction> = { 'chat-create': 'create', 'chat-send': 'send', 'chat-rename': 'rename', 'chat-delete': 'delete', 'chat-cancel': 'cancel', 'chat-prepare-mission': 'prepare-mission', 'chat-request-replan': 'request-replan' }
 const actionOf = (type: string): ChatAction => CHAT_ACTIONS[type] ?? 'send'
 const safeJson = (text: string): Record<string, unknown> | null => {
   try {
@@ -537,6 +541,7 @@ export function createAppServer({
     missionId,
     proposals: (plans?.listProposals({ projectId, missionId }) ?? []).map((p) => ({ ...p, previouslyRejected: team.previouslyRejected(p) })),
     steps: plans?.listSteps({ projectId, missionId }) ?? [],
+    pendingReplan: team.getPendingReplan?.(missionId) ?? null,
   })
   const broadcastGitStatus = async (cwd: string) => broadcast({ type: 'git-status', status: await git.status(cwd) })
 
@@ -575,6 +580,12 @@ export function createAppServer({
               ),
             )
             .catch((error) => chatResult(socket, 'prepare-mission', message.opId, false, errorText(error), message.conversationId))
+          return
+        case 'chat-request-replan':
+          service
+            .requestReplan(message)
+            .then(({ message: text }) => chatResult(socket, 'request-replan', message.opId, true, text, message.conversationId))
+            .catch((error) => chatResult(socket, 'request-replan', message.opId, false, errorText(error), message.conversationId))
           return
         case 'chat-open': {
           const page = store.listMessages(message.projectId, message.conversationId, { beforeId: message.beforeId })

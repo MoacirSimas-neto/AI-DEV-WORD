@@ -106,6 +106,9 @@ const terminals = new TerminalManager(
 const git = new GitService()
 // Um só lançador para missões e chat: todo CLI passa pelo supervisor de processos.
 const launch = launchAgentCli
+const chatStore = new ChatStore(projects.db)
+// Respostas que estavam chegando quando o app fechou: ficam interrompidas (nada é relançado).
+chatStore.interruptStreaming()
 const team = new TeamRunner({
   tasks,
   history,
@@ -117,13 +120,11 @@ const team = new TeamRunner({
   skills,
   events,
   plans,
+  pendingReplans: chatStore,
   launch,
 })
 
-const chatStore = new ChatStore(projects.db)
-// Respostas que estavam chegando quando o app fechou: ficam interrompidas (nada é relançado).
-chatStore.interruptStreaming()
-const chat = new ChatService({ store: chatStore, projects, registry, configs: agentConfigs, launch, git, tasks, team, events })
+const chat = new ChatService({ store: chatStore, projects, registry, configs: agentConfigs, launch, git, tasks, plans, team, events })
 
 team.recover()
 
