@@ -5,6 +5,7 @@ import type {
   AgentConfig,
   AgentSnapshotEntry,
   CliId,
+  DynamicProposal,
   EvidenceKind,
   GitFile,
   GitStatus,
@@ -13,8 +14,11 @@ import type {
   MissionEventState,
   MissionEventType,
   MissionInfo,
+  MissionMode,
   MissionSpecialistSelection,
   MissionTeamSelection,
+  PlannedStep,
+  ProposalDecision,
   ProviderId,
   SkillApplication,
   SpecializationId,
@@ -35,12 +39,33 @@ import type { ProjectStore } from '../projects/store.ts'
 import { composeSkills, type SkillStore } from '../skills/store.ts'
 import { OPEN_PHASES, type TaskStore } from '../tasks/store.ts'
 import {
+  assertTransition,
+  checkDecision,
+  DEFAULT_LIMITS,
+  MODE_STEP_ROLE,
+  nextAdjustRound,
+  nextStep,
+  planStatus,
+  recoveredPhase,
+  rejectedBefore,
+  resolveLimits,
+  stepBlocker,
+  validateProposal,
+} from './coordinator.ts'
+import type { PlanStore } from './planStore.ts'
+import { interpretProposal, MAX_INVALID_PROPOSALS } from './proposal.ts'
+import {
+  approvedPlanText,
   asUntrusted,
+  delegatedStepPrompt,
   devPrompt,
   parseClarificationRequest,
   parseDetailedVerdict,
   parseVerdict,
   planPrompt,
+  proposalPrompt,
+  type ProposalPromptContext,
+  type ProposalTrigger,
   type ReworkContext,
   reviewPrompt,
   specialistPostDevPrompt,
@@ -83,8 +108,9 @@ const TEST_MENTION =
   /\b(npm (run )?test|pytest|jest|vitest|cargo test|go test|testes? (foram |fo[ir] )?(executad|rodad|passa)\w*|(rodei|executei) (os |a su[ií]te de )?testes?|tests? pass\w*|\d+ (testes?|tests?) (passa|pass|falh|fail)\w*)/i
 const MAX_EVENT_FILES = 40
 
-type Stage = 'planning' | 'pre-dev' | 'developing' | 'post-dev' | 'reviewing'
-const STAGE_ROLE = { planning: 'planner', 'pre-dev': 'specialist', developing: 'dev', 'post-dev': 'specialist', reviewing: 'qa' } as const
+/** 'step' = um passo aprovado de missão dinâmica. */
+type Stage = 'planning' | 'pre-dev' | 'developing' | 'post-dev' | 'reviewing' | 'step'
+const STAGE_ROLE = { planning: 'planner', 'pre-dev': 'specialist', developing: 'dev', 'post-dev': 'specialist', reviewing: 'qa', step: 'step' } as const
 /** Uma execução delegada: o id liga delegação, contexto entregue, CLI e resultado. */
 interface Trace {
   id: string
@@ -106,6 +132,8 @@ export interface TeamOptions {
   skills?: SkillStore
   /** Sem trilha de eventos, as missões rodam igual e nada é registrado. */
   events?: EventStore
+  /** Sem ele só existe o fluxo clássico: missões dinâmicas não podem ser iniciadas. */
+  plans?: PlanStore
   stepTimeoutMs?: number
 }
 
@@ -192,6 +220,7 @@ export class TeamRunner extends EventEmitter {
   private readonly memory?: MemoryStore
   private readonly skills?: SkillStore
   private readonly events?: EventStore
+  private readonly plans?: PlanStore
   private readonly specializations: SpecializationRegistry
   private readonly stepTimeoutMs: number
   private running: Running | null = null
@@ -210,6 +239,7 @@ export class TeamRunner extends EventEmitter {
     this.memory = options.memory
     this.skills = options.skills
     this.events = options.events
+    this.plans = options.plans
     this.specializations = options.specializations ?? defaultSpecializations
     this.stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   }
@@ -225,6 +255,18 @@ export class TeamRunner extends EventEmitter {
         data: { reason: 'interrupted' },
       })
     }
+    // Missões dinâmicas não falham no reinício: param para decisão humana e nenhum CLI é relançado.
+    this.plans?.interruptRunning()
+    for (const m of this.tasks.openMissions()) {
+      if (m.mode !== 'dynamic' || recoveredPhase(m.phase) === m.phase) continue
+      const parked = this.tasks.updateMission(m.id, { phase: 'awaiting_decision', error: 'Interrompida: o app foi fechado durante a execução.' })
+      this.log(parked, 'error', `Missão #${m.id} interrompida pelo fechamento do app: aguardando a sua decisão.`)
+      this.track(parked, 'mission.blocked', 'observed', 'Missão interrompida: o app foi fechado durante a execução.', {
+        state: 'failed',
+        key: 'interrupted',
+        data: { actor: 'backend', reason: 'interrupted', phase: m.phase },
+      })
+    }
     for (const m of this.tasks.openMissions()) {
       if (m.phase === 'awaiting_approval') {
         this.registry.setMissionState(m.plannerId || 'architect', 'approval', 'Plano pronto: aguardando sua aprovação')
@@ -236,7 +278,9 @@ export class TeamRunner extends EventEmitter {
   }
 
   /** Etapa 1: o planejador (padrão: 'architect') planeja. Devolve a missão criada. */
-  async start(taskId: number, team?: Partial<MissionTeamSelection>): Promise<MissionInfo> {
+  async start(taskId: number, team?: Partial<MissionTeamSelection>, options?: { mode?: MissionMode; limits?: unknown }): Promise<MissionInfo> {
+    // O modo é escolhido aqui e nunca muda durante a missão.
+    if (options?.mode === 'dynamic') return this.startDynamic(taskId, team, options.limits)
     this.assertTeamFree()
     const { task, cwd } = this.context(taskId)
     const { plannerId, devId, qaId, specialists, teamSnapshot } = this.validateAndBuildTeam(team)
@@ -370,6 +414,8 @@ export class TeamRunner extends EventEmitter {
       this.running = null
     }
     this.tasks.updateMission(missionId, { phase: 'cancelled' })
+    // Proposta pendente e passos não concluídos deixam de valer: uma aprovação atrasada não executa nada.
+    if (mission.mode === 'dynamic') this.plans?.closeMission(missionId)
     this.tasks.setStatus(mission.taskId, 'todo')
     this.log(
       mission,
@@ -951,6 +997,8 @@ export class TeamRunner extends EventEmitter {
   }
 
   private fail(missionId: number, agentId: string, message: string, trace?: Trace) {
+    // No modo dinâmico uma falha não encerra a missão: ela para e espera o usuário.
+    if (this.requireMission(missionId).mode === 'dynamic') return this.block(missionId, message, 'failure', agentId, trace)
     const phase = this.requireMission(missionId).phase
     const mission = this.tasks.updateMission(missionId, { phase: 'failed', error: redact(message) })
     this.track(mission, 'mission.failed', 'observed', message.split('\n')[0], { agentId, trace, state: 'failed', data: { phase, ref: 'missions.error' } })
@@ -968,7 +1016,7 @@ export class TeamRunner extends EventEmitter {
    * escolhido e descartado (auditoria). null = a missão falhou porque o contexto
    * obrigatório não coube.
    */
-  private memoryBlock(mission: MissionInfo, stage: 'planning' | 'developing' | 'reviewing', agentId: string, task: TaskInfo, trace?: Trace): string | null {
+  private memoryBlock(mission: MissionInfo, stage: 'planning' | 'developing' | 'reviewing', agentId: string, task: TaskInfo, trace?: Trace, key: string = stage): string | null {
     if (!this.memory) return ''
     try {
       const { block, record } = buildMemoryContext({
@@ -978,7 +1026,7 @@ export class TeamRunner extends EventEmitter {
         pastMissions: this.tasks.finishedMissionsOfTask(task.id),
       })
       const all = this.requireMission(mission.id).memoryContext ?? {}
-      this.tasks.updateMission(mission.id, { memoryContext: { ...all, [stage]: { agentId, ...record } } })
+      this.tasks.updateMission(mission.id, { memoryContext: { ...all, [key]: { agentId, ...record } } })
       if (trace) this.trackMemory(mission, trace, agentId, record)
       return block
     } catch (error) {
@@ -1035,6 +1083,473 @@ export class TeamRunner extends EventEmitter {
     return block
   }
 
+  // ---------- modo dinâmico ----------
+  // Caminho separado do fluxo clássico. O Tech Lead só propõe; o que roda é o que o usuário aprovou
+  // pela interface (decideProposal), um passo por vez, com as permissões que o backend define.
+
+  private async startDynamic(taskId: number, team: Partial<MissionTeamSelection> | undefined, limitsInput: unknown): Promise<MissionInfo> {
+    this.requirePlans()
+    this.assertTeamFree()
+    const { task, cwd } = this.context(taskId)
+    const techLeadId = (team?.plannerId ?? 'architect').trim() || 'architect'
+    const limits = resolveLimits(limitsInput ?? {})
+    const lead = () => this.snapshotAgent({ agentId: techLeadId, expectedCategory: 'planning', defaultSpec: 'tech-lead', stageLabel: 'coordenação' })
+    lead()
+    this.preparing = true
+    let git: GitRef
+    try {
+      git = gitRef(await this.requireCleanRepo(cwd))
+    } finally {
+      this.preparing = false
+    }
+    // O mundo pode ter mudado durante a consulta ao Git.
+    this.assertTeamFree()
+    this.context(taskId)
+    const snapshot = lead()
+
+    const mission = this.tasks.createMission(task.id, task.projectId, { mode: 'dynamic', limits, plannerId: techLeadId, teamSnapshot: { [techLeadId]: snapshot } })
+    this.running = { missionId: mission.id, cancelled: false }
+    this.tasks.setStatus(task.id, 'doing')
+    this.log(mission, 'mission', `Missão dinâmica #${mission.id} iniciada: "${task.title}" (Tech Lead: ${snapshot.name})`)
+    this.events?.prune(mission.projectId)
+    this.track(mission, 'mission.started', 'observed', `Missão dinâmica #${mission.id} iniciada pelo usuário: "${task.title}"`, {
+      state: 'started',
+      key: '',
+      data: { actor: 'user', mode: 'dynamic', techLeadId, limits, git: { ...git, clean: true } },
+    })
+    this.trackJoin(mission, snapshot, 0, 'Tech Lead escolhido pelo usuário ao iniciar a missão.')
+    for (const id of new Set([...TEAM, techLeadId])) this.registry.setMissionState(id, null)
+    this.registry.setMissionState(techLeadId, 'planning', `Analisando a missão #${mission.id}`)
+    void this.runTechLeadTurn(mission.id, { kind: 'start' })
+    return mission
+  }
+
+  /**
+   * Decisão humana sobre uma proposta. Só a interface chama isto: nenhum texto de CLI ou de agente chega aqui.
+   * `applied: false` = a mesma decisão já tinha sido registrada (reenvio): nada é executado de novo.
+   */
+  decideProposal(input: { missionId: number; proposalId: number; revision: number; decision: ProposalDecision; feedback?: string; opId?: string }): {
+    proposal: DynamicProposal
+    applied: boolean
+  } {
+    const plans = this.requirePlans()
+    const mission = this.requireMission(input.missionId)
+    if (mission.mode !== 'dynamic') throw new Error('Esta missão usa o fluxo clássico: ela não tem propostas para decidir.')
+    const proposal = plans.getProposal(input.proposalId)
+    if (!proposal || proposal.missionId !== mission.id) throw new Error('Proposta não encontrada nesta missão.')
+    // Reenvio do mesmo clique (reconexão, duplo clique): responde sem executar nada de novo.
+    if (checkDecision(proposal, input.revision, input.decision) === 'duplicate') return { proposal, applied: false }
+    if (this.running || this.preparing) throw new Error('Há uma execução em andamento nesta missão: aguarde para decidir.')
+
+    // Aprovar exige que a proposta ainda valha agora: agentes ativos, CLIs disponíveis, equipe e limites.
+    const joiners: AgentSnapshotEntry[] = []
+    if (input.decision === 'approve' && checkDecision(proposal, input.revision, 'approve') === 'apply') {
+      const ctx = this.planContext(mission)
+      const problems = validateProposal(proposal, { ...ctx, proposals: ctx.proposals.filter((p) => p.id !== proposal.id) })
+      if (problems.length) throw new Error(`Esta proposta não pode mais ser aprovada: ${problems.join(' ')}`)
+      for (const change of proposal.teamChanges) {
+        if (change.action === 'convene') joiners.push(this.snapshotAgent({ agentId: change.agentId, defaultSpec: 'developer', stageLabel: 'equipe da missão' }))
+      }
+    }
+    const feedback = redact((input.feedback ?? '').trim()).slice(0, 5000)
+    const result = plans.decide(input.proposalId, input.revision, input.decision, {
+      feedback,
+      // Na mesma transação da decisão: quem entra ganha o snapshot do momento da entrada; os demais não mudam.
+      apply: () => {
+        const teamSnapshot = { ...mission.teamSnapshot, ...Object.fromEntries(joiners.map((s) => [s.agentId, s])) }
+        this.tasks.updateMission(mission.id, { teamSnapshot, error: null })
+      },
+    })
+    if (!result.applied) return result
+
+    const decided = result.proposal
+    const after = this.requireMission(mission.id)
+    const techLeadId = mission.plannerId || 'architect'
+    const label = { approve: 'aprovou a', reject: 'rejeitou a', adjust: 'pediu ajustes na' }[input.decision]
+    this.log(after, 'mission', `Usuário ${label} proposta (revisão ${decided.revision}) da missão #${mission.id}.`)
+    this.track(after, 'approval.received', 'observed', `Decisão humana sobre a proposta da revisão ${decided.revision}: ${decided.status}.`, {
+      state: 'completed',
+      key: `proposal:${decided.id}`,
+      data: {
+        actor: 'user',
+        decision: input.decision,
+        proposalId: decided.id,
+        revision: decided.revision,
+        kind: decided.kind,
+        opId: input.opId ?? null,
+        hasFeedback: Boolean(feedback),
+        ref: `mission_proposals[${decided.id}]`,
+        ...fingerprint(JSON.stringify([decided.teamChanges, decided.steps])),
+      },
+    })
+
+    if (input.decision === 'approve') {
+      for (const change of decided.teamChanges) {
+        const snap = joiners.find((s) => s.agentId === change.agentId)
+        if (snap) this.trackJoin(after, snap, decided.revision, change.reason)
+        else {
+          // Sai da missão; cadastro, histórico e snapshot antigo ficam como estão.
+          this.track(after, 'team.released', 'observed', `${change.agentId} deixou a equipe da missão #${mission.id}.`, {
+            agentId: change.agentId,
+            key: `${decided.revision}:${change.agentId}`,
+            state: 'completed',
+            data: { actor: 'backend', revision: decided.revision, proposalId: decided.id, reason: change.reason.slice(0, 300) },
+          })
+        }
+        this.registry.setMissionState(change.agentId, null)
+      }
+      if (decided.steps.length) {
+        this.track(after, 'plan.revised', 'observed', `Plano da missão #${mission.id} na revisão ${decided.revision}: ${decided.steps.length} passo(s) aprovado(s).`, {
+          state: 'completed',
+          key: String(decided.revision),
+          data: { actor: 'backend', revision: decided.revision, proposalId: decided.id, steps: decided.steps.map((s) => ({ key: s.key, agentId: s.agentId, mode: s.mode, dependsOn: s.dependsOn })) },
+        })
+      }
+    }
+
+    if (after.phase === 'done') this.completeDynamic(after, 'approved-closure-proposal')
+    else if (after.phase === 'executing') void this.runSteps(mission.id)
+    else if (after.phase === 'planning') {
+      // Ajuste pedido pelo usuário: um novo turno do Tech Lead, se ainda houver rodadas.
+      const round = nextAdjustRound(plans.listProposals({ projectId: mission.projectId, missionId: mission.id }))
+      const max = (mission.limits ?? DEFAULT_LIMITS).maxAdjustRounds
+      if (round > max) {
+        this.block(mission.id, `Limite de pedidos de ajuste atingido (${max}). Cancele a missão ou encerre.`, 'limit_reached')
+      } else {
+        this.running = { missionId: mission.id, cancelled: false }
+        this.registry.setMissionState(techLeadId, 'planning', `Refazendo a proposta da missão #${mission.id}`)
+        void this.runTechLeadTurn(mission.id, { kind: 'adjust_requested', detail: feedback || 'O usuário pediu ajustes sem detalhar.' })
+      }
+    } else {
+      this.block(mission.id, 'Proposta rejeitada e não há passo aprovado para executar: a missão aguarda a sua decisão.', 'proposal_rejected')
+    }
+    return result
+  }
+
+  /** Para a interface: em quais revisões o usuário já rejeitou cada mudança de equipe desta proposta. */
+  previouslyRejected(proposal: DynamicProposal): NonNullable<DynamicProposal['previouslyRejected']> {
+    const all = this.plans?.listProposals({ projectId: proposal.projectId, missionId: proposal.missionId }) ?? []
+    const earlier = all.filter((p) => p.revision < proposal.revision)
+    return proposal.teamChanges
+      .map((c) => ({ agentId: c.agentId, action: c.action, revisions: rejectedBefore(c, earlier).map((p) => p.revision) }))
+      .filter((r) => r.revisions.length > 0)
+  }
+
+  /** O usuário confirma o encerramento de uma missão dinâmica parada. Nada encerra uma missão dinâmica sem isto ou sem uma proposta de encerramento aprovada. */
+  closeMission(missionId: number) {
+    const mission = this.requireMission(missionId)
+    if (mission.mode !== 'dynamic') throw new Error('Esta missão usa o fluxo clássico.')
+    if (mission.phase !== 'awaiting_decision' || this.running || this.preparing) throw new Error('Esta missão não está aguardando a sua decisão.')
+    this.completeDynamic(this.tasks.updateMission(missionId, { phase: 'done', error: null }), 'human-confirmation')
+  }
+
+  private completeDynamic(mission: MissionInfo, basedOn: string) {
+    this.requirePlans().closeMission(mission.id)
+    this.running = null
+    if (this.tasks.get(mission.taskId)) this.tasks.setStatus(mission.taskId, 'review')
+    this.log(mission, 'mission', `Missão dinâmica #${mission.id} encerrada com a confirmação do usuário. Revise as alterações e faça o commit no painel Alterações.`)
+    this.track(mission, 'mission.completed', 'observed', `Missão #${mission.id} encerrada com confirmação humana.`, {
+      state: 'completed',
+      key: '',
+      data: { actor: 'user', basedOn, verdictDetail: mission.verdictDetail ?? null },
+    })
+    for (const id of new Set([...TEAM, ...this.missionParticipantIds(mission)])) this.registry.setMissionState(id, null)
+  }
+
+  /** Um turno do Tech Lead: ele propõe, o backend confere e a proposta válida fica pendente para o usuário. */
+  private async runTechLeadTurn(missionId: number, trigger: ProposalTrigger, invalid = 0): Promise<void> {
+    const run = this.running
+    if (!run || run.missionId !== missionId) return
+    const plans = this.requirePlans()
+    try {
+      const mission = this.requireMission(missionId)
+      const { task, cwd } = this.context(mission.taskId)
+      const ctx = this.planContext(mission)
+      const techLeadId = ctx.techLeadId
+      if (ctx.proposals.length >= ctx.limits.maxTechLeadTurns) {
+        return this.block(missionId, `Limite de propostas do Tech Lead atingido (${ctx.limits.maxTechLeadTurns}).`, 'limit_reached')
+      }
+      const cfg = this.resolveMissionAgentConfig(mission, techLeadId, 'tech-lead')
+      const cli = getStepCliAndArgs('planning', cfg)
+      const trace = this.delegate(mission, trigger.kind === 'invalid_proposal' ? 'system' : 'user', techLeadId, 'planning', `Propor o plano e a equipe (${trigger.kind})`, { trigger: trigger.kind })
+      const memory = this.memoryBlock(mission, 'planning', techLeadId, task, trace)
+      if (memory === null) return
+      const prompt = proposalPrompt(task, ctx, trigger, {
+        agentName: cfg?.name,
+        specializationId: cfg?.specializationId ?? 'tech-lead',
+        customInstructions: cfg?.customInstructions,
+        registry: this.specializations,
+        memory,
+        skills: this.skillsBlock(missionId, techLeadId, trace),
+      })
+      const text = await this.step(missionId, techLeadId, cli.cli, cli.args, cwd, prompt, cli.model, cli.effort, cli.passPromptAsArg, trace)
+      if (text === null) return
+
+      const answered = this.tasks.updateMission(missionId, { plan: text })
+      // O que o modelo propôs. Ainda não é decisão nem execução.
+      this.track(answered, 'proposal.declared', 'declared', `${techLeadId} respondeu com uma proposta (${text.length} caracteres); ainda não conferida nem aprovada.`, {
+        agentId: techLeadId,
+        trace,
+        key: '',
+        state: 'completed',
+        data: { actor: 'model', ref: 'missions.plan', ...fingerprint(text) },
+      })
+      const reading = interpretProposal(text, this.planContext(answered))
+      if (!reading.ok) {
+        this.log(answered, 'error', `Proposta do Tech Lead recusada pelo backend (${reading.code}): ${reading.problems[0]}`, techLeadId)
+        this.track(answered, 'proposal.invalid', 'observed', `Proposta recusada pelo backend (${reading.code}): nada dela foi aproveitado.`, {
+          agentId: techLeadId,
+          trace,
+          key: '',
+          state: 'failed',
+          data: { actor: 'backend', code: reading.code, problems: reading.problems, attempt: invalid + 1 },
+        })
+        if (invalid < MAX_INVALID_PROPOSALS) return this.runTechLeadTurn(missionId, { kind: 'invalid_proposal', detail: reading.problems.join('\n') }, invalid + 1)
+        return this.block(missionId, `O Tech Lead não entregou uma proposta válida (${reading.code}): ${reading.problems.join(' ')}`, 'invalid_proposal', techLeadId, trace)
+      }
+
+      const previous = plans.listProposals({ projectId: mission.projectId, missionId })
+      const proposal = plans.propose(missionId, techLeadId, reading.input)
+      this.running = null
+      const pending = this.requireMission(missionId)
+      this.log(pending, 'mission', `Proposta da missão #${missionId} (revisão ${proposal.revision}) pronta. Aguardando a sua decisão.`, techLeadId)
+      this.track(pending, 'approval.requested', 'observed', `Missão #${missionId} pausada: proposta da revisão ${proposal.revision} aguarda decisão humana.`, {
+        agentId: techLeadId,
+        trace,
+        key: `proposal:${proposal.id}`,
+        data: {
+          proposalId: proposal.id,
+          revision: proposal.revision,
+          kind: proposal.kind,
+          teamChanges: proposal.teamChanges.map((c) => ({ action: c.action, agentId: c.agentId })),
+          steps: proposal.steps.length,
+          // Mudanças de equipe que o usuário já rejeitou antes: a interface precisa mostrar isso.
+          previouslyRejected: proposal.teamChanges.filter((c) => rejectedBefore(c, previous).length > 0).map((c) => c.agentId),
+          ref: `mission_proposals[${proposal.id}]`,
+          ...fingerprint(JSON.stringify([proposal.teamChanges, proposal.steps])),
+        },
+      })
+      this.registry.setMissionState(techLeadId, 'approval', `Proposta da missão #${missionId} pronta: aguardando a sua decisão`)
+    } catch (error) {
+      if (!run.cancelled) this.block(missionId, errorText(error), 'error')
+    }
+  }
+
+  /** Executa os passos aprovados, um por vez, enquanto houver um elegível. Qualquer impedimento pausa a missão. */
+  private async runSteps(missionId: number): Promise<void> {
+    const plans = this.requirePlans()
+    const run: Running = { missionId, cancelled: false }
+    this.running = run
+    try {
+      for (;;) {
+        const mission = this.requireMission(missionId)
+        const ctx = this.planContext(mission)
+        const status = planStatus(ctx.steps)
+        if (status === 'empty') {
+          return this.block(missionId, 'Todos os passos aprovados terminaram. Confirme o encerramento da missão ou cancele.', 'queue_empty')
+        }
+        if (status !== 'ready') {
+          return this.block(missionId, 'Um passo não foi concluído e os que dependem dele não podem rodar.', 'dependency_failed')
+        }
+        const next = nextStep(ctx.steps)!
+        const blocker = stepBlocker(next, ctx)
+        if (blocker) return this.block(missionId, `Passo "${next.key}": ${blocker.message}`, blocker.reason, next.agentId)
+        const { task, cwd } = this.context(mission.taskId)
+        // Antes da primeira escrita o repositório precisa estar limpo: nada do usuário é misturado nem descartado.
+        if (next.mode === 'implement' && !ctx.steps.some((s) => s.mode === 'implement' && s.startedAt !== null)) {
+          const status = await this.git.status(cwd)
+          if (run.cancelled) return
+          if (status.files.length > 0) {
+            return this.block(missionId, 'O projeto tem alterações sem commit feitas fora da missão. Faça o commit ou desfaça-as antes de liberar a implementação.', 'dirty_repo', next.agentId)
+          }
+        }
+        if (!(await this.runStep(run, mission, next, ctx, task, cwd, plans))) return
+      }
+    } catch (error) {
+      if (!run.cancelled) this.block(missionId, errorText(error), 'error')
+    }
+  }
+
+  /** Um passo aprovado, do início ao resultado. Devolve false quando a missão parou (falha, cancelamento ou veredito). */
+  private async runStep(run: Running, mission: MissionInfo, step: PlannedStep, ctx: ProposalPromptContext, task: TaskInfo, cwd: string, plans: PlanStore): Promise<boolean> {
+    const agentId = step.agentId
+    const reviewing = step.mode === 'review' || step.mode === 'verify'
+    const cfg = this.resolveMissionAgentConfig(mission, agentId, reviewing ? 'qa-tester' : 'developer')
+    // O modo vira permissão aqui, pelo backend: só `implement` recebe sandbox de escrita.
+    const cli = getStepCliAndArgs(MODE_STEP_ROLE[step.mode], cfg)
+    const name = cfg?.name || agentId
+    const trace = this.delegate(mission, ctx.techLeadId, agentId, 'step', step.objective, { stepId: step.id, key: step.key, revision: step.revision, mode: step.mode, proposalId: step.proposalId })
+    // A partir daqui qualquer parada (block) marca este passo como falho.
+    plans.startStep(step.id, trace.id)
+
+    const memory = this.memoryBlock(mission, reviewing ? 'reviewing' : 'developing', agentId, task, trace, `step:${step.id}`)
+    if (memory === null) return false
+
+    // Só o que o passo declarou em `inputs` entra no prompt.
+    const results: string[] = []
+    let plan = ''
+    let diff = ''
+    for (const ref of step.inputs) {
+      if (ref.kind === 'plan') {
+        plan = approvedPlanText(ctx.proposals, ctx.steps)
+        this.forward(mission, trace, ctx.techLeadId, agentId, 'plan', `mission_proposals[revisão ${step.revision}]`, plan)
+      } else if (ref.kind === 'git-diff') {
+        diff = await this.collectDiff(cwd, (await this.git.status(cwd)).files)
+        if (run.cancelled) return false
+        this.forward(mission, trace, 'system', agentId, 'git-diff', 'git-diff', diff)
+      } else {
+        const source = ctx.steps.find((s) => s.key === ref.key && s.revision === (ref.revision ?? step.revision))
+        if (source?.status !== 'completed') {
+          this.block(mission.id, `Passo "${step.key}": o resultado de "${ref.key}" não está disponível.`, 'dependency_failed', agentId, trace)
+          return false
+        }
+        this.forward(mission, trace, source.agentId, agentId, `step-${source.id}-result`, `mission_steps[${source.id}].result`, source.result)
+        results.push(`#### Resultado de ${source.agentId} no passo r${source.revision}/${source.key} (${source.mode}):\n${source.result}`)
+      }
+    }
+    const prompt = delegatedStepPrompt(
+      task,
+      step,
+      { plan, results: asUntrusted(results.join('\n\n')), diff },
+      {
+        agentName: cfg?.name,
+        specializationId: cfg?.specializationId,
+        customInstructions: cfg?.customInstructions,
+        registry: this.specializations,
+        memory,
+        skills: this.skillsBlock(mission.id, agentId, trace),
+      },
+      cli.passPromptAsArg ? MAX_ARG_PROMPT : MAX_TEXT,
+    )
+    this.registry.setMissionState(agentId, reviewing ? 'reviewing' : 'working', `Passo "${step.key}" da missão #${mission.id}`)
+    const text = await this.step(mission.id, agentId, cli.cli, cli.args, cwd, prompt, cli.model, cli.effort, cli.passPromptAsArg, trace)
+    if (text === null) return false
+
+    if (step.mode === 'implement') {
+      const gitAfter = await this.git.status(cwd)
+      if (run.cancelled) return false
+      const files = gitAfter.files.map((f) => f.path)
+      const changed = this.tasks.updateMission(mission.id, { devReport: text, files })
+      this.log(changed, 'files', files.length ? `Arquivos alterados por ${name}: ${files.join(', ')}` : `${name} não alterou nenhum arquivo.`, agentId)
+      this.emit('git-change', { agentId, cwd, files, summary: `${name} concluiu o passo "${step.key}" — ${files.length} arquivo(s) com alterações.` })
+      this.track(changed, 'files.changed', 'observed', `${files.length} arquivo(s) com alterações no Git depois do passo "${step.key}".`, {
+        agentId,
+        trace,
+        key: '',
+        data: {
+          stepId: step.id,
+          after: gitRef(gitAfter),
+          filesTotal: files.length,
+          files: gitAfter.files.slice(0, MAX_EVENT_FILES).map((f) => ({ path: f.path, code: f.code })),
+          listTruncated: gitAfter.truncated || files.length > MAX_EVENT_FILES,
+          ref: 'missions.files',
+          attribution: 'mission-window',
+        },
+      })
+      this.track(changed, 'tests.executed', 'unavailable', 'O sistema não executou comandos de teste neste passo: não há resultado de teste verificado.', {
+        agentId,
+        trace,
+        key: '',
+        data: { executedBySystem: false },
+      })
+    }
+    plans.finishStep(step.id, 'completed', { result: text })
+    // O texto do agente é resultado declarado: nada nele aprova, convoca ou muda regras.
+    this.declared(mission, trace, agentId, `step-${step.id}-result`, `mission_steps[${step.id}].result`, text)
+    this.registry.setMissionState(agentId, 'done', `Passo "${step.key}" entregue`)
+    this.log(mission, 'agent', `${name} entregou o passo "${step.key}" (${step.mode}) da missão #${mission.id}.`, agentId)
+
+    if (step.mode === 'verify') {
+      const verdictDetail = parseDetailedVerdict(text)
+      const verdict = parseVerdict(text)
+      const reviewed = this.tasks.updateMission(mission.id, { review: text, verdict, verdictDetail })
+      this.memory?.proposeFromMission(reviewed)
+      const label = verdictDetail ?? 'sem veredito claro'
+      this.track(reviewed, 'verdict.declared', 'declared', `Veredito declarado por ${agentId} no passo "${step.key}": ${label}.`, {
+        agentId,
+        trace,
+        key: '',
+        data: { stepId: step.id, verdict, verdictDetail, ref: `mission_steps[${step.id}].result` },
+      })
+      if (verdict !== 'approved') {
+        this.block(mission.id, `A verificação do passo "${step.key}" não aprovou o trabalho (${label}). Leia o parecer e decida como seguir.`, 'verdict_rejected', agentId, trace)
+        return false
+      }
+    }
+    return true
+  }
+
+  /**
+   * Missão dinâmica parada até uma decisão humana: falha, limite, veredito, fila vazia ou rejeição.
+   * Nada é repetido nem relançado por conta própria.
+   */
+  private block(missionId: number, message: string, reason: string, agentId: string | null = null, trace?: Trace) {
+    const before = this.requireMission(missionId)
+    this.running = null
+    if (!OPEN_PHASES.includes(before.phase)) return
+    if (before.phase !== 'awaiting_decision') assertTransition(before.phase, 'awaiting_decision')
+    const mission = this.tasks.updateMission(missionId, { phase: 'awaiting_decision', error: redact(message) })
+    // Um passo que estava rodando quando a missão parou não fica pendurado como "em execução".
+    for (const step of this.plans?.listSteps({ projectId: mission.projectId, missionId }) ?? []) {
+      if (step.status === 'running') this.plans!.finishStep(step.id, 'failed', { error: message })
+    }
+    this.track(mission, 'mission.blocked', 'observed', message.split('\n')[0], {
+      agentId: agentId ?? undefined,
+      trace,
+      state: reason === 'queue_empty' ? 'info' : 'failed',
+      data: { actor: 'backend', reason, phase: before.phase, ref: 'missions.error' },
+    })
+    this.log(mission, reason === 'queue_empty' ? 'mission' : 'error', `Missão #${missionId} aguardando a sua decisão: ${message}`, agentId)
+    const techLeadId = mission.plannerId || 'architect'
+    for (const id of new Set([...TEAM, ...this.missionParticipantIds(mission)])) this.registry.setMissionState(id, null)
+    this.registry.setMissionState(techLeadId, 'approval', `Missão #${missionId}: aguardando a sua decisão`)
+  }
+
+  /** O que o coordenador precisa saber agora: cadastro (só quem pode executar conta como ativo), plano e limites. */
+  private planContext(mission: MissionInfo): ProposalPromptContext {
+    const query = { projectId: mission.projectId, missionId: mission.id }
+    const known = this.configs
+      ? this.configs.list({ includeInactive: true })
+      : this.registry.list().map((a) => ({ agentId: a.id, name: a.name, role: a.role, roleCategory: a.roleCategory, active: true }))
+    const ready = (id: string) => {
+      const agent = this.registry.get(id)
+      return Boolean(agent) && agent!.state !== 'offline' && agent!.auth !== 'missing'
+    }
+    const plans = this.requirePlans()
+    return {
+      techLeadId: mission.plannerId || 'architect',
+      agents: known.map((a) => ({ agentId: a.agentId, name: a.name, role: a.role, roleCategory: a.roleCategory, active: a.active !== false && ready(a.agentId) })),
+      steps: plans.listSteps(query),
+      proposals: plans.listProposals(query),
+      limits: mission.limits ?? DEFAULT_LIMITS,
+    }
+  }
+
+  private trackJoin(mission: MissionInfo, snap: AgentSnapshotEntry, revision: number, reason: string) {
+    this.track(mission, 'team.joined', 'observed', `${snap.name} entrou na equipe da missão #${mission.id} (${snap.provider} · ${snap.model}).`, {
+      agentId: snap.agentId,
+      key: `${revision}:${snap.agentId}`,
+      state: 'completed',
+      data: {
+        actor: 'backend',
+        revision,
+        reason: reason.slice(0, 300),
+        provider: snap.provider,
+        model: snap.model,
+        reasoningEffort: snap.reasoningEffort,
+        specializationId: snap.specializationId,
+        // Skills congeladas no momento da entrada.
+        skills: (snap.skills ?? []).map((s) => ({ id: s.id, version: s.version, hash: s.hash.slice(0, 16), mode: s.mode, state: s.state })),
+        ref: `missions.teamSnapshot.${snap.agentId}`,
+      },
+    })
+  }
+
+  private requirePlans(): PlanStore {
+    if (!this.plans) throw new Error('O modo dinâmico não está disponível neste servidor.')
+    return this.plans
+  }
+
   // ---------- trilha de eventos ----------
 
   private track(
@@ -1062,14 +1577,14 @@ export class TeamRunner extends EventEmitter {
   }
 
   /** Quem pediu, quem recebeu e com qual objetivo. Abre a execução que os demais eventos referenciam. */
-  private delegate(mission: MissionInfo, from: string, to: string, stage: Stage, objective: string): Trace {
+  private delegate(mission: MissionInfo, from: string, to: string, stage: Stage, objective: string, extra: Record<string, unknown> = {}): Trace {
     const trace: Trace = { id: randomUUID(), stage }
     this.track(mission, 'task.delegated', 'observed', `${from} → ${to} (${stage}): ${objective}`.slice(0, 300), {
       agentId: to,
       trace,
       key: '',
       // O encadeamento é fixo e feito pelo orquestrador: `from` é a origem do pedido, não um CLI chamando outro.
-      data: { from, to, stage, objective: objective.slice(0, 300), orchestrated: true },
+      data: { ...extra, from, to, stage, objective: objective.slice(0, 300), orchestrated: true },
     })
     return trace
   }
@@ -1121,9 +1636,10 @@ export class TeamRunner extends EventEmitter {
     return [mission.plannerId || 'architect', mission.devId || 'dev', mission.qaId || 'qa', mission.specialists ?? []]
   }
 
-  private missionParticipantIds(mission: Pick<MissionInfo, 'plannerId' | 'devId' | 'qaId' | 'specialists'>): string[] {
+  private missionParticipantIds(mission: Pick<MissionInfo, 'plannerId' | 'devId' | 'qaId' | 'specialists' | 'teamSnapshot'>): string[] {
     const [p, d, q, specs] = this.missionTeam(mission)
-    return [p, d, q, ...specs.map((s) => s.agentId)]
+    // O snapshot traz também quem entrou durante uma missão dinâmica.
+    return [p, d, q, ...specs.map((s) => s.agentId), ...Object.keys(mission.teamSnapshot ?? {})]
   }
 
   private resolveMissionAgentConfig(
@@ -1206,53 +1722,59 @@ export class TeamRunner extends EventEmitter {
 
     const teamSnapshot: Record<string, AgentSnapshotEntry> = {}
 
-    for (const slot of slots) {
-      const cfg = this.configs?.find(slot.agentId)
-      if (this.configs) {
-        if (!cfg) {
-          throw new Error(`Agente "${slot.agentId}" não encontrado no cadastro.`)
-        }
-        if (cfg.active === false) {
-          throw new Error(`O agente "${cfg.name || slot.agentId}" está inativo e não pode participar de missões.`)
-        }
-        if (slot.expectedCategory && cfg.roleCategory && cfg.roleCategory !== slot.expectedCategory) {
-          throw new Error(
-            `O agente "${cfg.name || slot.agentId}" possui categoria "${cfg.roleCategory}", incompatível com a etapa de ${slot.stageLabel} (requer "${slot.expectedCategory}").`,
-          )
-        }
-        if (!VALID_PROVIDERS.has(cfg.provider)) {
-          throw new Error(`O agente "${cfg.name || slot.agentId}" possui provedor CLI inválido ("${String(cfg.provider)}").`)
-        }
-        if (!cfg.model || typeof cfg.model !== 'string' || !cfg.model.trim()) {
-          throw new Error(`O agente "${cfg.name || slot.agentId}" não possui um modelo válido configurado.`)
-        }
-      }
+    for (const slot of slots) teamSnapshot[slot.agentId] = this.snapshotAgent(slot)
 
-      const regAgent = this.registry.get(slot.agentId)
-      if (!regAgent || regAgent.state === 'offline') {
-        throw new Error(`${regAgent?.name ?? cfg?.name ?? slot.agentId}: CLI indisponível. Use "Verificar CLI" na janela do agente.`)
-      }
-      if (regAgent.auth === 'missing') {
-        throw new Error(`${regAgent.name}: o CLI "${regAgent.cli}" está instalado mas não consegue executar (sem login ou conta sem acesso).`)
-      }
+    return { plannerId, devId, qaId, specialists, teamSnapshot }
+  }
 
-      const fallbackProvider: ProviderId =
-        regAgent.cli === 'agy' ? 'antigravity' : regAgent.cli === 'codex' ? 'codex' : 'gemini'
-
-      teamSnapshot[slot.agentId] = {
-        agentId: slot.agentId,
-        name: cfg?.name || regAgent.name || slot.agentId,
-        role: cfg?.role || regAgent.role || '',
-        provider: cfg?.provider ?? fallbackProvider,
-        model: cfg?.model || 'default',
-        reasoningEffort: cfg?.reasoningEffort ?? 'default',
-        specializationId: cfg?.specializationId ?? slot.defaultSpec,
-        customInstructions: cfg?.customInstructions ? redact(cfg.customInstructions) : '',
-        ...(this.skills ? { skills: this.skills.resolveFor(slot.agentId) } : {}),
+  /**
+   * Confere um agente (cadastro, categoria, provedor, CLI disponível) e devolve o snapshot dele agora,
+   * com as skills resolvidas neste momento. Lança com a mensagem para o usuário se ele não puder participar.
+   */
+  private snapshotAgent(slot: { agentId: string; expectedCategory?: 'planning' | 'developing' | 'reviewing' | 'teaching'; defaultSpec: SpecializationId; stageLabel: string }): AgentSnapshotEntry {
+    const cfg = this.configs?.find(slot.agentId)
+    if (this.configs) {
+      if (!cfg) {
+        throw new Error(`Agente "${slot.agentId}" não encontrado no cadastro.`)
+      }
+      if (cfg.active === false) {
+        throw new Error(`O agente "${cfg.name || slot.agentId}" está inativo e não pode participar de missões.`)
+      }
+      if (slot.expectedCategory && cfg.roleCategory && cfg.roleCategory !== slot.expectedCategory) {
+        throw new Error(
+          `O agente "${cfg.name || slot.agentId}" possui categoria "${cfg.roleCategory}", incompatível com a etapa de ${slot.stageLabel} (requer "${slot.expectedCategory}").`,
+        )
+      }
+      if (!VALID_PROVIDERS.has(cfg.provider)) {
+        throw new Error(`O agente "${cfg.name || slot.agentId}" possui provedor CLI inválido ("${String(cfg.provider)}").`)
+      }
+      if (!cfg.model || typeof cfg.model !== 'string' || !cfg.model.trim()) {
+        throw new Error(`O agente "${cfg.name || slot.agentId}" não possui um modelo válido configurado.`)
       }
     }
 
-    return { plannerId, devId, qaId, specialists, teamSnapshot }
+    const regAgent = this.registry.get(slot.agentId)
+    if (!regAgent || regAgent.state === 'offline') {
+      throw new Error(`${regAgent?.name ?? cfg?.name ?? slot.agentId}: CLI indisponível. Use "Verificar CLI" na janela do agente.`)
+    }
+    if (regAgent.auth === 'missing') {
+      throw new Error(`${regAgent.name}: o CLI "${regAgent.cli}" está instalado mas não consegue executar (sem login ou conta sem acesso).`)
+    }
+
+    const fallbackProvider: ProviderId =
+      regAgent.cli === 'agy' ? 'antigravity' : regAgent.cli === 'codex' ? 'codex' : 'gemini'
+
+    return {
+      agentId: slot.agentId,
+      name: cfg?.name || regAgent.name || slot.agentId,
+      role: cfg?.role || regAgent.role || '',
+      provider: cfg?.provider ?? fallbackProvider,
+      model: cfg?.model || 'default',
+      reasoningEffort: cfg?.reasoningEffort ?? 'default',
+      specializationId: cfg?.specializationId ?? slot.defaultSpec,
+      customInstructions: cfg?.customInstructions ? redact(cfg.customInstructions) : '',
+      ...(this.skills ? { skills: this.skills.resolveFor(slot.agentId) } : {}),
+    }
   }
 
   /** Diferenças entregues ao QA. Nunca falha: sem diff, o QA ainda lê os arquivos. */
