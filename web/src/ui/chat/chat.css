@@ -1,5 +1,7 @@
 /* Chat com o Tech Lead: paleta do Studio (Etapa 9), leitura em primeiro lugar. */
 .chat-shell {
+  /* Altura definida pela ChatView (resto da janela abaixo da barra superior). */
+  height: 100%;
   --chat-bg: #090e1a;
   --chat-panel: #0d1322;
   --chat-raised: #121a2c;
@@ -14,6 +16,27 @@
   background: var(--chat-bg);
   color: var(--chat-text);
   font-family: var(--body);
+}
+
+/* O estilo pixel global de <button> (Studio) não vale dentro do chat; cada botão define
+   --bg/--fg (e opcionalmente --bg-hover/--bg-disabled/--fg-disabled). .btn-quiet fica como no Studio. */
+.chat-shell button:not(.btn-quiet) {
+  background: var(--bg, transparent);
+  color: var(--fg, inherit);
+  font-family: var(--body);
+  box-shadow: none;
+  white-space: normal;
+}
+.chat-shell button:not(.btn-quiet):hover:not(:disabled) {
+  background: var(--bg-hover, var(--bg, transparent));
+}
+.chat-shell button:not(.btn-quiet):disabled {
+  background: var(--bg-disabled, var(--bg, transparent));
+  color: var(--fg-disabled, var(--fg, inherit));
+  box-shadow: none;
+}
+.chat-shell button:not(.btn-quiet):active:not(:disabled) {
+  transform: none;
 }
 
 /* ---------- lista de conversas ---------- */
@@ -32,13 +55,12 @@
   padding: 9px 12px;
   border-radius: 10px;
   border: 1px solid rgba(56, 189, 248, 0.35);
-  background: rgba(56, 189, 248, 0.1);
-  color: #e0f2fe;
+  --bg: rgba(56, 189, 248, 0.1);
+  --bg-hover: rgba(56, 189, 248, 0.18);
+  --fg: #e0f2fe;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
-}
-.chat-new:hover:not(:disabled) {
-  background: rgba(56, 189, 248, 0.18);
 }
 .chat-new:disabled {
   opacity: 0.55;
@@ -89,8 +111,6 @@
   gap: 2px;
   padding: 8px 10px;
   border: 0;
-  background: transparent;
-  color: inherit;
   text-align: left;
   cursor: pointer;
 }
@@ -108,9 +128,9 @@
 .chat-list-del {
   opacity: 0;
   width: 28px;
+  padding: 0;
   border: 0;
-  background: transparent;
-  color: var(--chat-dim);
+  --fg: var(--chat-dim);
   font-size: 16px;
   cursor: pointer;
 }
@@ -119,7 +139,7 @@
   opacity: 1;
 }
 .chat-list-del:hover {
-  color: #fca5a5;
+  --fg: #fca5a5;
 }
 .chat-confirm {
   flex: 1;
@@ -137,9 +157,11 @@
   gap: 6px;
 }
 .chat-danger {
-  background: #b91c1c;
+  --bg: #b91c1c;
+  --bg-hover: #dc2626;
+  --fg: #fff;
   border: 0;
-  color: #fff;
+  font-size: 12.5px;
   border-radius: 7px;
   padding: 4px 10px;
   font-weight: 700;
@@ -180,13 +202,13 @@
 }
 .chat-rename {
   border: 0;
-  background: transparent;
-  color: var(--chat-dim);
+  padding: 2px 4px;
+  --fg: var(--chat-dim);
   cursor: pointer;
   font-size: 14px;
 }
 .chat-rename:hover {
-  color: var(--chat-text);
+  --fg: var(--chat-text);
 }
 .chat-title-input {
   width: min(480px, 100%);
@@ -257,8 +279,8 @@
 .chat-older {
   align-self: center;
   border: 1px solid var(--chat-line);
-  background: transparent;
-  color: var(--chat-dim);
+  --fg: var(--chat-dim);
+  font-size: 12.5px;
   border-radius: 999px;
   padding: 4px 12px;
   cursor: pointer;
@@ -285,9 +307,8 @@
 }
 .chat-link {
   border: 0;
-  background: none;
   padding: 0;
-  color: var(--chat-accent);
+  --fg: var(--chat-accent);
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
@@ -466,8 +487,8 @@
   left: 50%;
   transform: translateX(-50%);
   border: 1px solid rgba(56, 189, 248, 0.4);
-  background: #0f1a2e;
-  color: #e0f2fe;
+  --bg: #0f1a2e;
+  --fg: #e0f2fe;
   border-radius: 999px;
   padding: 5px 14px;
   font-size: 12.5px;
@@ -539,18 +560,22 @@
   cursor: pointer;
 }
 .chat-send {
-  background: #0ea5e9;
-  color: #04121f;
+  --bg: #0ea5e9;
+  --bg-hover: #38bdf8;
+  --fg: #04121f;
+  --bg-disabled: #1e293b;
+  --fg-disabled: #64748b;
+  font-size: 14px;
 }
 .chat-send:disabled {
-  background: #1e293b;
-  color: #64748b;
   cursor: default;
 }
 .chat-stop {
-  background: rgba(239, 68, 68, 0.16);
-  color: #fecaca;
+  --bg: rgba(239, 68, 68, 0.16);
+  --bg-hover: rgba(239, 68, 68, 0.26);
+  --fg: #fecaca;
   border: 1px solid rgba(239, 68, 68, 0.4);
+  font-size: 14px;
 }
 .chat-counter {
   margin: 4px 4px 0;

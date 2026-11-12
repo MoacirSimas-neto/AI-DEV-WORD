@@ -81,6 +81,19 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
   const streaming = state.streaming
   const responding = state.messages.some((m) => m.status === 'streaming')
 
+  // ---------- altura: o chat ocupa o resto da janela (composer sempre visível) ----------
+  const shell = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const fit = () => {
+      const el = shell.current
+      if (el) setHeight(Math.max(360, Math.floor(window.innerHeight - el.getBoundingClientRect().top)))
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [online, projectId])
+
   // ---------- rolagem: acompanha o fim só se o usuário já estava no fim ----------
   const scroller = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
@@ -151,6 +164,7 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
   const [title, setTitle] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
   const saveTitle = () => {
+    if (!editing) return
     if (conversation && title.trim() && title.trim() !== conversation.title) chat.rename(conversation.id, title)
     setEditing(false)
   }
@@ -165,7 +179,7 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
   }
 
   return (
-    <div className="chat-shell">
+    <div className="chat-shell" ref={shell} style={height ? { height } : undefined}>
       <aside className="chat-sidebar" aria-label="Conversas">
         <div className="chat-sidebar-head">
           <button

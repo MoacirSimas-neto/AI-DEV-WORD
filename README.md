@@ -31,6 +31,18 @@ Agentes padrão: **Arquiteto** (Tech Lead / planejamento), **Dev** (implementaç
 - **Git Control:** estado do repositório, diff, commit e push com pré-visualização.
 - **Recuperação de missões** após fechamento ou queda do app.
 
+## Chat com o Tech Lead (entrada principal)
+
+Ao abrir o app, a aba **Chat** mostra as conversas do projeto ativo. Você pode conversar com o Tech Lead, ou com outro agente planejador ativo, sobre ideias, requisitos, arquitetura e planejamento.
+
+- **Conversar não executa nada.** O agente roda com o papel de planejamento, sem permissão de escrita e sob o supervisor de processos. Nenhuma resposta vira proposta, aprovação ou missão. Para implementar, use **Tarefas** (modos clássico e dinâmico).
+- As conversas ficam no SQLite, separadas por projeto: uma conversa não é vista nem usada a partir de outro projeto. Elas podem ser renomeadas e excluídas (com confirmação).
+- **Contexto limitado:** cada resposta recebe só as mensagens mais recentes (até 20 e 16 mil caracteres). Quando mensagens antigas ficam de fora, a resposta avisa.
+- Uma resposta por vez no app. **Interromper** encerra o processo do CLI e guarda o texto parcial. Se o app fechar no meio, a resposta fica como interrompida e nada é relançado.
+- Sem CLI disponível, as conversas continuam consultáveis.
+- O texto mostrado e o gravado passam pela remoção de segredos. A interface renderiza Markdown sem HTML: links só abrem se forem `http(s)`.
+- Se arquivos mudarem durante uma resposta, ela é marcada com erro e aviso. Nada é desfeito.
+
 ## Modos de missão
 
 ### Clássico

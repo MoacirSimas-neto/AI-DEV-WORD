@@ -9,7 +9,7 @@ const SAFE_URL = /^https?:\/\/[^\s<>"']+$/i
 /** Elementos inline: código, negrito, itálico e links. */
 function inline(text: string, keyBase = 'i'): ReactNode[] {
   const out: ReactNode[] = []
-  const re = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*|_[^_\n]+_)|(\[[^\]\n]+\]\([^)\s]+\))/g
+  const re = /(`[^`\n]+`)|(\*\*[^*]{1,500}?\*\*)|(\*[^*\n]+\*|_[^_\n]+_)|(\[[^\]\n]+\]\([^)\s]+\))/g
   let last = 0
   let m: RegExpExecArray | null
   let k = 0
@@ -18,7 +18,7 @@ function inline(text: string, keyBase = 'i'): ReactNode[] {
     const token = m[0]
     const key = `${keyBase}-${k++}`
     if (m[1]) out.push(<code key={key}>{token.slice(1, -1)}</code>)
-    else if (m[2]) out.push(<strong key={key}>{inline(token.slice(2, -2), key)}</strong>)
+    else if (m[2]) out.push(<strong key={key}>{breaks(inline(token.slice(2, -2), key), key)}</strong>)
     else if (m[3]) out.push(<em key={key}>{inline(token.slice(1, -1), key)}</em>)
     else {
       const [, label, url] = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)!
@@ -96,13 +96,15 @@ function parseBlocks(source: string): Block[] {
   return blocks
 }
 
-const withBreaks = (text: string, key: string) =>
-  text.split('\n').map((part, i) => (
-    <Fragment key={`${key}-${i}`}>
-      {i > 0 && <br />}
-      {inline(part, `${key}-${i}`)}
-    </Fragment>
-  ))
+/** Quebras de linha viram <br/> em qualquer nível (inclusive dentro de **negrito**). */
+function breaks(nodes: ReactNode[], key: string): ReactNode[] {
+  return nodes.flatMap((node, i): ReactNode[] => {
+    if (typeof node !== 'string') return [node]
+    return node.split('\n').flatMap((part, j): ReactNode[] => (j === 0 ? [part] : [<br key={`${key}-${i}-${j}`} />, part]))
+  })
+}
+
+const withBreaks = (text: string, key: string) => breaks(inline(text, key), key)
 
 /** Texto do chat renderizado como Markdown seguro. */
 export function Markdown({ text }: { text: string }) {

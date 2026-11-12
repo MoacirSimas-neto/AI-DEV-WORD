@@ -191,3 +191,10 @@ describe('ChatView', () => {
     expect(s.server.of('chat-delete')[0]).toMatchObject({ projectId: 1, conversationId: 5 })
   })
 })
+
+describe('Markdown: quebras', () => {
+  it('negrito que atravessa uma quebra de linha', () => {
+    const { container } = render(<Markdown text={'Você perguntou: **linha 1,\nlinha 2**'} />)
+    expect(container.querySelector('strong')!.innerHTML).toBe('linha 1,<br>linha 2')
+  })
+})
