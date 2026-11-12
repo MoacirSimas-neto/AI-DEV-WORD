@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { CliId } from '../../../shared/protocol.ts'
 import type { AgentRegistry } from '../agents/registry.ts'
+import { liveRedaction } from '../security/redact.ts'
 
 /** O mínimo que usamos de um pseudo-terminal (o node-pty satisfaz esta interface). */
 export interface PtyLike {
@@ -83,12 +84,18 @@ export class TerminalManager extends EventEmitter {
     this.sessions.set(agentId, session)
     this.registry.setRuntimeState(agentId, 'waiting', `Sessão aberta em ${cwd}`)
 
+    // A saída do terminal só sai do backend (tela e histórico de rolagem) depois da redação.
+    // O que o usuário digita vai ao processo sem alteração.
+    const live = liveRedaction((safe) => {
+      session.buffer = (session.buffer + safe).slice(-MAX_BUFFER)
+      this.emit('data', agentId, safe)
+    })
     session.pty.onData((data) => {
-      session.buffer = (session.buffer + data).slice(-MAX_BUFFER)
-      this.emit('data', agentId, data)
+      live.write(data)
       if (Date.now() - session.lastInput > this.echoMs) this.markWorking(agentId, session)
     })
     session.pty.onExit(({ exitCode }) => {
+      live.end()
       clearTimeout(session.quietTimer)
       this.sessions.delete(agentId)
       this.registry.setRuntimeState(agentId, 'idle', 'Sessão encerrada.')

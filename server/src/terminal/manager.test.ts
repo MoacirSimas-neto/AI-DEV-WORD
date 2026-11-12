@@ -169,3 +169,23 @@ test('abre sessão PTY para agente personalizado sem colidir com sessão de agen
 
   terminals.closeAll()
 })
+
+test('terminal: segredo fictício partido em pedaços não chega à tela nem ao histórico de rolagem; a entrada vai intacta', async () => {
+  const { terminals, pty } = await setup()
+  const shown: string[] = []
+  terminals.on('data', (_id: string, data: string) => shown.push(data))
+  terminals.open('dev', 80, 24)
+  const fake = 'ghp_ficticio0123456789abcdefghijkl'
+  pty.output('\x1b[33mGITHUB_TOKEN\x1b[0m=' + fake.slice(0, 9))
+  pty.output(fake.slice(9, 20))
+  pty.output(fake.slice(20) + '\r\n$ ')
+  await sleep(100)
+  const all = shown.join('')
+  assert.ok(!all.includes(fake) && !all.includes('0123456789abcdef'), all)
+  assert.match(all, /\x1b\[33mGITHUB_TOKEN\x1b\[0m=\[SEGREDO REMOVIDO\]\r\n\$ /)
+  // Reabrir devolve o histórico já redigido.
+  assert.ok(!terminals.open('dev', 80, 24).includes('0123456789abcdef'))
+  // O que o usuário digita não passa pelo redator.
+  terminals.write('dev', `echo ${fake}\r`)
+  assert.deepEqual(pty.written, [`echo ${fake}\r`])
+})

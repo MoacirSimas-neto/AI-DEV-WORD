@@ -41,6 +41,7 @@ import type { MemoryStore } from '../memory/store.ts'
 import { type EventStore, fingerprint } from '../observability/store.ts'
 import type { ProjectStore } from '../projects/store.ts'
 import { composeSkills, type SkillStore } from '../skills/store.ts'
+import { liveRedaction } from '../security/redact.ts'
 import { OPEN_PHASES, type TaskStore } from '../tasks/store.ts'
 import {
   assertTransition,
@@ -216,7 +217,7 @@ interface Running {
   git?: GitRef
 }
 
-const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const errorText = (error: unknown) => redact(error instanceof Error ? error.message : String(error))
 
 /**
  * Modo equipe: Arquiteto (Gemini) planeja -> usuário aprova -> Dev (Codex)
@@ -958,15 +959,17 @@ export class TeamRunner extends EventEmitter {
       }
       const stepArgs = passPromptAsArg ? [...args, fullPrompt] : args
       const stepInput = passPromptAsArg ? undefined : fullPrompt
+      // A saída bruta fica no backend (parser); a tela recebe só a versão redigida, mesmo em pedaços.
+      const live = liveRedaction((safe) => {
+        const clean = cleanOutput(safe)
+        if (clean) this.emit('output', missionId, clean)
+      })
       run.proc = this.launch(cli, stepArgs, {
         cwd,
         label: `missão #${missionId} · ${agentId} · ${cli}`,
         input: stepInput,
         timeoutMs: this.stepTimeoutMs,
-        onOutput: (text) => {
-          const clean = cleanOutput(text)
-          if (clean) this.emit('output', missionId, clean)
-        },
+        onOutput: (text) => live.write(text),
       })
       launched = true
       // Nunca o prompt: só tamanho e hash. `args` são as opções do CLI, sem o texto do prompt.
@@ -980,7 +983,7 @@ export class TeamRunner extends EventEmitter {
         prompt: fingerprint(fullPrompt),
         timeoutMs: this.stepTimeoutMs,
       })
-      const result = await run.proc.done
+      const result = await run.proc.done.finally(() => live.end())
       run.proc = undefined
       exited = true
       const ok = result.code === 0 && !result.timedOut
@@ -2124,7 +2127,9 @@ export class TeamRunner extends EventEmitter {
     } catch (error) {
       out += `\n(não foi possível ler todas as diferenças: ${errorText(error)})\n`
     }
-    return out.length > MAX_DIFF ? `${out.slice(0, MAX_DIFF)}\n… diferenças cortadas …` : out
+    // O diff vai para outro agente: valores com cara de segredo não precisam ir junto.
+    const safe = redact(out)
+    return safe.length > MAX_DIFF ? `${safe.slice(0, MAX_DIFF)}\n… diferenças cortadas …` : safe
   }
 
   /**

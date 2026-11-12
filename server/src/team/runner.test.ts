@@ -1189,3 +1189,41 @@ test('TeamRunner com especialistas: executa pré-dev, passa contexto ao Dev, exe
   assert.ok(qaCall)
   assert.match(qaCall.input || qaCall.args.at(-1)!, /PARECER SEGURANÇA: Nenhuma injeção SQL/)
 })
+
+test('saída ao vivo da missão: segredo fictício em pedaços não chega à tela; o plano gravado também sai redigido', async () => {
+  const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-secret-')))
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp })
+  writeFileSync(path.join(tmp, 'init.txt'), 'init')
+  execFileSync('git', ['add', '.'], { cwd: tmp })
+  execFileSync('git', ['-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-qm', 'i'], { cwd: tmp })
+  const projects = new ProjectStore(':memory:')
+  projects.add(tmp)
+  const history = new HistoryStore(projects.db)
+  const tasks = new TaskStore(projects.db, history)
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: '1.0', auth: 'ok' }))
+  for (const a of registry.list()) await registry.check(a.id)
+  const fake = 'sk-proj-ficticio0123456789abcdefXYZ'
+  const plan = `## Plano\nUse a chave ${fake} no .env\n`
+  const runner = new TeamRunner({
+    tasks,
+    history,
+    projects,
+    registry,
+    git: new GitService(),
+    launch: (_cli, _args, options) => {
+      // O CLI imprime o plano em pedaços pequenos, partindo a chave.
+      for (const piece of plan.match(/[\s\S]{1,4}/g)!) options.onOutput?.(piece)
+      return { done: Promise.resolve({ code: 0, stdout: plan, stderr: '', timedOut: false }), kill: () => {} }
+    },
+  })
+  const shown: string[] = []
+  runner.on('output', (_id: number, data: string) => shown.push(data))
+  const task = tasks.create(projects.active()!.id, { title: 'Configurar', description: '', priority: 'low', status: 'todo', agentId: null })
+  const mission = await runner.start(task.id)
+  for (let i = 0; i < 100 && tasks.getMission(mission.id)!.phase !== 'awaiting_approval'; i++) await new Promise((r) => setTimeout(r, 20))
+  const all = shown.join('')
+  assert.ok(all.includes('Use a chave'), all)
+  assert.ok(!all.includes('0123456789abcdef'), all)
+  assert.ok(!tasks.getMission(mission.id)!.plan.includes('0123456789abcdef'))
+  runner.cancel(mission.id)
+})
