@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GitStatus, ServerMessage } from '../../../shared/protocol.ts'
 import { GitPanel } from './GitPanel.tsx'
@@ -68,11 +68,13 @@ describe('Etapa 12.4.2 — GitPanel & DiffViewer', () => {
     fireEvent.click(screen.getByText('src/b.ts'))
     expect(send).toHaveBeenCalledWith({ type: 'git-diff', path: 'src/b.ts', staged: false })
 
-    listener!({
-      type: 'git-diff',
-      path: 'src/b.ts',
-      staged: false,
-      text: '@@ -1,1 +1,2 @@\n const a = 1\n+const b = 2\n',
+    act(() => {
+      listener!({
+        type: 'git-diff',
+        path: 'src/b.ts',
+        staged: false,
+        text: '@@ -1,1 +1,2 @@\n const a = 1\n+const b = 2\n',
+      })
     })
 
     expect(screen.getByText('+1')).toBeTruthy()
