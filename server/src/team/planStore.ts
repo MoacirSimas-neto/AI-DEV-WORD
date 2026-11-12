@@ -31,7 +31,10 @@ const SCHEMA = `
     created_at TEXT NOT NULL,
     decided_at TEXT,
     decided_by TEXT,
-    feedback TEXT
+    feedback TEXT,
+    objective TEXT NOT NULL DEFAULT '',
+    risks TEXT NOT NULL DEFAULT '[]',
+    completion_criteria TEXT NOT NULL DEFAULT '[]'
   );
   CREATE UNIQUE INDEX IF NOT EXISTS mission_proposals_revision ON mission_proposals (mission_id, revision);
   CREATE UNIQUE INDEX IF NOT EXISTS mission_proposals_one_pending ON mission_proposals (mission_id) WHERE status = 'pending';
@@ -59,9 +62,17 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS mission_steps_by_mission ON mission_steps (project_id, mission_id, id);
 `
 
+// Colunas acrescentadas depois da primeira versão da tabela (Etapa 10.2).
+const EXTRA_PROPOSAL_COLUMNS: [string, string][] = [
+  ['objective', "TEXT NOT NULL DEFAULT ''"],
+  ['risks', "TEXT NOT NULL DEFAULT '[]'"],
+  ['completion_criteria', "TEXT NOT NULL DEFAULT '[]'"],
+]
+
 const PROPOSAL_COLUMNS = `id, mission_id AS missionId, project_id AS projectId, revision, kind, status, author, reason,
   mission_state AS missionState, alternative, team_changes AS teamChanges, steps, shared_context AS sharedContext,
-  adjust_round AS adjustRound, created_at AS createdAt, decided_at AS decidedAt, decided_by AS decidedBy, feedback`
+  adjust_round AS adjustRound, created_at AS createdAt, decided_at AS decidedAt, decided_by AS decidedBy, feedback,
+  objective, risks, completion_criteria AS completionCriteria`
 const STEP_COLUMNS = `id, mission_id AS missionId, project_id AS projectId, proposal_id AS proposalId, revision, key, seq,
   agent_id AS agentId, mode, objective, depends_on AS dependsOn, inputs, status, started_at AS startedAt,
   finished_at AS finishedAt, result, error, correlation_id AS correlationId`
@@ -78,7 +89,14 @@ function list<T>(raw: unknown): T[] {
 }
 
 const toProposal = (row: Record<string, unknown>) =>
-  ({ ...row, teamChanges: list(row.teamChanges), steps: list(row.steps), sharedContext: list(row.sharedContext) }) as unknown as DynamicProposal
+  ({
+    ...row,
+    teamChanges: list(row.teamChanges),
+    steps: list(row.steps),
+    sharedContext: list(row.sharedContext),
+    risks: list(row.risks),
+    completionCriteria: list(row.completionCriteria),
+  }) as unknown as DynamicProposal
 const toStep = (row: Record<string, unknown>) => ({ ...row, dependsOn: list(row.dependsOn), inputs: list(row.inputs) }) as unknown as PlannedStep
 
 export interface PlanQuery {
@@ -99,6 +117,10 @@ export class PlanStore {
     this.db = db
     this.tasks = tasks
     this.db.exec(SCHEMA)
+    const existing = new Set((this.db.prepare('PRAGMA table_info(mission_proposals)').all() as { name: string }[]).map((c) => c.name))
+    for (const [column, definition] of EXTRA_PROPOSAL_COLUMNS) {
+      if (!existing.has(column)) this.db.exec(`ALTER TABLE mission_proposals ADD COLUMN ${column} ${definition}`)
+    }
   }
 
   /** Em ordem de revisão. */
@@ -141,8 +163,9 @@ export class PlanStore {
       const result = this.db
         .prepare(
           `INSERT INTO mission_proposals
-             (mission_id, project_id, revision, kind, status, author, reason, mission_state, alternative, team_changes, steps, shared_context, adjust_round, created_at)
-           VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (mission_id, project_id, revision, kind, status, author, reason, mission_state, alternative, team_changes, steps, shared_context, adjust_round, created_at,
+              objective, risks, completion_criteria)
+           VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           missionId,
@@ -154,11 +177,14 @@ export class PlanStore {
           redact(input.missionState),
           redact(input.alternative),
           // Segredos saem campo a campo: remover no JSON inteiro poderia quebrá-lo.
-          JSON.stringify(input.teamChanges.map((c) => ({ ...c, reason: redact(c.reason), task: redact(c.task ?? ''), expectedImpact: redact(c.expectedImpact ?? '') }))),
+          JSON.stringify(input.teamChanges.map((c) => ({ ...c, reason: redact(c.reason), task: redact(c.task ?? ''), context: redact(c.context ?? ''), expectedImpact: redact(c.expectedImpact ?? ''), alternative: redact(c.alternative ?? '') }))),
           JSON.stringify(input.steps.map((step) => ({ ...step, objective: redact(step.objective) }))),
           JSON.stringify(input.sharedContext),
           nextAdjustRound(previous),
           now,
+          redact(input.objective ?? ''),
+          JSON.stringify((input.risks ?? []).map(redact)),
+          JSON.stringify((input.completionCriteria ?? []).map(redact)),
         )
       if (mission.phase !== 'awaiting_approval') this.tasks.updateMission(missionId, { phase: 'awaiting_approval' })
       return this.getProposal(Number(result.lastInsertRowid))!

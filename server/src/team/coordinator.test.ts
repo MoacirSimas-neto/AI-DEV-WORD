@@ -59,16 +59,19 @@ const planned = (input: PlannedStepInput, status: PlannedStep['status'], seq: nu
   correlationId: null,
 })
 
-const convene = (agentId: string) => ({ action: 'convene' as const, agentId, reason: 'Competência necessária', task: 'Apoiar a missão', expectedImpact: 'Menos retrabalho' })
+const convene = (agentId: string) => ({ action: 'convene' as const, agentId, reason: 'Competência necessária', task: 'Apoiar a missão', expectedImpact: 'Menos retrabalho', context: 'Plano e tarefa', alternative: 'Seguir sem o agente' })
 
 const proposal = (input: Partial<DynamicProposalInput>): DynamicProposalInput => ({
   kind: 'plan',
+  objective: 'Entregar a tarefa.',
   reason: 'A tarefa pede estas competências.',
   missionState: 'Missão recém-criada.',
   alternative: 'Seguir só com o Dev.',
   teamChanges: [],
   steps: [],
   sharedContext: [{ kind: 'plan' }],
+  risks: [],
+  completionCriteria: ['Testes passando.'],
   ...input,
 })
 

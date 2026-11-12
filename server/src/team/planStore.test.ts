@@ -36,15 +36,18 @@ const step = (key: string, agentId: string, mode: PlannedStepInput['mode'], depe
   dependsOn,
   inputs: [],
 })
-const convene = (agentId: string) => ({ action: 'convene' as const, agentId, reason: 'Necessário', task: 'Apoiar', expectedImpact: 'Qualidade' })
+const convene = (agentId: string) => ({ action: 'convene' as const, agentId, reason: 'Necessário', task: 'Apoiar', expectedImpact: 'Qualidade', context: 'Plano e tarefa', alternative: 'Seguir sem o agente' })
 const proposal = (input: Partial<DynamicProposalInput> = {}): DynamicProposalInput => ({
   kind: 'plan',
+  objective: 'Entregar a tarefa.',
   reason: 'Competências necessárias.',
   missionState: 'Início.',
   alternative: 'Seguir sem a mudança.',
   teamChanges: [convene('dev'), convene('qa')],
   steps: [step('impl', 'dev', 'implement'), step('teste', 'qa', 'verify', ['impl'])],
   sharedContext: [{ kind: 'plan' }],
+  risks: [],
+  completionCriteria: ['Testes passando.'],
   ...input,
 })
 
@@ -442,4 +445,27 @@ test('compatibilidade: o fluxo clássico não aprova nem esclarece missão dinâ
   // O cancelamento do fluxo clássico continua funcionando para qualquer missão aberta.
   runner.cancel(dynamic.id)
   assert.equal(tasks.getMission(dynamic.id)!.phase, 'cancelled')
+})
+
+test('migração 10.2: tabela de propostas da 10.1 ganha os campos novos sem perder registros', () => {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'aidw-plan-102-')), 'app.db')
+  const first = open(file)
+  const mission = dynamicMission(first.tasks)
+  // Volta a tabela ao formato da 10.1 e grava uma proposta como aquela versão gravaria.
+  for (const column of ['objective', 'risks', 'completion_criteria']) first.db.exec(`ALTER TABLE mission_proposals DROP COLUMN ${column}`)
+  first.db
+    .prepare(`INSERT INTO mission_proposals (mission_id, project_id, revision, kind, status, author, reason, created_at) VALUES (?, 1, 1, 'plan', 'pending', 'architect', 'Antiga', '2026-01-01')`)
+    .run(mission.id)
+  first.db.close()
+
+  for (let boot = 0; boot < 2; boot++) {
+    const { db, plans } = open(file)
+    const [old] = plans.listProposals({ projectId: 1, missionId: mission.id })
+    assert.equal(old.reason, 'Antiga')
+    assert.equal(old.objective, '')
+    assert.deepEqual(old.risks, [])
+    assert.deepEqual(old.completionCriteria, [])
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM mission_proposals').get()!.n, 1)
+    db.close()
+  }
 })

@@ -416,7 +416,11 @@ export interface TeamChange {
   reason: string
   /** Tarefa pretendida para o agente (convene). */
   task: string
+  /** O que o agente vai receber para trabalhar (convene). */
+  context: string
   expectedImpact: string
+  /** Como a missão segue se o usuário rejeitar esta mudança. */
+  alternative: string
 }
 
 /** plan = plano inicial; replan = mudança de passos e/ou equipe; closure = recomendação de encerrar. */
@@ -427,6 +431,8 @@ export type ProposalDecision = 'approve' | 'reject' | 'adjust'
 /** O que o Tech Lead propõe. Texto do modelo: dado não confiável até o backend validar. */
 export interface DynamicProposalInput {
   kind: ProposalKind
+  /** Objetivo da missão como o Tech Lead o entendeu. */
+  objective: string
   reason: string
   /** Estado atual da missão, nas palavras do Tech Lead. */
   missionState: string
@@ -436,6 +442,33 @@ export interface DynamicProposalInput {
   steps: PlannedStepInput[]
   /** O que será compartilhado com os agentes envolvidos. */
   sharedContext: ArtifactRef[]
+  risks: string[]
+  /** Como saber que a missão terminou. Declarado pelo Tech Lead; o sistema não verifica sozinho. */
+  completionCriteria: string[]
+}
+
+/**
+ * Por que a resposta do Tech Lead não virou proposta:
+ * missing/duplicate/too_long = bloco ausente, repetido ou grande demais; invalid_json; unsupported_version;
+ * invalid_schema = campo faltando, a mais ou fora do formato; stale_revision = feita sobre um plano que já mudou;
+ * duplicate_proposal = igual a uma que o usuário já viu; rejected_by_rules = equipe, permissões, dependências ou limites.
+ */
+export type ProposalErrorCode =
+  | 'missing'
+  | 'duplicate'
+  | 'too_long'
+  | 'invalid_json'
+  | 'unsupported_version'
+  | 'invalid_schema'
+  | 'stale_revision'
+  | 'duplicate_proposal'
+  | 'rejected_by_rules'
+
+/** Uma resposta recusada inteira: nada dela é aproveitado nem executado. */
+export interface ProposalRejection {
+  code: ProposalErrorCode
+  /** Mensagens prontas para mostrar ao usuário e devolver ao Tech Lead. */
+  problems: string[]
 }
 
 export interface DynamicProposal extends DynamicProposalInput {

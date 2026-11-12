@@ -243,7 +243,7 @@ export interface PlanContext {
   limits: DynamicLimits
 }
 
-const KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/
+export const KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/
 const MAX_OBJECTIVE = 1000
 const MAX_TEXT = 2000
 const text = (value: unknown, max = MAX_TEXT) => typeof value === 'string' && value.trim().length > 0 && value.length <= max
