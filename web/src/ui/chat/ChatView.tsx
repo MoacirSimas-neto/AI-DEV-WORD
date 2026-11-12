@@ -200,6 +200,7 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const saveTitle = () => {
     if (!editing) return
     if (conversation && title.trim() && title.trim() !== conversation.title) chat.rename(conversation.id, title)
@@ -217,7 +218,7 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
 
   return (
     <div className="chat-shell" ref={shell} style={height ? { height } : undefined}>
-      <aside className="chat-sidebar" aria-label="Conversas">
+      <aside className={`chat-sidebar ${sidebarOpen ? 'is-open' : ''}`} aria-label="Conversas">
         <div className="chat-sidebar-head">
           <button
             type="button"
@@ -225,6 +226,7 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
             onClick={() => {
               chat.startNew()
               setConfirmDelete(null)
+              setSidebarOpen(false)
             }}
             disabled={!state.selectedId}
             title="Começar uma conversa nova (ela é criada ao enviar a primeira mensagem)"
@@ -264,7 +266,7 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
                   </div>
                 ) : (
                   <>
-                    <button type="button" className="chat-list-item" onClick={() => chat.select(c.id)} title={c.title}>
+                    <button type="button" className="chat-list-item" onClick={() => { chat.select(c.id); setSidebarOpen(false) }} title={c.title}>
                       <span className="chat-list-title">{c.title}</span>
                       <span className="chat-list-meta">
                         {c.messageCount} msg · {new Date(c.updatedAt).toLocaleDateString()}
@@ -283,6 +285,15 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
 
       <section className="chat-main" aria-label="Conversa">
         <header className="chat-header">
+          <button
+            type="button"
+            className="btn-quiet btn-xs chat-sidebar-toggle"
+            aria-label="Alternar lista de conversas"
+            aria-expanded={sidebarOpen}
+            onClick={() => setSidebarOpen((v) => !v)}
+          >
+            ☰ Conversas
+          </button>
           <div className="chat-title-area">
             {conversation && editing ? (
               <input
