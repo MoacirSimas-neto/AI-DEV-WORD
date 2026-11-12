@@ -38,7 +38,7 @@ export function planSpawn(
 ): SpawnPlan {
   if (platform === 'win32' && /\.(cmd|bat)$/i.test(executable)) {
     for (const arg of args) {
-      if (!SAFE_ARG.test(arg)) throw new Error(`Argumento não permitido: ${arg}`)
+      if (!SAFE_ARG.test(arg)) throw new Error('O shim do CLI não aceita um dos argumentos.')
     }
     if (/["%&|<>^]/.test(executable)) throw new Error('Caminho de executável não permitido')
     const line = [`"${executable}"`, ...args].join(' ')
@@ -87,6 +87,7 @@ export interface StartOptions {
 
 export interface RunningCli {
   done: Promise<CliResult & { timedOut: boolean }>
+  promptVia?: 'argument' | 'stdin'
   /** true = roda sob o guardião do supervisor (encerrado junto com o backend). */
   guarded?: boolean
   /** Encerra o processo e os filhos dele. */

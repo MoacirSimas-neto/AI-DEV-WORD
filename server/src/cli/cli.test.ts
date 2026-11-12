@@ -54,7 +54,10 @@ test('planSpawn executa direto no Linux', () => {
 })
 
 test('planSpawn recusa argumentos com metacaracteres de shell', () => {
-  assert.throws(() => planSpawn('C:\\npm\\codex.cmd', ['--version & calc'], 'win32'))
+  assert.throws(
+    () => planSpawn('C:\\npm\\codex.cmd', ['--version & calc segredo-ficticio'], 'win32'),
+    { message: 'O shim do CLI não aceita um dos argumentos.' },
+  )
 })
 
 test('planSpawn executa agy.exe direto no Windows sem cmd.exe', () => {

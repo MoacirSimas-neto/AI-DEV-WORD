@@ -77,7 +77,7 @@ socket.on('data', (chunk: string) => {
     windowsHide: true,
     windowsVerbatimArguments: spec.verbatim,
   })
-  child.on('error', (error) => fail(`não foi possível iniciar o CLI: ${error.message}`, 127))
+  child.on('error', () => fail('não foi possível iniciar o CLI.', 127))
   child.on('exit', (code, signal) => {
     finished = true
     socket.end()

@@ -7,6 +7,7 @@ import { after, test } from 'node:test'
 import { pathToFileURL } from 'node:url'
 import { GUARD_FLAG, GUARD_SCRIPT, ProcessSupervisor, setSupervisor, SUPERVISOR_ENV } from './supervisor.ts'
 import { planSpawn, startCli } from './run.ts'
+import { launchAgentCli } from './probe.ts'
 
 // Só processos criados por este teste, em pastas descartáveis. Nenhum CLI real é chamado.
 const dir = mkdtempSync(path.join(tmpdir(), 'aidw-guard-'))
@@ -87,6 +88,29 @@ test('guardado: entrada, saída e código de saída chegam como antes', async ()
     assert.equal(result.code, 3)
     assert.match(result.stdout, /got:olá/)
   } finally {
+    setSupervisor(null)
+    await supervisor.close()
+  }
+})
+
+test('Windows: agy.cmd simulado recebe prompt multilinha intacto pelo stdin sob o guardião', { skip: process.platform !== 'win32' }, async () => {
+  writeFileSync(path.join(dir, 'agy.cmd'), `@REM AIDW-SIMULATED-CLI\r\n@"${process.execPath}" "${ECHO}" %*\r\n`)
+  const previous = process.env.AIDW_SIMULATED_CLI_DIR
+  const supervisor = await ProcessSupervisor.start()
+  setSupervisor(supervisor)
+  process.env.AIDW_SIMULATED_CLI_DIR = dir
+  try {
+    const prompt = 'olá & echo NÃO | < > ^ %PATH% !VAR! "aspas"\nsegunda linha'
+    const run = launchAgentCli('agy', ['-p', prompt], { cwd: dir, timeoutMs: 10_000 })
+    assert.equal(run.guarded, true)
+    assert.equal(run.promptVia, 'stdin')
+    const result = await run.done
+    assert.equal(result.code, 3)
+    assert.equal(result.stdout.trimEnd(), 'got:' + prompt)
+    assert.equal(result.stderr, '')
+  } finally {
+    if (previous === undefined) delete process.env.AIDW_SIMULATED_CLI_DIR
+    else process.env.AIDW_SIMULATED_CLI_DIR = previous
     setSupervisor(null)
     await supervisor.close()
   }

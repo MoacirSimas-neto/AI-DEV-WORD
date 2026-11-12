@@ -1,7 +1,7 @@
 import type { AuthState, CliId } from '../../../shared/protocol.ts'
 import { cliMode, findSimulatedCli } from './mode.ts'
 import { resolveCommand } from './resolve.ts'
-import { runCli } from './run.ts'
+import { runCli, startCli, type StartOptions } from './run.ts'
 
 export interface ProbeResult {
   found: boolean
@@ -31,6 +31,17 @@ export function findCli(cli: CliId): string | null {
   // Modo simulado: só a pasta dos simulados, nunca o PATH.
   if (mode.kind === 'simulated') return findSimulatedCli(cli, mode.dir)
   return resolveCommand(CATALOG[cli].command)
+}
+
+/** O agy real recebe o prompt como argumento. Só o shim simulado o lê do stdin. */
+export function launchAgentCli(cli: CliId, args: string[], options: StartOptions) {
+  const executable = findCli(cli)
+  if (!executable) throw new Error(`CLI "${cli}" não encontrado no PATH.`)
+  if (cli === 'agy' && process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable) &&
+      cliMode().kind === 'simulated' && options.input === undefined && args.at(-2) === '-p') {
+    return { ...startCli(executable, args.slice(0, -1), { ...options, input: args.at(-1) }), promptVia: 'stdin' as const }
+  }
+  return startCli(executable, args, options)
 }
 
 const inFlight = new Map<CliId, Promise<ProbeResult>>()

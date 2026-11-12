@@ -2,8 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { cliMode, requireSimulatedClis } from './cli/mode.ts'
-import { findCli, probeCli } from './cli/probe.ts'
-import { startCli } from './cli/run.ts'
+import { findCli, launchAgentCli, probeCli } from './cli/probe.ts'
 import { ProcessSupervisor, setSupervisor } from './cli/supervisor.ts'
 import { ALLOWED_ORIGINS, DATA_DIR, DATABASE_FILE, HOST, LOCK_FILE, PORT } from './config.ts'
 import { acquireInstanceLock, type InstanceLock } from './db/database.ts'
@@ -18,7 +17,7 @@ import { createAppServer } from './server.ts'
 import { SkillStore } from './skills/store.ts'
 import { TaskStore } from './tasks/store.ts'
 import { PlanStore } from './team/planStore.ts'
-import { type AgentLauncher, agyEffortArgs, TeamRunner } from './team/runner.ts'
+import { agyEffortArgs, TeamRunner } from './team/runner.ts'
 import { TerminalManager } from './terminal/manager.ts'
 import { spawnCliPty } from './terminal/spawnPty.ts'
 
@@ -106,11 +105,7 @@ const terminals = new TerminalManager(
 
 const git = new GitService()
 // Um só lançador para missões e chat: todo CLI passa pelo supervisor de processos.
-const launch: AgentLauncher = (cli, args, options) => {
-  const executable = findCli(cli)
-  if (!executable) throw new Error(`CLI "${cli}" não encontrado no PATH.`)
-  return startCli(executable, args, options)
-}
+const launch = launchAgentCli
 const team = new TeamRunner({
   tasks,
   history,
