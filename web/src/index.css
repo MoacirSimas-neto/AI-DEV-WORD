@@ -4026,6 +4026,12 @@ input:focus-visible {
   padding: 0 6px;
 }
 
+.pipeline-empty {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Dock: participação na missão dinâmica */
 .dock-agent-pill.is-team {
   border-color: rgba(52, 211, 153, 0.7);

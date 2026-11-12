@@ -226,8 +226,8 @@ export function StudioTopBar({
         ) : activeMission ? (
           <div className="pipeline-container">
             <div className="pipeline-meta-row">
-              <span className="pipeline-title">
-                <strong className="mission-id">#{activeMission.id}</strong> {activeTask?.title ?? 'Missão em execução'}
+              <span className="pipeline-title" title={`#${activeMission.id} ${activeTask?.title ?? 'Missão em execução'}`}>
+                <strong className="mission-id">#{activeMission.id}</strong>{activeTask?.title ?? 'Missão em execução'}
               </span>
               <span className="pipeline-progress-badge">
                 {activeMission.phase === 'planning' && 'Etapa 1 de 4 · Planejamento'}

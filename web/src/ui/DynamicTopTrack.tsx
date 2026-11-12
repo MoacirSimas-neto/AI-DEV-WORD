@@ -26,8 +26,8 @@ export function DynamicTopTrack({ mission, title, online, send, subscribe, onSel
   return (
     <div className="pipeline-container">
       <div className="pipeline-meta-row">
-        <span className="pipeline-title">
-          <strong className="mission-id">#{mission.id}</strong> {title}
+        <span className="pipeline-title" title={`#${mission.id} ${title}`}>
+          <strong className="mission-id">#{mission.id}</strong>{title}
         </span>
         <span className="pipeline-progress-badge">
           {DYNAMIC_PHASE_LABEL[mission.phase] ?? mission.phase}

@@ -2639,7 +2639,8 @@
   }
 }
 
-@media (max-width: 1366px) {
+/* Barra superior compacta até 1600px: em 1440 a versão larga espremia a missão no centro. */
+@media (max-width: 1600px) {
   .proto-office-topbar {
     padding: 6px 10px !important;
     gap: 8px !important;
@@ -2669,6 +2670,9 @@
   .pipeline-step .step-texts strong {
     font-size: 10px !important;
   }
+}
+
+@media (max-width: 1366px) {
   .office-side-panel {
     width: 310px !important;
     max-width: 32% !important;
@@ -2998,9 +3002,48 @@
 .pipeline-title {
   color: #e2e8f0;
   font-weight: 600;
+  /* Uma linha só: o título longo vira reticências (texto completo no tooltip). */
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline-title .mission-id {
+  margin-right: 6px;
+}
+
+/* O centro da barra cede espaço em vez de empurrar a altura da barra. */
+.topbar-center {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
+  justify-content: center;
+  padding: 0 12px;
+}
+
+.topbar-center .pipeline-container {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.topbar-center .pipeline-meta-row {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.topbar-center .pipeline-track {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.topbar-right {
+  flex-shrink: 0;
 }
 
 .mission-id {
@@ -3012,6 +3055,8 @@
 }
 
 .pipeline-progress-badge {
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 10px;
   font-weight: 700;
   color: #10b981;
