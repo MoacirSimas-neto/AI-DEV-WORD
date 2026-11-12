@@ -17,18 +17,23 @@ interface Props {
 export function PhaserGame({ agents, selectedId, onSelect, onAction }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const bridgeRef = useRef<WorldBridge | null>(null)
+  const onSelectRef = useRef(onSelect)
   const onActionRef = useRef(onAction)
   const [specialistPage, setSpecialistPage] = useState(0)
 
   const placement = computeOfficePlacement(agents, specialistPage)
 
   useEffect(() => {
+    onSelectRef.current = onSelect
     onActionRef.current = onAction
-  }, [onAction])
+  })
 
   useEffect(() => {
     const bridge = new WorldBridge()
-    bridge.on('select', onSelect)
+    bridge.agents = agents
+    bridge.selectedId = selectedId
+    bridge.specialistPage = placement.page
+    bridge.on('select', (id: string) => onSelectRef.current?.(id))
     bridge.on('action', (action: WorldAction) => onActionRef.current?.(action))
     bridgeRef.current = bridge
     let game: Phaser.Game | undefined
@@ -59,11 +64,20 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction }: Props) {
       bridge.removeAllListeners()
       game?.destroy(true)
     }
-  }, [onSelect])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  useEffect(() => bridgeRef.current?.setAgents(agents), [agents])
-  useEffect(() => bridgeRef.current?.setSelected(selectedId), [selectedId])
-  useEffect(() => bridgeRef.current?.setSpecialistPage(placement.page), [placement.page])
+  useEffect(() => {
+    bridgeRef.current?.setAgents(agents)
+  }, [agents])
+
+  useEffect(() => {
+    bridgeRef.current?.setSelected(selectedId)
+  }, [selectedId])
+
+  useEffect(() => {
+    bridgeRef.current?.setSpecialistPage(placement.page)
+  }, [placement.page])
 
   return (
     <div className="world-wrapper">

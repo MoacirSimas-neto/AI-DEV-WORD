@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { AgentConfig, AgentInfo, GitStatus, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
 import type { WorldAction } from '../game/WorldBridge.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
@@ -62,10 +62,13 @@ export function StudioOfficeView({
     ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing'].includes(m.phase),
   )
 
-  const handleSelectAgent = (id: string) => {
-    onSelectAgent(id)
-    onSetSideTab('agent')
-  }
+  const handleSelectAgent = useCallback(
+    (id: string) => {
+      onSelectAgent(id)
+      onSetSideTab('agent')
+    },
+    [onSelectAgent, onSetSideTab],
+  )
 
   return (
     <main className="proto-office-stage-layout">
