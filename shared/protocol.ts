@@ -735,6 +735,8 @@ export type MissionEventType =
   | 'chat.mission_requested'
   /** observed: a missão ficou vinculada à conversa de origem. */
   | 'chat.mission_linked'
+  /** observed: o usuário pediu alteração da missão pelo chat (Etapa 12.3). */
+  | 'chat.replan_requested'
 
 /** Um fato da trilha de execução de uma missão. Textos passam por remoção de segredos; nunca traz prompts nem conteúdo de arquivos. */
 export interface MissionEvent {
@@ -811,9 +813,19 @@ export const CHAT_LIMITS = {
   /** ...e no máximo estes caracteres de histórico no prompt. */
   contextChars: 16_000,
   pageSize: 100,
+  /** Máximo de chamadas ao modelo no chat enquanto uma missão vinculada está aberta. */
+  maxMissionChatCalls: 20,
 } as const
 
-export type ChatAction = 'create' | 'send' | 'rename' | 'delete' | 'cancel' | 'prepare-mission'
+export type ChatAction = 'create' | 'send' | 'rename' | 'delete' | 'cancel' | 'prepare-mission' | 'request-replan'
+
+export interface PendingReplanRequest {
+  missionId: number
+  conversationId: number
+  opId: string
+  detail: string
+  requestedAt: string
+}
 
 /**
  * Missão nascida de uma conversa (Etapa 12.2). Uma conversa pode originar várias missões;
@@ -851,7 +863,7 @@ export type ServerMessage =
   /** Evento novo, ao vivo. */
   | { type: 'mission-event'; event: MissionEvent }
   /** Resposta a plan-list e aviso a cada mudança: todas as revisões, em ordem. */
-  | { type: 'mission-plan'; projectId: number; missionId: number; proposals: DynamicProposal[]; steps: PlannedStep[] }
+  | { type: 'mission-plan'; projectId: number; missionId: number; proposals: DynamicProposal[]; steps: PlannedStep[]; pendingReplan?: PendingReplanRequest | null }
   | { type: 'mission-recovery'; state: RecoveryState }
   | { type: 'mission-resume-result'; opId: string; missionId: number; ok: boolean; applied: boolean; message: string }
   /** Resultado de proposal-decide para quem pediu. applied=false com ok=true = a decisão já estava registrada. */
@@ -924,6 +936,8 @@ export type ClientMessage =
   | { type: 'chat-cancel'; projectId: number; conversationId: number; opId: string }
   /** Transforma a conversa numa missão dinâmica: o Tech Lead propõe, nada roda sem aprovação. */
   | { type: 'chat-prepare-mission'; projectId: number; conversationId: number; opId: string }
+  /** Solicita alteração da missão vinculada (ponto seguro / replanejamento explícito). */
+  | { type: 'chat-request-replan'; projectId: number; conversationId: number; missionId: number; detail: string; opId: string }
   | { type: 'chat-links'; projectId: number }
   | { type: 'check-cli'; agentId: string }
   | { type: 'dialog-open-folder' }

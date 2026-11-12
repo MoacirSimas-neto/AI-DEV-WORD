@@ -19,6 +19,7 @@ import type {
   MissionMode,
   MissionSpecialistSelection,
   MissionTeamSelection,
+  PendingReplanRequest,
   PlannedStep,
   ProposalDecision,
   ProviderId,
@@ -148,7 +149,17 @@ export interface TeamOptions {
   events?: EventStore
   /** Sem ele só existe o fluxo clássico: missões dinâmicas não podem ser iniciadas. */
   plans?: PlanStore
+  /** Fila persistente para pedidos de replanejamento vindos do chat durante passos ativos. */
+  pendingReplans?: PendingReplanQueue
   stepTimeoutMs?: number
+}
+
+export interface PendingReplanQueue {
+  findReplanStatus(missionId: number, opId: string): string | null
+  getPendingReplan(missionId: number): PendingReplanRequest | null
+  enqueueReplan(input: { projectId: number; conversationId: number; missionId: number; opId: string; detail: string }): PendingReplanRequest
+  consumePendingReplan(missionId: number): PendingReplanRequest | null
+  cancelPendingReplans(missionId?: number): number
 }
 
 /**
@@ -242,6 +253,7 @@ export class TeamRunner extends EventEmitter {
   private readonly skills?: SkillStore
   private readonly events?: EventStore
   private readonly plans?: PlanStore
+  private readonly pendingReplans?: PendingReplanQueue
   private readonly specializations: SpecializationRegistry
   private readonly stepTimeoutMs: number
   private running: Running | null = null
@@ -263,6 +275,7 @@ export class TeamRunner extends EventEmitter {
     this.skills = options.skills
     this.events = options.events
     this.plans = options.plans
+    this.pendingReplans = options.pendingReplans
     this.specializations = options.specializations ?? defaultSpecializations
     this.stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   }
@@ -290,6 +303,7 @@ export class TeamRunner extends EventEmitter {
         data: { actor: 'backend', stepId: step.id, key: step.key, revision: step.revision, attempt: step.attempt ?? 1, mode: step.mode, mayHaveWrittenFiles: step.mode === 'implement' },
       })
     }
+    this.pendingReplans?.cancelPendingReplans()
     for (const m of this.tasks.openMissions()) {
       if (m.mode !== 'dynamic' || recoveredPhase(m.phase) === m.phase) continue
       const parked = this.tasks.updateMission(m.id, { phase: 'awaiting_decision', error: 'Interrompida: o app foi fechado durante a execução.' })
@@ -300,6 +314,7 @@ export class TeamRunner extends EventEmitter {
         data: { actor: 'backend', reason: 'interrupted', phase: m.phase },
       })
     }
+    this.pendingReplans?.cancelPendingReplans()
     for (const m of this.tasks.openMissions()) {
       if (m.phase === 'awaiting_approval') {
         this.registry.setMissionState(m.plannerId || 'architect', 'approval', 'Plano pronto: aguardando sua aprovação')
@@ -457,6 +472,7 @@ export class TeamRunner extends EventEmitter {
     this.tasks.updateMission(missionId, { phase: 'cancelled' })
     // Proposta pendente e passos não concluídos deixam de valer: uma aprovação atrasada não executa nada.
     if (mission.mode === 'dynamic') this.plans?.closeMission(missionId)
+    this.pendingReplans?.cancelPendingReplans(missionId)
     this.tasks.setStatus(mission.taskId, 'todo')
     this.log(
       mission,
@@ -1337,6 +1353,7 @@ export class TeamRunner extends EventEmitter {
 
   private completeDynamic(mission: MissionInfo, basedOn: string) {
     this.requirePlans().closeMission(mission.id)
+    this.pendingReplans?.cancelPendingReplans(mission.id)
     this.running = null
     if (this.tasks.get(mission.taskId)) this.tasks.setStatus(mission.taskId, 'review')
     this.log(mission, 'mission', `Missão dinâmica #${mission.id} encerrada com a confirmação do usuário. Revise as alterações e faça o commit no painel Alterações.`)
@@ -1527,6 +1544,11 @@ export class TeamRunner extends EventEmitter {
           }
         }
         if (!(await this.runStep(run, mission, next, ctx, task, cwd, plans))) return
+        const queued = this.pendingReplans?.consumePendingReplan(missionId)
+        if (queued) {
+          this.escalate(missionId, { kind: 'user_request', detail: queued.detail }, { evidence: 'observed', source: 'user' })
+          return
+        }
       }
     } catch (error) {
       if (!run.cancelled) this.block(missionId, errorText(error), 'error')
@@ -1898,6 +1920,91 @@ export class TeamRunner extends EventEmitter {
     this.tasks.updateMission(mission.id, { phase: 'executing', error: null })
     void this.runSteps(mission.id)
     return { applied: true, message: 'Execução retomada com os passos aprovados.' }
+  }
+
+  getPendingReplan(missionId: number): PendingReplanRequest | null {
+    return this.pendingReplans?.getPendingReplan(missionId) ?? null
+  }
+
+  /** Pedido explícito de alteração vindo do chat (Etapa 12.3): respeita passo em execução e pontos seguros. */
+  async requestChatReplan(input: { missionId: number; conversationId: number; detail: string; opId: string }): Promise<{ applied: boolean; queued: boolean; message: string }> {
+    const mission = this.requireMission(input.missionId)
+    if (mission.mode !== 'dynamic') throw new Error('Esta missão está no modo clássico e não usa replanejamento dinâmico do Tech Lead.')
+    if (!OPEN_PHASES.includes(mission.phase)) throw new Error('Esta missão já foi encerrada. Você pode iniciar uma nova conversa ou preparar uma nova missão.')
+
+    const seen = this.pendingReplans?.findReplanStatus(mission.id, input.opId)
+    if (seen) return { applied: false, queued: seen === 'pending', message: 'Solicitação de alteração já registrada.' }
+
+    const cleanDetail = redact(input.detail.trim()).slice(0, 2000)
+    if (!cleanDetail) throw new Error('Descreva a alteração desejada antes de enviar ao Tech Lead.')
+
+    if (mission.phase === 'awaiting_approval') {
+      throw new Error('Já existe uma proposta pendente aguardando sua decisão. Use "Pedir ajustes" na proposta ou decida sobre ela antes de pedir outra alteração.')
+    }
+    if (mission.phase === 'planning') {
+      throw new Error('O Tech Lead já está preparando uma proposta neste momento. Aguarde a proposta aparecer.')
+    }
+    if (mission.phase === 'awaiting_clarification') {
+      throw new Error('Responda primeiro ao pedido de esclarecimento da missão antes de solicitar outra alteração.')
+    }
+
+    const ctx = this.planContext(mission)
+    const hit = replanLimit({ ...ctx, leadTurns: mission.leadTurns }, 'user_request')
+    if (hit) {
+      throw new Error(`Limite da missão atingido (${hit.limit}: ${hit.value}/${hit.max}). Não é possível pedir novo turno ao Tech Lead.`)
+    }
+
+    if (mission.phase === 'awaiting_decision') {
+      const res = await this.resumeMission({ missionId: mission.id, action: 'replan', detail: cleanDetail, opId: input.opId })
+      return { applied: res.applied, queued: false, message: res.message }
+    }
+
+    const plans = this.requirePlans()
+    if (this.pendingReplans?.getPendingReplan(mission.id)) {
+      throw new Error('Já existe uma solicitação de alteração aguardando o fim do passo atual (ponto seguro).')
+    }
+
+    const runningStep = ctx.steps.find((s) => s.status === 'running')
+    if (this.running?.missionId === mission.id) {
+      if (!this.pendingReplans) throw new Error('A fila de replanejamento não está configurada.')
+      this.pendingReplans.enqueueReplan({
+        projectId: mission.projectId,
+        conversationId: input.conversationId,
+        missionId: mission.id,
+        opId: input.opId,
+        detail: cleanDetail,
+      })
+      this.track(
+        mission,
+        'chat.replan_requested',
+        'observed',
+        `Usuário pediu alteração da missão #${mission.id} pelo chat; aguardando o fim do passo atual (ponto seguro).`,
+        {
+          state: 'info',
+          data: {
+            actor: 'user',
+            conversationId: input.conversationId,
+            opId: input.opId,
+            queued: true,
+            runningStep: runningStep?.key ?? null,
+            detailSha256: fingerprint(cleanDetail).sha256,
+          },
+        },
+      )
+      plans.emit('change', mission.id)
+      return {
+        applied: true,
+        queued: true,
+        message: `${runningStep ? `O passo "${runningStep.key}" está em execução. ` : 'A equipe está ocupada no passo atual. '}Sua solicitação foi registrada e será enviada ao Tech Lead no próximo ponto seguro.`,
+      }
+    }
+
+    this.track(mission, 'chat.replan_requested', 'observed', `Usuário solicitou alteração da missão #${mission.id} pelo chat.`, {
+      state: 'info',
+      data: { actor: 'user', conversationId: input.conversationId, opId: input.opId, queued: false, detailSha256: fingerprint(cleanDetail).sha256 },
+    })
+    this.escalate(mission.id, { kind: 'user_request', detail: cleanDetail }, { evidence: 'observed', source: 'user' })
+    return { applied: true, queued: false, message: 'O Tech Lead foi consultado: a nova proposta vai aguardar a sua aprovação.' }
   }
 
   /** O que o coordenador precisa saber agora: cadastro (só quem pode executar conta como ativo), plano e limites. */

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
-import { CHAT_LIMITS, type ChatContextInfo, type ChatConversation, type ChatMessage, type ChatMessageStatus, type ChatMissionLink, type CliId } from '../../../shared/protocol.ts'
+import { CHAT_LIMITS, type ChatContextInfo, type ChatConversation, type ChatMessage, type ChatMessageStatus, type ChatMissionLink, type CliId, type PendingReplanRequest } from '../../../shared/protocol.ts'
 import { inTransaction } from '../db/database.ts'
 import { redact } from '../security/redact.ts'
 
@@ -46,6 +46,20 @@ const SCHEMA = `
     UNIQUE (conversation_id, op_id)
   );
   CREATE INDEX IF NOT EXISTS chat_mission_links_project ON chat_mission_links (project_id, conversation_id);
+  -- Etapa 12.3: pedidos de replanejamento feitos no chat enquanto um passo está executando.
+  CREATE TABLE IF NOT EXISTS chat_replan_requests (
+    id INTEGER PRIMARY KEY,
+    mission_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    conversation_id INTEGER NOT NULL REFERENCES chat_conversations (id) ON DELETE CASCADE,
+    op_id TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'triggered', 'cancelled')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (mission_id, op_id)
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS chat_replan_one_pending ON chat_replan_requests (mission_id) WHERE status = 'pending';
 `
 
 type Row = Record<string, unknown>
@@ -199,7 +213,7 @@ export class ChatStore extends EventEmitter {
    */
   addExchange(
     conv: ChatConversation,
-    input: { content: string; opId: string; agentId: string; cli: CliId; context: ChatContextInfo },
+    input: { content: string; opId: string; agentId: string; cli: CliId | null; context: ChatContextInfo },
   ): { user: ChatMessage; reply: ChatMessage } {
     const now = new Date().toISOString()
     const ids = inTransaction(this.db, () => {
@@ -282,6 +296,58 @@ export class ChatStore extends EventEmitter {
     return (this.db.prepare('SELECT * FROM chat_mission_links WHERE project_id = ? ORDER BY mission_id').all(projectId) as Row[]).map(linkOf)
   }
 
+  /** Encontra o vínculo de uma missão específica, se veio de uma conversa. */
+  findLinkByMission(missionId: number): ChatMissionLink | null {
+    const row = this.db.prepare('SELECT * FROM chat_mission_links WHERE mission_id = ?').get(missionId) as Row | undefined
+    return row ? linkOf(row) : null
+  }
+
+  /** Quantas chamadas de CLI já foram feitas nesta conversa desde `sinceIso`. */
+  countCliCallsSince(conversationId: number, projectId: number, sinceIso: string): number {
+    return Number(
+      (
+        this.db
+          .prepare("SELECT COUNT(*) AS n FROM chat_messages WHERE conversation_id = ? AND project_id = ? AND role = 'assistant' AND cli IS NOT NULL AND created_at >= ?")
+          .get(conversationId, projectId, sinceIso) as Row
+      ).n,
+    )
+  }
+
+  findReplanStatus(missionId: number, opId: string): string | null {
+    const row = this.db.prepare('SELECT status FROM chat_replan_requests WHERE mission_id = ? AND op_id = ?').get(missionId, opId) as Row | undefined
+    return row ? String(row.status) : null
+  }
+
+  getPendingReplan(missionId: number): PendingReplanRequest | null {
+    const row = this.db.prepare("SELECT * FROM chat_replan_requests WHERE mission_id = ? AND status = 'pending'").get(missionId) as Row | undefined
+    return row ? pendingReplanOf(row) : null
+  }
+
+  enqueueReplan(input: { projectId: number; conversationId: number; missionId: number; opId: string; detail: string }): PendingReplanRequest {
+    const now = new Date().toISOString()
+    this.db
+      .prepare('INSERT INTO chat_replan_requests (mission_id, project_id, conversation_id, op_id, detail, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(input.missionId, input.projectId, input.conversationId, input.opId, redact(input.detail).slice(0, 2000), 'pending', now, now)
+    return this.getPendingReplan(input.missionId)!
+  }
+
+  consumePendingReplan(missionId: number): PendingReplanRequest | null {
+    return inTransaction(this.db, () => {
+      const row = this.db.prepare("SELECT * FROM chat_replan_requests WHERE mission_id = ? AND status = 'pending'").get(missionId) as Row | undefined
+      if (!row) return null
+      this.db.prepare("UPDATE chat_replan_requests SET status = 'triggered', updated_at = ? WHERE id = ?").run(new Date().toISOString(), Number(row.id))
+      return pendingReplanOf(row)
+    })
+  }
+
+  cancelPendingReplans(missionId?: number): number {
+    const now = new Date().toISOString()
+    if (missionId !== undefined) {
+      return Number(this.db.prepare("UPDATE chat_replan_requests SET status = 'cancelled', updated_at = ? WHERE mission_id = ? AND status = 'pending'").run(now, missionId).changes)
+    }
+    return Number(this.db.prepare("UPDATE chat_replan_requests SET status = 'cancelled', updated_at = ? WHERE status = 'pending'").run(now).changes)
+  }
+
   /** Na inicialização: respostas que estavam chegando quando o app fechou ficam interrompidas. */
   interruptStreaming(): number {
     return Number(
@@ -291,6 +357,14 @@ export class ChatStore extends EventEmitter {
     )
   }
 }
+
+const pendingReplanOf = (r: Row): PendingReplanRequest => ({
+  missionId: Number(r.mission_id),
+  conversationId: Number(r.conversation_id),
+  opId: String(r.op_id),
+  detail: String(r.detail),
+  requestedAt: String(r.created_at),
+})
 
 function cleanTitle(title: string): string {
   return redact(title.replace(/\s+/g, ' ').trim()).slice(0, CHAT_LIMITS.maxTitleChars)
