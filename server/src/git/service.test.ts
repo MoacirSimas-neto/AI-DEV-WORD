@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
@@ -135,3 +135,51 @@ test('parseRemotes distingue configurado, sem remote e sanitiza credenciais na U
   assert.equal(sanitizeRemoteUrl('git@github.com:org/repo.git'), 'git@github.com:org/repo.git')
 })
 
+
+test('log, branches, commitDetail e proteção contra hash inválido', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'aidw-git-hist-'))
+  try {
+    const git = new GitService()
+    execFileSync('git', ['init', '-b', 'main'], { cwd: dir })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir })
+
+    assert.deepEqual(await git.log(dir), [])
+    writeFileSync(path.join(dir, 'a.txt'), 'hello\n')
+    await git.stage(dir, ['a.txt'])
+    await git.commit(dir, 'feat: initial commit')
+
+    const entries = await git.log(dir, 10)
+    assert.equal(entries.length, 1)
+    assert.equal(entries[0].subject, 'feat: initial commit')
+
+    const branches = await git.branches(dir)
+    assert.equal(branches.length, 1)
+    assert.equal(branches[0].name, 'main')
+    assert.equal(branches[0].current, true)
+
+    const detail = await git.commitDetail(dir, entries[0].hash)
+    assert.deepEqual(detail.files, ['a.txt'])
+    assert.match(detail.diff, /\+hello/)
+
+    await assert.rejects(() => git.commitDetail(dir, '--exec=evil'), /Hash de commit inválido/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('diff detecta arquivo binário sem renderizar bytes crus', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'aidw-git-bin-'))
+  try {
+    const git = new GitService()
+    execFileSync('git', ['init', '-b', 'main'], { cwd: dir })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir })
+    writeFileSync(path.join(dir, 'img.bin'), Buffer.from([0x00, 0x01, 0x02, 0xff]))
+    await git.stage(dir, ['img.bin'])
+    const diff = await git.diff(dir, 'img.bin', true)
+    assert.match(diff, /Arquivo binário/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

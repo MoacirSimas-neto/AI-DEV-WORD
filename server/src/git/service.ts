@@ -138,6 +138,9 @@ export class GitService {
       args = tracked.code === 0 ? ['diff', '--', file] : ['diff', '--no-index', '--', '/dev/null', file]
     }
     const { stdout } = await this.run(cwd, ['-c', 'core.quotepath=off', ...args], { allowFailure: true })
+    if (stdout.includes('\0') || /^Binary files .* differ$/m.test(stdout)) {
+      return 'Arquivo binário — visualização textual indisponível.\n'
+    }
     return stdout.length > MAX_DIFF_CHARS
       ? `${stdout.slice(0, MAX_DIFF_CHARS)}\n… diff cortado por ser muito grande …\n`
       : stdout
@@ -202,6 +205,68 @@ export class GitService {
     const result = await this.run(cwd, approval.args, { timeoutMs: 120_000 })
     const lines = (result.stderr || result.stdout).trim().split(/\r?\n/)
     return lines[lines.length - 1] || 'Push concluído.'
+  }
+
+  /** Lista commits recentes da branch atual (vazio se não houver commits). */
+  async log(cwd: string, limit = 30): Promise<{ hash: string; shortHash: string; subject: string; author: string; date: string }[]> {
+    const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)))
+    const res = await this.run(
+      cwd,
+      ['log', `-n`, String(safeLimit), '--format=%H%x1f%h%x1f%s%x1f%an%x1f%ai'],
+      { allowFailure: true },
+    )
+    if (res.code !== 0 || !res.stdout.trim()) return []
+    return res.stdout
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => {
+        const [hash = '', shortHash = '', subject = '', author = '', date = ''] = line.split('\x1f')
+        return { hash, shortHash, subject, author, date }
+      })
+      .filter((entry) => entry.hash.length > 0)
+  }
+
+  /** Lista branches locais e indica a branch ativa. */
+  async branches(cwd: string): Promise<{ name: string; current: boolean; upstream?: string }[]> {
+    const res = await this.run(
+      cwd,
+      ['for-each-ref', '--format=%(HEAD)%1f%(refname:short)%1f%(upstream:short)', 'refs/heads'],
+      { allowFailure: true },
+    )
+    if (res.code !== 0 || !res.stdout.trim()) return []
+    return res.stdout
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => {
+        const [head = '', name = '', upstream = ''] = line.split('\x1f')
+        return { name, current: head.trim() === '*', ...(upstream ? { upstream } : {}) }
+      })
+      .filter((b) => b.name.length > 0)
+  }
+
+  /** Detalhes e diff de um commit específico, validando o hash. */
+  async commitDetail(
+    cwd: string,
+    hash: string,
+  ): Promise<{ hash: string; shortHash: string; subject: string; author: string; date: string; files: string[]; diff: string }> {
+    if (!/^[0-9a-f]{4,40}$/i.test(hash)) {
+      throw new Error('Hash de commit inválido.')
+    }
+    const meta = await this.run(cwd, ['show', '-s', '--format=%H%x1f%h%x1f%s%x1f%an%x1f%ai', hash])
+    const [fullHash = hash, shortHash = hash.slice(0, 7), subject = '', author = '', date = ''] = meta.stdout.trim().split('\x1f')
+    const filesRes = await this.run(cwd, ['-c', 'core.quotepath=off', 'diff-tree', '--root', '--no-commit-id', '--name-only', '-r', fullHash], {
+      allowFailure: true,
+    })
+    const files = filesRes.stdout.trim().split(/\r?\n/).filter(Boolean)
+    const diffRes = await this.run(cwd, ['-c', 'core.quotepath=off', 'show', '--format=', fullHash], { allowFailure: true })
+    const rawDiff = diffRes.stdout
+    const diff =
+      rawDiff.includes('\0') || /^Binary files .* differ$/m.test(rawDiff)
+        ? 'Arquivo binário — visualização textual indisponível.\n'
+        : rawDiff.length > MAX_DIFF_CHARS
+          ? `${rawDiff.slice(0, MAX_DIFF_CHARS)}\n… diff cortado por ser muito grande …\n`
+          : rawDiff
+    return { hash: fullHash, shortHash, subject, author, date, files, diff }
   }
 
   private async run(cwd: string, args: string[], options: { allowFailure?: boolean; timeoutMs?: number } = {}) {

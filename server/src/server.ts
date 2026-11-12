@@ -194,8 +194,17 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case 'project-remove':
       return isId(msg.projectId) ? { type: msg.type, projectId: msg.projectId } : null
     case 'git-status':
+    case 'git-branches':
     case 'git-push-preview':
       return { type: msg.type }
+    case 'git-log':
+      return msg.limit === undefined || (typeof msg.limit === 'number' && Number.isInteger(msg.limit) && msg.limit >= 1 && msg.limit <= 100)
+        ? { type: 'git-log', ...(msg.limit !== undefined ? { limit: msg.limit } : {}) }
+        : null
+    case 'git-commit-detail':
+      return typeof msg.hash === 'string' && /^[0-9a-f]{4,40}$/i.test(msg.hash)
+        ? { type: 'git-commit-detail', hash: msg.hash }
+        : null
     case 'git-diff':
       return typeof msg.path === 'string' && typeof msg.staged === 'boolean'
         ? { type: 'git-diff', path: msg.path, staged: msg.staged }
@@ -742,6 +751,15 @@ export function createAppServer({
           const text = await git.diff(cwd, message.path, message.staged)
           send(socket, { type: 'git-diff', path: message.path, staged: message.staged, text })
         })
+        break
+      case 'git-log':
+        inProject(socket, async (cwd) => send(socket, { type: 'git-log', entries: await git.log(cwd, message.limit) }))
+        break
+      case 'git-branches':
+        inProject(socket, async (cwd) => send(socket, { type: 'git-branches', branches: await git.branches(cwd) }))
+        break
+      case 'git-commit-detail':
+        inProject(socket, async (cwd) => send(socket, { type: 'git-commit-detail', detail: await git.commitDetail(cwd, message.hash) }))
         break
       case 'git-stage':
         inProject(socket, async (cwd) => {

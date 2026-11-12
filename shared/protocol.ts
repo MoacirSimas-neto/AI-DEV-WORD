@@ -895,6 +895,9 @@ export type ServerMessage =
   /** Estado Git do projeto ativo; null quando não há projeto. */
   | { type: 'git-status'; status: GitStatus | null }
   | { type: 'git-diff'; path: string; staged: boolean; text: string }
+  | { type: 'git-log'; entries: { hash: string; shortHash: string; subject: string; author: string; date: string }[] }
+  | { type: 'git-branches'; branches: { name: string; current: boolean; upstream?: string }[] }
+  | { type: 'git-commit-detail'; detail: { hash: string; shortHash: string; subject: string; author: string; date: string; files: string[]; diff: string } }
   | { type: 'git-push-preview'; preview: PushPreview }
   | { type: 'git-result'; ok: boolean; message: string }
   /** Notificação de atividade/alterações detectadas no Git */
@@ -952,6 +955,9 @@ export type ClientMessage =
   | { type: 'project-remove'; projectId: number }
   | { type: 'git-status' }
   | { type: 'git-diff'; path: string; staged: boolean }
+  | { type: 'git-log'; limit?: number }
+  | { type: 'git-branches' }
+  | { type: 'git-commit-detail'; hash: string }
   | { type: 'git-stage'; paths: string[] }
   | { type: 'git-unstage'; paths: string[] }
   | { type: 'git-commit'; message: string }
