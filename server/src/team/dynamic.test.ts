@@ -602,6 +602,54 @@ test('repositório com alterações de fora da missão: a implementação não c
   assert.match(execFileSync('git', ['status', '--porcelain'], { cwd: w.dir, encoding: 'utf8' }), /meu-rascunho\.txt/)
 })
 
+// Regressão da validação 10.6 (limitação da 10.4): o caminho já registrado não basta; o conteúdo também é conferido.
+test('arquivo da missão editado por fora entre passos: a próxima escrita não começa e a edição do usuário é preservada', async () => {
+  const w = await world()
+  w.lead.push(
+    proposalText({
+      steps: [
+        stepJson('impl', 'dev', 'implement'),
+        stepJson('revisar', 'qa', 'review', ['impl']),
+        stepJson('impl2', 'dev', 'implement', ['revisar']),
+      ],
+    }),
+  )
+  const mission = await w.runner.start(w.task.id, { plannerId: 'architect' }, { mode: 'dynamic' })
+  await until(() => w.phase(mission.id) === 'awaiting_approval', 'proposta')
+  // Enquanto o QA lê, o usuário edita à mão o arquivo que o Dev criou (arquivo novo: sem histórico no Git).
+  w.steps.revisar = () => {
+    writeFileSync(path.join(w.dir, 'api.ts'), 'export const saldo = 42 // ajuste manual do usuário\n')
+    return { stdout: 'Revisei api.ts.' }
+  }
+  w.steps.impl2 = () => {
+    writeFileSync(path.join(w.dir, 'api.ts'), 'export const saldo = 0 // reescrito pelo Dev\n')
+    return { stdout: 'Reescrevi api.ts.' }
+  }
+  w.decide(mission.id, 'approve')
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'bloqueio')
+  assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'revisar'], 'o segundo passo de escrita não rodou')
+  assert.equal(trailOf(w, mission.id).at(-1)!.data.reason, 'dirty_repo')
+  assert.match(w.tasks.getMission(mission.id)!.error!, /conteúdo mudou fora da missão \(api\.ts\)/)
+  assert.match(readFileSync(path.join(w.dir, 'api.ts'), 'utf8'), /ajuste manual do usuário/, 'nada foi descartado nem sobrescrito')
+
+  // A recuperação mostra o arquivo como alteração a decidir, não como algo que a missão já conhece.
+  const state = await w.runner.recoveryState(w.project.id, mission.id)
+  assert.deepEqual(state.files, { available: true, known: [], unknown: ['api.ts'] })
+
+  // Continuar sem aceitar: bloqueia de novo, sem escrever.
+  await w.runner.resumeMission({ missionId: mission.id, action: 'continue', opId: 'op-sem-aceitar' })
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'bloqueio de novo')
+  assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'revisar'])
+
+  // Usuário SIMULADO aceita a edição: o conteúdo atual vira a nova referência e a escrita segue.
+  w.lead.push(closureText(1))
+  await w.runner.resumeMission({ missionId: mission.id, action: 'continue', acceptChanges: true, opId: 'op-aceitar' })
+  await waitProposals(w, mission.id, 2, 'encerramento')
+  assert.deepEqual(w.calls.map((c) => c.key), ['lead', 'impl', 'revisar', 'impl2', 'lead'])
+  const resumed = trailOf(w, mission.id).filter((e) => e.type === 'mission.resumed').at(-1)!
+  assert.deepEqual(resumed.data.acceptedFiles, ['api.ts'])
+})
+
 test('proposta inválida: uma correção pelo Tech Lead e depois a missão para — sem laço', async () => {
   const w = await world()
   const bad = proposalText({ steps: [stepJson('impl', 'qa', 'implement')] })

@@ -1,5 +1,7 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import type {
   ActivityKind,
   AgentConfig,
@@ -1440,13 +1442,23 @@ export class TeamRunner extends EventEmitter {
         if (next.mode === 'implement') {
           const status = await this.git.status(cwd)
           if (run.cancelled) return
-          const known = new Set(this.requireMission(missionId).files)
+          const current = this.requireMission(missionId)
+          const known = new Set(current.files)
           const unknown = status.files.map((f) => f.path).filter((path) => !known.has(path))
           if (unknown.length > 0) {
-            const list = `${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` e mais ${unknown.length - 10}` : ''}`
             return this.block(
               missionId,
-              `O projeto tem alterações que a missão não registrou (${list}). Nada foi descartado: faça o commit, desfaça-as ou retome aceitando essas alterações.`,
+              `O projeto tem alterações que a missão não registrou (${listPaths(unknown)}). Nada foi descartado: faça o commit, desfaça-as ou retome aceitando essas alterações.`,
+              'dirty_repo',
+              next.agentId,
+            )
+          }
+          // O caminho já registrado não basta: um arquivo da missão editado por fora seria sobrescrito pela próxima escrita.
+          const drifted = driftedFiles(cwd, current)
+          if (drifted.length > 0) {
+            return this.block(
+              missionId,
+              `O conteúdo mudou fora da missão (${listPaths(drifted)}) depois que ela registrou esses arquivos. Nada foi descartado: confira a edição e retome aceitando essas alterações, ou desfaça-as.`,
               'dirty_repo',
               next.agentId,
             )
@@ -1526,7 +1538,8 @@ export class TeamRunner extends EventEmitter {
       const gitAfter = await this.git.status(cwd)
       if (run.cancelled) return false
       const files = gitAfter.files.map((f) => f.path)
-      const changed = this.tasks.updateMission(mission.id, { devReport: text, files })
+      // O conteúdo de agora vira a referência: uma edição de fora antes da próxima escrita é detectada.
+      const changed = this.tasks.updateMission(mission.id, { devReport: text, files, fileHashes: contentHashes(cwd, files) })
       this.log(changed, 'files', files.length ? `Arquivos alterados por ${name}: ${files.join(', ')}` : `${name} não alterou nenhum arquivo.`, agentId)
       this.emit('git-change', { agentId, cwd, files, summary: `${name} concluiu o passo "${step.key}" — ${files.length} arquivo(s) com alterações.` })
       this.track(changed, 'files.changed', 'observed', `${files.length} arquivo(s) com alterações no Git depois do passo "${step.key}".`, {
@@ -1703,10 +1716,14 @@ export class TeamRunner extends EventEmitter {
     const status = planStatus(ctx.steps)
     const files: RecoveryState['files'] = { available: false, known: [], unknown: [] }
     try {
-      const git = await this.git.status(this.context(mission.taskId).cwd)
-      const known = new Set(mission.files)
+      const cwd = this.context(mission.taskId).cwd
+      const git = await this.git.status(cwd)
+      // Arquivo da missão com conteúdo editado por fora volta a ser uma alteração a decidir.
+      const drifted = new Set(driftedFiles(cwd, mission))
+      const known = new Set(mission.files.filter((p) => !drifted.has(p)))
       files.available = true
       for (const f of git.files) (known.has(f.path) ? files.known : files.unknown).push(f.path)
+      for (const p of drifted) if (!files.unknown.includes(p)) files.unknown.push(p)
     } catch {
       // Sem Git legível o estado ainda é útil; a retomada volta a conferir antes de escrever.
     }
@@ -1754,11 +1771,13 @@ export class TeamRunner extends EventEmitter {
     if (input.action === 'retry_step' && (!target || target.missionId !== mission.id)) throw new Error('Passo não encontrado nesta missão.')
 
     let accepted: string[] = []
+    const cwd = this.context(mission.taskId).cwd
     if (input.acceptChanges) {
       this.preparing = true
       try {
-        const status = await this.git.status(this.context(mission.taskId).cwd)
-        accepted = status.files.map((f) => f.path).filter((path) => !mission.files.includes(path))
+        const status = await this.git.status(cwd)
+        const drifted = driftedFiles(cwd, mission)
+        accepted = [...new Set([...status.files.map((f) => f.path).filter((path) => !mission.files.includes(path)), ...drifted])]
       } finally {
         this.preparing = false
       }
@@ -1768,7 +1787,13 @@ export class TeamRunner extends EventEmitter {
     const ctx = this.planContext(current)
     const resumed = (extra: Record<string, unknown> = {}) => {
       this.resumeOps.set(mission.id, input.opId)
-      if (accepted.length) this.tasks.updateMission(mission.id, { files: [...new Set([...current.files, ...accepted])] })
+      // O conteúdo aceito pelo usuário vira a nova referência dos arquivos aceitos.
+      if (accepted.length) {
+        this.tasks.updateMission(mission.id, {
+          files: [...new Set([...current.files, ...accepted])],
+          fileHashes: { ...current.fileHashes, ...contentHashes(cwd, accepted) },
+        })
+      }
       this.track(this.requireMission(mission.id), 'mission.resumed', 'observed', `Usuário decidiu seguir a missão #${mission.id}: ${input.action}.`, {
         state: 'info',
         data: { actor: 'user', action: input.action, opId: input.opId, acceptedFiles: accepted.slice(0, MAX_EVENT_FILES), acceptedTotal: accepted.length, ...extra },
@@ -2153,4 +2178,29 @@ function failureText(name: string, cli: CliId, result: CliResult) {
     return `${name}: o ${cli} atingiu um limite de uso (cota ou excesso de requisições). Tente de novo mais tarde.\n${tail}`
   }
   return `${name}: o ${cli} terminou com código ${result.code}.\n${tail}`
+}
+
+const listPaths = (paths: string[]) => `${paths.slice(0, 10).join(', ')}${paths.length > 10 ? ` e mais ${paths.length - 10}` : ''}`
+
+/** Impressão do conteúdo atual de cada arquivo do projeto. Arquivo removido ou ilegível recebe a marca 'missing'. */
+export function contentHashes(cwd: string, paths: string[]): Record<string, string> {
+  const root = path.resolve(cwd)
+  const hashes: Record<string, string> = {}
+  for (const p of paths) {
+    const full = path.resolve(root, p)
+    if (!full.startsWith(root + path.sep)) continue
+    try {
+      hashes[p] = createHash('sha256').update(readFileSync(full)).digest('hex')
+    } catch {
+      hashes[p] = 'missing'
+    }
+  }
+  return hashes
+}
+
+/** Arquivos que a missão registrou e cujo conteúdo mudou desde então. Sem impressão registrada (missões antigas) não há como saber. */
+function driftedFiles(cwd: string, mission: Pick<MissionInfo, 'fileHashes'>): string[] {
+  const recorded = mission.fileHashes ?? {}
+  const now = contentHashes(cwd, Object.keys(recorded))
+  return Object.keys(recorded).filter((p) => now[p] !== undefined && now[p] !== recorded[p])
 }

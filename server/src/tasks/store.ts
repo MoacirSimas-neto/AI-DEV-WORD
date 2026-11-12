@@ -85,6 +85,8 @@ const EXTRA_MISSION_COLUMNS: [string, string][] = [
   ['mode', "TEXT NOT NULL DEFAULT 'pipeline'"],
   ['limits', "TEXT NOT NULL DEFAULT '{}'"],
   ['lead_turns', 'INTEGER NOT NULL DEFAULT 0'],
+  // Validação 10.6: conteúdo registrado dos arquivos da missão (caminho -> hash).
+  ['file_hashes', "TEXT NOT NULL DEFAULT '{}'"],
 ]
 
 export { OPEN_PHASES }
@@ -104,7 +106,7 @@ const MISSION_COLUMNS = `id, task_id AS taskId, project_id AS projectId, phase,
   planner_id AS plannerId, dev_id AS devId, qa_id AS qaId,
   plan, dev_report AS devReport, review, verdict, verdict_detail AS verdictDetail,
   team_snapshot AS teamSnapshot, specialists, specialist_results AS specialistResults,
-  files, attempts, clarifications, memory_context AS memoryContext, skill_applications AS skillApplications, mode, limits, lead_turns AS leadTurns, error, created_at AS createdAt, updated_at AS updatedAt`
+  files, attempts, clarifications, memory_context AS memoryContext, skill_applications AS skillApplications, mode, limits, lead_turns AS leadTurns, file_hashes AS fileHashes, error, created_at AS createdAt, updated_at AS updatedAt`
 
 type MissionPatch = Partial<
   Pick<
@@ -127,6 +129,7 @@ type MissionPatch = Partial<
     | 'memoryContext'
     | 'skillApplications'
     | 'leadTurns'
+    | 'fileHashes'
     | 'error'
   >
 >
@@ -150,6 +153,7 @@ const MISSION_FIELDS: Record<keyof MissionPatch, string> = {
   memoryContext: 'memory_context',
   skillApplications: 'skill_applications',
   leadTurns: 'lead_turns',
+  fileHashes: 'file_hashes',
   error: 'error',
 }
 
@@ -177,7 +181,9 @@ const toMission = (row: Record<string, unknown>): MissionInfo => ({
   projectId: Number(row.projectId),
   phase: row.phase as MissionPhase,
   mode: row.mode === 'dynamic' ? 'dynamic' : 'pipeline',
-  ...(row.mode === 'dynamic' ? { limits: readLimits(row.limits), leadTurns: Number(row.leadTurns ?? 0) } : {}),
+  ...(row.mode === 'dynamic'
+    ? { limits: readLimits(row.limits), leadTurns: Number(row.leadTurns ?? 0), fileHashes: parseJsonSafe<Record<string, string>>(row.fileHashes, {}) }
+    : {}),
   plannerId: String(row.plannerId || 'architect'),
   devId: String(row.devId || 'dev'),
   qaId: String(row.qaId || 'qa'),
@@ -366,6 +372,7 @@ export class TaskStore extends EventEmitter {
     const keys = Object.keys(patch) as (keyof MissionPatch)[]
     const values = keys.map((k) => {
       if (k === 'files') return JSON.stringify(patch.files)
+      if (k === 'fileHashes') return JSON.stringify(patch.fileHashes ?? {})
       if (k === 'attempts' || k === 'clarifications' || k === 'memoryContext' || k === 'skillApplications' || k === 'specialists' || k === 'specialistResults') {
         return JSON.stringify(patch[k])
       }

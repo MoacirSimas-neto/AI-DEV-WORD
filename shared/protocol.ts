@@ -565,6 +565,8 @@ export interface MissionInfo {
   teamSnapshot?: Record<string, AgentSnapshotEntry>
   /** Arquivos com alterações depois que o Dev terminou. */
   files: string[]
+  /** Missão dinâmica: impressão do conteúdo de cada arquivo de `files` quando a missão o registrou (detecta edição de fora). */
+  fileHashes?: Record<string, string>
   error: string | null
   createdAt: string
   updatedAt: string
