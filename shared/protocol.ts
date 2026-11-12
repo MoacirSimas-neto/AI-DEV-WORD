@@ -330,9 +330,132 @@ export type MissionPhase =
   | 'awaiting_clarification'
   | 'developing'
   | 'reviewing'
+  /** Só modo dinâmico: um passo aprovado está em execução. */
+  | 'executing'
+  /** Só modo dinâmico: parada (falha, limite, interrupção) até uma decisão humana. */
+  | 'awaiting_decision'
   | 'done'
   | 'failed'
   | 'cancelled'
+
+/** pipeline = fluxo clássico (padrão, inclusive missões antigas); dynamic = plano em passos coordenado pelo Tech Lead. */
+export type MissionMode = 'pipeline' | 'dynamic'
+/** Fases que uma missão dinâmica usa. As clássicas developing/reviewing não existem nela. */
+export type DynamicMissionState = Exclude<MissionPhase, 'developing' | 'reviewing'>
+
+/**
+ * O que o agente faz num passo. O backend traduz o modo em permissões do CLI:
+ * só `implement` grava arquivos, e só `verify` emite veredito. Nada vindo do Tech Lead muda isso.
+ */
+export type DelegationMode = 'analyze' | 'implement' | 'review' | 'verify'
+
+/** Limites de uma missão dinâmica. Atingir um deles pausa a missão para decisão humana. */
+export interface DynamicLimits {
+  /** Passos delegados (iniciados + planejados). */
+  maxSteps: number
+  /** Convocações e dispensas depois da equipe inicial. */
+  maxTeamChanges: number
+  maxActiveMembers: number
+  /** Reverificações (`verify`) depois da primeira. */
+  maxReworkRounds: number
+  maxCallsPerAgent: number
+  /** Propostas do Tech Lead (cada proposta é um turno). */
+  maxTechLeadTurns: number
+  /** Mesmo agente com o mesmo objetivo. */
+  maxSameConsult: number
+  /** Pedidos de ajuste em sequência sobre a mesma proposta. */
+  maxAdjustRounds: number
+}
+
+/** Chave de outro passo da mesma revisão que precisa terminar antes. */
+export type StepDependency = string
+
+/** O que entra no prompt de um passo. `step` sem `revision` aponta para um passo da mesma revisão. */
+export type ArtifactRef =
+  | { kind: 'plan' }
+  | { kind: 'git-diff' }
+  | { kind: 'step'; key: string; revision?: number }
+
+/** Um passo como o Tech Lead o propõe. */
+export interface PlannedStepInput {
+  /** Identifica o passo dentro da revisão (ex.: 'dados-1'). */
+  key: string
+  agentId: string
+  mode: DelegationMode
+  objective: string
+  dependsOn: StepDependency[]
+  inputs: ArtifactRef[]
+}
+
+export type StepStatus = 'approved' | 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled' | 'superseded'
+
+/** Um passo de um plano aprovado. Só existe depois da aprovação humana da proposta que o trouxe. */
+export interface PlannedStep extends PlannedStepInput {
+  id: number
+  missionId: number
+  projectId: number
+  /** Revisão do plano (= revisão da proposta aprovada). */
+  revision: number
+  proposalId: number
+  /** Ordem lógica dentro da revisão. */
+  seq: number
+  status: StepStatus
+  startedAt: string | null
+  finishedAt: string | null
+  /** Resposta do agente (declarada, não verificada). */
+  result: string
+  error: string | null
+  /** Liga o passo aos eventos da execução (mission_events.correlation_id). */
+  correlationId: string | null
+}
+
+/** convene = entra na equipe; release = deixa a equipe (o cadastro do agente não muda). */
+export interface TeamChange {
+  action: 'convene' | 'release'
+  agentId: string
+  reason: string
+  /** Tarefa pretendida para o agente (convene). */
+  task: string
+  expectedImpact: string
+}
+
+/** plan = plano inicial; replan = mudança de passos e/ou equipe; closure = recomendação de encerrar. */
+export type ProposalKind = 'plan' | 'replan' | 'closure'
+export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'adjust_requested' | 'superseded'
+export type ProposalDecision = 'approve' | 'reject' | 'adjust'
+
+/** O que o Tech Lead propõe. Texto do modelo: dado não confiável até o backend validar. */
+export interface DynamicProposalInput {
+  kind: ProposalKind
+  reason: string
+  /** Estado atual da missão, nas palavras do Tech Lead. */
+  missionState: string
+  /** Como seguir sem aprovar esta proposta. */
+  alternative: string
+  teamChanges: TeamChange[]
+  steps: PlannedStepInput[]
+  /** O que será compartilhado com os agentes envolvidos. */
+  sharedContext: ArtifactRef[]
+}
+
+export interface DynamicProposal extends DynamicProposalInput {
+  id: number
+  missionId: number
+  projectId: number
+  /** Crescente por missão. Uma decisão só vale para a revisão que o usuário viu. */
+  revision: number
+  status: ProposalStatus
+  /** Agente que propôs. */
+  author: string
+  /** Quantos pedidos de ajuste em sequência levaram a esta proposta. */
+  adjustRound: number
+  createdAt: string
+  decidedAt: string | null
+  /** Quem decidiu (hoje sempre 'user'). */
+  decidedBy: string | null
+  /** Texto do usuário ao rejeitar ou pedir ajustes. */
+  feedback: string | null
+}
 
 /** Uma rodada Dev -> QA da missão. A lista preserva o histórico do retrabalho. */
 export interface MissionAttempt {
@@ -365,6 +488,10 @@ export interface MissionInfo {
   taskId: number
   projectId: number
   phase: MissionPhase
+  /** Ausente = 'pipeline'. */
+  mode?: MissionMode
+  /** Só em missões dinâmicas. */
+  limits?: DynamicLimits
   /** Agente responsável pelo planejamento (padrão: 'architect'). */
   plannerId?: string
   /** Agente responsável pela implementação (padrão: 'dev'). */
@@ -402,7 +529,10 @@ export interface MissionInfo {
   updatedAt: string
 }
 
-export type ActivityKind = 'task' | 'status' | 'mission' | 'agent' | 'review' | 'files' | 'commit' | 'push' | 'error' | 'memory'
+/** Missão no modo dinâmico: o plano vive em propostas (DynamicProposal) e passos (PlannedStep). */
+export type DynamicMission = MissionInfo & { mode: 'dynamic'; phase: DynamicMissionState; limits: DynamicLimits }
+
+export type ActivityKind ='task' | 'status' | 'mission' | 'agent' | 'review' | 'files' | 'commit' | 'push' | 'error' | 'memory'
 
 /** agent = só o agente dono recebe; team = toda a equipe do projeto recebe. */
 export type MemoryScope = 'agent' | 'team'
