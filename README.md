@@ -1,87 +1,121 @@
 # AI Dev World
 
-**Futuristic Command Center + Living Pixel Art Office** — Plataforma local de coordenação de agentes de IA onde cada personagem representa um agente real conectado aos CLIs oficiais (**Google Antigravity CLI (`agy`)**, **Codex CLI** e **Gemini CLI**). Roda 100% na sua máquina (Windows e Linux), sem depender de chaves de API pagas externas.
+Aplicativo **local** para coordenar agentes de IA de programação num projeto da sua máquina. Cada agente é um personagem num escritório 2D (Phaser) e executa um **CLI oficial já instalado e autenticado por você**. O app não usa chaves de API próprias: ele chama os CLIs.
 
-| Personagem | Papel               | CLI Padrão               | Identidade Visual no Escritório 2D       |
-| ---------- | ------------------- | ------------------------ | ---------------------------------------- |
-| Arquiteto  | Planeja a solução   | Antigravity CLI (`agy`)  | Óculos, blazer petróleo e gravata IA     |
-| Dev        | Implementa o código | Codex CLI                | Headset menta, moletom verde e 2 telas   |
-| QA         | Revisa e testa      | Antigravity CLI (`agy`)  | Visor analítico ciano e jaqueta âmbar    |
-| Tutor      | Explica e ensina    | Gemini CLI               | Óculos de leitura e cardigã madeira      |
+> **Estado:** protótipo em desenvolvimento ativo, para uso pessoal e de desenvolvimento. **Não está pronto para distribuição pública** (sem instalador, sem assinatura de código, sem auditoria ofensiva completa).
+
+---
+
+## Integrações realmente disponíveis
+
+| CLI | Comando | Uso no app |
+| --- | --- | --- |
+| Codex CLI | `codex` | Execução headless (`codex exec`) e terminal interativo |
+| Gemini CLI | `gemini` | Execução headless e terminal interativo |
+| Google Antigravity CLI | `agy` | Execução headless (`agy -p`) e terminal interativo |
+
+**Claude Code não é um provedor integrado.** Nenhum outro provedor é suportado hoje.
+
+Agentes padrão: **Arquiteto** (Tech Lead / planejamento), **Dev** (implementação), **QA** (revisão) e **Tutor**. O provedor, o modelo e o esforço de cada um são configurados na Central de Agentes. Também é possível criar agentes personalizados com especializações.
+
+---
+
+## Funcionalidades
+
+- **Escritório 2D (Phaser):** agentes com estado ao vivo (planejando, executando, revisando, aguardando aprovação), dock de agentes e objetos clicáveis que levam às telas.
+- **Terminais:** sessão PTY real do CLI de cada agente, sempre na pasta do projeto ativo.
+- **Projetos e tarefas:** pastas autorizadas por você, com tarefas por projeto.
+- **Missões em dois modos** (veja abaixo): clássico e dinâmico.
+- **Skills e memória:** skills (instruções reutilizáveis) por agente e memória do projeto/equipe. O que entra em cada prompt fica registrado na missão.
+- **Observabilidade:** trilha de eventos por missão (início/fim de CLI, delegação, propostas, decisões, arquivos alterados), com a natureza de cada evidência: observado pelo sistema, declarado pelo agente ou incluído no contexto.
+- **Git Control:** estado do repositório, diff, commit e push com pré-visualização.
+- **Recuperação de missões** após fechamento ou queda do app.
+
+## Modos de missão
+
+### Clássico
+Uma equipe fixa trabalha em sequência: **planejamento → aprovação humana do plano → desenvolvimento → revisão do QA**. Quando o QA reprova, o trabalho volta ao Dev até um limite de tentativas.
+
+### Dinâmico (Tech Lead)
+O Tech Lead propõe a equipe e os passos (análise, implementação, revisão, verificação) num formato estruturado que o **backend valida** (formato, revisão vigente, membros, permissões por categoria, dependências e limites). Nada roda sem a sua decisão:
+
+- **Aprovar**, **rejeitar** ou **pedir ajustes** em cada proposta. A decisão vale só para a revisão que você viu.
+- Quando um passo falha, é reprovado ou fica bloqueado, o Tech Lead é consultado de novo e a nova proposta também aguarda você.
+- Limites por missão: passos, turnos do Tech Lead, mudanças de equipe, retrabalho e chamadas por agente.
+
+Pode consumir mais chamadas aos CLIs que o modo clássico.
+
+## Recuperação
+
+Se o app fechar durante uma missão dinâmica, ela fica **parada aguardando decisão**: nenhum CLI é relançado sozinho. O painel de recuperação mostra os passos interrompidos e as alterações no Git. Ele também oferece continuar, reexecutar um passo, pedir replanejamento, encerrar ou cancelar.
+
+Cada arquivo registrado pela missão guarda uma impressão SHA-256. Se ele mudar por fora, ou se a missão for antiga e não tiver impressão, a próxima escrita só acontece depois da sua confirmação. **A confirmação vale exatamente para a lista exibida:** se surgir outra alteração depois disso, o backend recusa e pede uma nova confirmação. Nada é desfeito no repositório.
+
+Missões clássicas interrompidas são marcadas como falhas, e a tarefa volta para "a fazer".
 
 ---
 
 ## Requisitos
 
-- **Node.js 22.18+** (testado no Node 24).
-- **CLIs instalados e autenticados** (pelo menos um):
-  - [Google Antigravity CLI (`agy`)](https://antigravity.google)
-  - [Codex CLI (`codex`)](https://github.com/openai/codex)
-  - [Gemini CLI (`gemini`)](https://github.com/google-gemini/gemini-cli)
-- **Git** instalado e disponível no `PATH`.
-- **Linux**: `build-essential` e `python3` para compilação do `node-pty`.
+- **Node.js 22.18+** (desenvolvido no Node 24).
+- **Git** no `PATH`.
+- Pelo menos um dos CLIs acima instalado e autenticado.
+- Windows ou Linux. No Linux, `build-essential` e `python3` (compilação do `node-pty`).
 
----
-
-## Como rodar
+## Instalação e desenvolvimento
 
 ```bash
 npm install
 npm run dev
 ```
 
-Abra `http://localhost:5173`.
+Abra `http://localhost:5173`. O backend escuta só em `127.0.0.1:4517` e aceita apenas a origem da interface local.
 
-Verificação completa (TypeScript, build Vite, testes automatizados e linter):
+| Variável | Padrão | Uso |
+| --- | --- | --- |
+| `AIDW_DATA_DIR` | `~/.ai-dev-world` | Pasta do banco SQLite e da trava de instância |
+| `AIDW_PORT` | `4517` | Porta do backend |
+| `AIDW_WEB_PORT` | `5173` | Porta da interface (faz parte das origens aceitas) |
+
+Para uma instância isolada (testes, validação), use outra `AIDW_DATA_DIR` e outras portas.
+
+### Configuração dos CLIs
+
+1. Instale e faça login em cada CLI pelo terminal, da forma oficial de cada um.
+2. No app, a Central de Agentes mostra se o CLI foi encontrado e se há login. **A verificação de login do Gemini executa um prompt mínimo e gasta 1 requisição.**
+3. Escolha provedor, modelo e esforço por agente.
+
+### Dados locais e instância única
+
+- Banco: `data.sqlite` em `AIDW_DATA_DIR`, em modo **WAL** com `busy_timeout` de 5 s. Os arquivos `-wal` e `-shm` ao lado fazem parte do banco: para fazer backup, feche o app e copie os três.
+- **Um backend por pasta de dados:** um segundo backend apontando para a mesma pasta é recusado com uma mensagem clara, antes de abrir o banco. A trava (`instance.lock`) é liberada pelo sistema operacional se o processo morrer, então não é preciso apagar nada depois de uma queda.
+
+---
+
+## Testes
+
 ```bash
-npm run check
+npm run check   # typecheck do backend, build da interface, testes (backend + frontend) e lint
+npm test        # só os testes
+npm test -w web # só os testes de componentes (Vitest + Testing Library, jsdom)
 ```
+
+O backend usa `node --test`. Os testes de concorrência do SQLite usam bancos descartáveis e processos filhos reais. O frontend testa o comportamento visível e as mensagens enviadas ao backend. O Phaser é simulado nos testes, porque WebGL não roda em jsdom.
 
 ---
 
-## Arquitetura da Interface
+## Permissões e segurança
 
-### 1. Barra de Navegação Superior (5 Visões)
-- **Home (Command Center):** Tela inicial com métricas operacionais reais (projetos, agentes configurados/em execução, missões ativas/concluídas, tarefas e aprovações pendentes), card de Missão em Destaque, Esquadrão de Agentes, Projetos Locais com estado Git e Linha do Tempo.
-- **Escritório 2D (Living Agent Office):** Layout operacional em 3 colunas (Monitor de Missão à esquerda, Mundo 2D Phaser ao centro com **Modo Imersivo**, e Git Control à direita). A instância Phaser permanece montada ao alternar entre abas, preservando animações e sessões de terminal.
-- **Projetos e Tarefas:** Gerenciamento completo de tarefas locais por projeto e disparo do Modo Equipe.
-- **Histórico:** Registro persistente em SQLite com filtro por categoria e sanitização de credenciais (`redact`).
-- **Central de Agentes:** Configuração individual de provedor (`antigravity`, `gemini`, `codex`), modelo e esforço de raciocínio (`default`, `low`, `medium`, `high`, `extra-high`), além de perfis rápidos (*Economia*, *Equilibrado*, *Máxima qualidade*).
+- **Os CLIs agem no seu projeto com as permissões que você configurou neles.** No modo clássico e nos passos de implementação, o Dev roda com escrita: Codex com `--sandbox workspace-write`, Gemini com `--approval-mode auto_edit` e Antigravity com `--mode accept-edits`. Os passos de leitura usam modo somente leitura quando o CLI oferece essa opção. **Trabalhe num repositório Git com commit em dia.**
+- Os agentes só são iniciados dentro da pasta do projeto ativo. Shims `.cmd` no Windows só recebem argumentos simples (sem metacaracteres de shell).
+- O texto produzido pelos modelos é tratado como dado não confiável. Propostas fora do formato ou das regras são recusadas por inteiro. **Isso não elimina prompt injection:** um conteúdo malicioso no projeto ainda pode influenciar o que o CLI faz dentro das permissões dele.
+- Credenciais: o app não lê nem guarda tokens dos CLIs. Textos gravados (histórico, eventos, memória) passam por uma **remoção de segredos baseada em padrões** (chaves conhecidas, JWT, `senha=`, `*_API_KEY=`, URLs com credencial). **Ela não detecta segredos sem formato reconhecível.** Não cole segredos em tarefas.
+- A saída ao vivo dos terminais e dos CLIs chega à interface sem filtro.
 
-### 2. Living Agent Office (Phaser 2D)
-- **Zonas Funcionais:** Bancadas exclusivas por agente (Arquiteto com blueprint, Dev com monitor duplo, QA com checklist, Tutor junto à biblioteca), Mesa de Comando da Equipe, Quadro Kanban, Rack de Servidores com LEDs ativos, Cantinho do Café, Bebedouro e janelas panorâmicas noturnas.
-- **Objetos Interativos com Highlight e Tooltip:** Clicar nas mesas abre o terminal do agente; clicar no Quadro Kanban abre Tarefas; na Biblioteca abre a Central de Agentes; no Rack de Servidores abre o Histórico; na Mesa de Reuniões foca o Monitor de Missão.
-- **Movimentação Inteligente por Corredor:** Personagens utilizam waypoints no corredor principal para nunca atravessar mesas ou móveis, com animações dedicadas de caminhada (4 quadros), digitação (2 quadros), piscar de olhos e etiquetas pixeladas de estado (`PLAN`, `EXEC`, `QA REV`, `APROVAR`, `PRONTO`, `ESPERA`, `ERRO`, `OFF`).
+## Limitações conhecidas
 
-### 3. Monitor de Missão e Progresso Verificável
-- Exibe as 4 etapas operacionais: `1. Planejamento → 2. Desenvolvimento → 3. Revisão QA → 4. Entrega`.
-- **Progresso 100% honesto e determinístico** (`shared/missionProgress.ts`): calculado exclusivamente por etapas concluídas (`0%` = 0/3, `33%` = 1/3, `67%` = 2/3, `100%` = 3/3). Nunca utiliza timers artificiais e nunca exibe 100% em missões interrompidas ou com falha.
-
-### 4. Git Control: Git Local vs Repositório Remoto
-- **Bloco Git Local:** Branch ativa, último commit (`git log -1`), contadores categorizados (`novos`, `modificados`, `removidos`, `conflitos`, `staged`), diff inline e **Commit Local** (grava alterações apenas na máquina local).
-- **Bloco Repositório Remoto:** Estado explícito (`Configurado`, `Sem remote` ou `Estado remoto desconhecido`), nome do remote (`origin`), URL sanitizada sem credenciais (com opções Ver/Copiar), contadores `ahead/behind` com nota explicativa sobre referências locais e **Push Remoto** com confirmação em duas etapas via token de uso único.
-- **Honestidade de Autoria:** Eventos originados pelo término do Dev no Modo Equipe identificam o agente; alterações externas detectadas por polling exibem o aviso neutro `"Novas alterações detectadas."`.
-
----
-
-## Estrutura do Projeto
-
-```
-shared/
-  protocol.ts             Contratos WebSocket, tipos de agentes, tarefas, missões e GitStatus
-  missionProgress.ts      Cálculo determinístico de progresso por etapas verificadas (0/33/67/100%)
-server/src/
-  cli/                    Resolução segura de binários (agy, codex, gemini) e execução sem shell
-  agents/                 Registro de estados em tempo real e persistência de modelos (SQLite)
-  terminal/               Sessões PTY reais (node-pty) com injeção de modelo/esforço
-  projects/               Validação e normalização canônica de caminhos Windows/Linux (SQLite)
-  tasks/                  CRUD de tarefas e missões do Modo Equipe (SQLite)
-  history/                Histórico persistente com sanitização de segredos (redact)
-  team/                   Orquestrador do Modo Equipe (Arquiteto -> Aprovação -> Dev -> QA; reprovado volta ao Dev, até 3 tentativas)
-  git/                    Serviço Git local/remoto com sanitização de URL e token de push
-  server.ts               Servidor HTTP + WebSocket restrito a 127.0.0.1
-web/src/
-  game/                   Cenário Phaser 2D, sprites pixel art, atores e WorldBridge
-  net/                    Hooks WebSocket e sincronização Git em tempo real
-  ui/                     HomeView, MissionMonitor, GitPanel, AgentCenter, TaskPanel, HistoryPanel, AgentWindow
-```
+- Se o backend for **encerrado à força** (queda, `kill`, Gerenciador de Tarefas), o processo do CLI em execução **não é encerrado junto no Windows**: ele continua até terminar sozinho e pode alterar arquivos depois disso. A recuperação detecta essas alterações e pede confirmação. O encerramento normal (Ctrl+C) encerra os CLIs.
+- Backends de versões anteriores à trava de instância não a respeitam. Não rode versões antigas e novas na mesma pasta de dados.
+- O escritório Phaser é **desmontado ao trocar de aba** e remontado em cerca de 0,1 s ao voltar. Isso foi decidido na Etapa 11.2 depois de comparar com a opção de mantê-lo montado, oculto e com o loop suspenso. Medidas no Chromium: CPU oculto ~0% nas duas; troca de aba 94 ms contra 31 ms; memória do navegador fora do escritório 371–416 MB contra 441 MB. Mantê-lo montado também manteria vivos o painel lateral e o terminal. A memória em repouso pesou mais que os 60 ms de troca.
+- Os CLIs não informam custo nem tokens. Os limites contam chamadas e passos.
+- Sem empacotamento desktop ainda.
