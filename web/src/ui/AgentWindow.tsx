@@ -2,7 +2,8 @@ import type { AgentConfig, AgentInfo, AuthState } from '../../../shared/protocol
 import type { Send, Subscribe } from '../net/useServer.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
 import { stateOf } from './agentText.ts'
-import { TerminalView } from './TerminalView.tsx'
+import { Suspense } from 'react'
+import { LazyTerminalView } from '../lazyScreens.ts'
 
 const AUTH_LABEL: Record<AuthState, string> = {
   ok: 'Conta conectada',
@@ -94,16 +95,18 @@ export function AgentWindow({
         {cliReady && !hasProject ? 'Escolha um projeto acima para iniciar a sessão.' : agent.message}
       </p>
 
-      <TerminalView
-        key={agent.id}
-        agentId={agent.id}
-        cliName={agent.cli}
-        sessionActive={sessionActive}
-        canStart={online && cliReady && hasProject}
-        online={online}
-        send={send}
-        subscribe={subscribe}
-      />
+      <Suspense fallback={<p className="window-message">Carregando o terminal…</p>}>
+        <LazyTerminalView
+          key={agent.id}
+          agentId={agent.id}
+          cliName={agent.cli}
+          sessionActive={sessionActive}
+          canStart={online && cliReady && hasProject}
+          online={online}
+          send={send}
+          subscribe={subscribe}
+        />
+      </Suspense>
     </aside>
   )
 }

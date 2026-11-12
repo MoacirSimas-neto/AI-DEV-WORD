@@ -1202,6 +1202,18 @@ input:focus-visible {
   background: var(--night);
 }
 
+/* Placeholder enquanto o módulo do Phaser é baixado (carregado sob demanda). */
+.world-loading {
+  aspect-ratio: 720 / 396;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  border: 4px solid var(--wood);
+  background: var(--night);
+  color: var(--stone);
+  font-family: var(--pixel);
+}
+
 .full-view-container {
   max-width: 1280px;
   margin: 0 auto;

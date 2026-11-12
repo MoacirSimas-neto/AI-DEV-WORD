@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type { AgentConfig, AgentInfo, GitStatus, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
 import type { WorldAction } from '../game/WorldBridge.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
-import { PhaserGame } from '../game/PhaserGame.tsx'
+import { LazyPhaserGame } from '../lazyScreens.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
 import { AgentWindow } from './AgentWindow.tsx'
 import { GitPanel } from './GitPanel.tsx'
@@ -186,14 +186,16 @@ export function StudioOfficeView({
 
         {/* Jogo Phaser com agentes ao vivo */}
         <ErrorBoundary fallbackTitle="Falha no mundo do escritório">
-          <PhaserGame
-            agents={agents}
-            selectedId={selectedAgentId}
-            onSelect={handleSelectAgent}
-            onAction={onAction}
-            team={team.active}
-            forward={forward}
-          />
+          <Suspense fallback={<div className="world-wrapper"><p className="world-loading">Carregando o escritório…</p></div>}>
+            <LazyPhaserGame
+              agents={agents}
+              selectedId={selectedAgentId}
+              onSelect={handleSelectAgent}
+              onAction={onAction}
+              team={team.active}
+              forward={forward}
+            />
+          </Suspense>
         </ErrorBoundary>
 
         {/* Dock Flutuante Inferior Slim & Escalável (Mostra Nome + Função de cada Agente) */}

@@ -1,19 +1,25 @@
-import { useCallback, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { isOpenMission } from '../../shared/missionPhases.ts'
 import type { WorldAction } from './game/WorldBridge.ts'
 import { useGitStatus } from './net/useGitStatus.ts'
 import { useServer } from './net/useServer.ts'
-import { AgentCenter } from './ui/AgentCenter.tsx'
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
-import { HistoryPanel } from './ui/HistoryPanel.tsx'
-import { HomeView } from './ui/HomeView.tsx'
-import { MemoryCenter } from './ui/MemoryCenter.tsx'
-import { ObservabilityCenter } from './ui/ObservabilityCenter.tsx'
-import { TaskPanel } from './ui/TaskPanel.tsx'
 import { StudioTopBar, type StudioTab } from './ui/StudioTopBar.tsx'
 import { StudioOfficeView } from './ui/StudioOfficeView.tsx'
-import { PrototypeShowcase } from './prototypes/PrototypeShowcase.tsx'
+import {
+  LazyAgentCenter,
+  LazyHistoryPanel,
+  LazyHomeView,
+  LazyMemoryCenter,
+  LazyObservabilityCenter,
+  LazyPrototypeShowcase,
+  LazyTaskPanel,
+  prefetchScreens,
+} from './lazyScreens.ts'
+// Estilos do shell do Studio (não só dos protótipos): ficam no carregamento inicial.
 import './prototypes/prototypes.css'
+
+const pageFallback = <p className="window-message studio-page-loading">Carregando…</p>
 
 export type NavTab = StudioTab | 'home' | 'prototypes'
 
@@ -45,6 +51,9 @@ function App() {
   const [sideTab, setSideTab] = useState<'agent' | 'git' | 'mission'>('agent')
 
   const online = status === 'online'
+
+  // As telas secundárias descem em segundo plano depois da primeira pintura.
+  useEffect(() => prefetchScreens(), [])
   const gitStatus = useGitStatus(send, subscribe, online, workspace.activeProjectId)
 
   const selectAgent = useCallback((agentId: string) => {
@@ -164,17 +173,19 @@ function App() {
         {activeTab === 'tasks' && (
           <div className="studio-page-view">
             <ErrorBoundary fallbackTitle="Falha no painel de tarefas">
-              <TaskPanel
-                tasks={tasks}
-                missions={missions}
-                agents={agents}
-                configs={configs}
-                activeProjectId={workspace.activeProjectId}
-                online={online}
-                send={send}
-                subscribe={subscribe}
-                onClose={() => setActiveTab('office')}
-              />
+              <Suspense fallback={pageFallback}>
+                <LazyTaskPanel
+                  tasks={tasks}
+                  missions={missions}
+                  agents={agents}
+                  configs={configs}
+                  activeProjectId={workspace.activeProjectId}
+                  online={online}
+                  send={send}
+                  subscribe={subscribe}
+                  onClose={() => setActiveTab('office')}
+                />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
@@ -183,7 +194,9 @@ function App() {
         {activeTab === 'history' && (
           <div className="studio-page-view">
             <ErrorBoundary fallbackTitle="Falha no painel de histórico">
-              <HistoryPanel history={history} onClose={() => setActiveTab('office')} />
+              <Suspense fallback={pageFallback}>
+                <LazyHistoryPanel history={history} onClose={() => setActiveTab('office')} />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
@@ -192,18 +205,20 @@ function App() {
         {activeTab === 'agents' && (
           <div className="studio-page-view">
             <ErrorBoundary fallbackTitle="Falha na Central de Agentes">
-              <AgentCenter
-                agents={agents}
-                configs={configs}
-                allConfigs={allConfigs}
-                specializations={specializations}
-                skills={skills}
-                skillOverrides={skillOverrides}
-                online={online}
-                send={send}
-                subscribe={subscribe}
-                onClose={() => setActiveTab('office')}
-              />
+              <Suspense fallback={pageFallback}>
+                <LazyAgentCenter
+                  agents={agents}
+                  configs={configs}
+                  allConfigs={allConfigs}
+                  specializations={specializations}
+                  skills={skills}
+                  skillOverrides={skillOverrides}
+                  online={online}
+                  send={send}
+                  subscribe={subscribe}
+                  onClose={() => setActiveTab('office')}
+                />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
@@ -212,15 +227,17 @@ function App() {
         {activeTab === 'memory' && (
           <div className="studio-page-view">
             <ErrorBoundary fallbackTitle="Falha na Central de Memória">
-              <MemoryCenter
-                projectId={workspace.activeProjectId}
-                projectName={activeProject?.name}
-                agents={agents}
-                online={online}
-                send={send}
-                subscribe={subscribe}
-                onClose={() => setActiveTab('office')}
-              />
+              <Suspense fallback={pageFallback}>
+                <LazyMemoryCenter
+                  projectId={workspace.activeProjectId}
+                  projectName={activeProject?.name}
+                  agents={agents}
+                  online={online}
+                  send={send}
+                  subscribe={subscribe}
+                  onClose={() => setActiveTab('office')}
+                />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
@@ -229,21 +246,23 @@ function App() {
         {activeTab === 'observability' && (
           <div className="studio-page-view">
             <ErrorBoundary fallbackTitle="Falha na Central de Observabilidade">
-              <ObservabilityCenter
-                workspace={workspace}
-                missions={missions}
-                agents={agents}
-                configs={allConfigs ?? configs}
-                skills={skills}
-                skillOverrides={skillOverrides}
-                online={online}
-                send={send}
-                subscribe={subscribe}
-                initialMissionId={observabilityMissionId}
-                initialAgentId={observabilityAgentId}
-                onClose={() => setActiveTab('office')}
-                onSelectAgentInOffice={selectAgent}
-              />
+              <Suspense fallback={pageFallback}>
+                <LazyObservabilityCenter
+                  workspace={workspace}
+                  missions={missions}
+                  agents={agents}
+                  configs={allConfigs ?? configs}
+                  skills={skills}
+                  skillOverrides={skillOverrides}
+                  online={online}
+                  send={send}
+                  subscribe={subscribe}
+                  initialMissionId={observabilityMissionId}
+                  initialAgentId={observabilityAgentId}
+                  onClose={() => setActiveTab('office')}
+                  onSelectAgentInOffice={selectAgent}
+                />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
@@ -252,22 +271,24 @@ function App() {
         {activeTab === 'home' && (
           <div className="studio-page-view">
             <ErrorBoundary fallbackTitle="Falha na Home Command Center">
-              <HomeView
-                workspace={workspace}
-                agents={agents}
-                configs={configs}
-                tasks={tasks}
-                missions={missions}
-                history={history}
-                gitStatus={gitStatus}
-                online={online}
-                send={send}
-                onNavigateOffice={() => setActiveTab('office')}
-                onSelectAgentInOffice={selectAgent}
-                onNavigateTasks={() => setActiveTab('tasks')}
-                onNavigateHistory={() => setActiveTab('history')}
-                onNavigateAgents={() => setActiveTab('agents')}
-              />
+              <Suspense fallback={pageFallback}>
+                <LazyHomeView
+                  workspace={workspace}
+                  agents={agents}
+                  configs={configs}
+                  tasks={tasks}
+                  missions={missions}
+                  history={history}
+                  gitStatus={gitStatus}
+                  online={online}
+                  send={send}
+                  onNavigateOffice={() => setActiveTab('office')}
+                  onSelectAgentInOffice={selectAgent}
+                  onNavigateTasks={() => setActiveTab('tasks')}
+                  onNavigateHistory={() => setActiveTab('history')}
+                  onNavigateAgents={() => setActiveTab('agents')}
+                />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
@@ -276,7 +297,9 @@ function App() {
         {activeTab === 'prototypes' && (
           <div style={{ position: 'fixed', inset: 0, zIndex: 9999, width: '100%', height: '100%', overflow: 'hidden' }}>
             <ErrorBoundary fallbackTitle="Falha no laboratório de protótipos">
-              <PrototypeShowcase onBackToApp={() => setActiveTab('office')} />
+              <Suspense fallback={pageFallback}>
+                <LazyPrototypeShowcase onBackToApp={() => setActiveTab('office')} />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}
