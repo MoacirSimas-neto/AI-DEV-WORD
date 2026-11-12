@@ -12,6 +12,7 @@ import type {
   ProposalStatus,
   RoleCategory,
   StepStatus,
+  TeamChange,
 } from '../../../shared/protocol.ts'
 
 // Regras do modo dinâmico, sem banco e sem CLI: o que é válido, o que pode rodar e quando parar.
@@ -210,6 +211,37 @@ export function teamOf(techLeadId: string, proposals: Pick<DynamicProposal, 'sta
   return [...team]
 }
 
+/** Vezes que uma mudança de equipe rejeitada pode voltar com necessidade nova. Depois disso, não volta nesta missão. */
+export const MAX_REJECTED_RETRIES = 1
+
+/** Propostas rejeitadas que traziam a mesma mudança de equipe (mesma ação, mesmo agente). */
+export function rejectedBefore<P extends Pick<DynamicProposal, 'status' | 'teamChanges'>>(change: Pick<TeamChange, 'action' | 'agentId'>, proposals: P[]): P[] {
+  return proposals.filter((p) => p.status === 'rejected' && p.teamChanges.some((c) => c.action === change.action && c.agentId === change.agentId))
+}
+
+const normalized = (value: unknown) => String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
+/** O que identifica o pedido: a tarefa (convocação) ou o motivo (dispensa). */
+const subject = (c: TeamChange) => normalized(c.action === 'convene' ? c.task : c.reason)
+
+/**
+ * Mudança de equipe que o usuário já rejeitou só volta se for outro pedido E algo novo tiver acontecido:
+ * objetivo diferente do rejeitado, pelo menos um passo terminado depois da rejeição, e no máximo
+ * MAX_REJECTED_RETRIES vezes. A decisão continua sendo humana; isto só impede a insistência.
+ */
+function repeatProblem(change: TeamChange, ctx: PlanContext): string | null {
+  const rejected = rejectedBefore(change, ctx.proposals)
+  if (rejected.length === 0) return null
+  const id = change.agentId
+  if (rejected.length > MAX_REJECTED_RETRIES) {
+    return `O usuário já rejeitou esta mudança de equipe para "${id}" ${rejected.length} vezes nesta missão: ela não pode ser proposta de novo.`
+  }
+  const same = rejected.some((p) => p.teamChanges.some((c) => c.action === change.action && c.agentId === id && subject(c) === subject(change)))
+  if (same) return `O usuário já rejeitou esta mudança de equipe para "${id}" com o mesmo objetivo.`
+  const since = rejected.reduce((latest, p) => (p.decidedAt && p.decidedAt > latest ? p.decidedAt : latest), '')
+  const news = ctx.steps.some((s) => ['completed', 'failed', 'interrupted'].includes(s.status) && s.finishedAt !== null && s.finishedAt > since)
+  return news ? null : `O usuário já rejeitou esta mudança de equipe para "${id}" e nenhum passo terminou desde então: não há contexto novo.`
+}
+
 // ---------- validação de propostas ----------
 
 /** O que o coordenador precisa saber de um agente do cadastro (AgentConfig serve). */
@@ -327,9 +359,6 @@ export function validateProposal(input: DynamicProposalInput, ctx: PlanContext):
   if (!input.steps.length && !input.teamChanges.length) problems.push('A proposta não muda nada: inclua passos ou mudanças de equipe.')
 
   const team = new Set(teamOf(ctx.techLeadId, ctx.proposals))
-  const refused = new Set(
-    ctx.proposals.filter((p) => p.status === 'rejected').flatMap((p) => p.teamChanges.map((c) => `${c.action}:${c.agentId}`)),
-  )
   const changed = new Set<string>()
   for (const change of input.teamChanges) {
     const id = String(change?.agentId)
@@ -340,7 +369,8 @@ export function validateProposal(input: DynamicProposalInput, ctx: PlanContext):
     if (changed.has(id)) problems.push(`O agente "${id}" aparece em mais de uma mudança de equipe.`)
     changed.add(id)
     if (!text(change.reason)) problems.push(`Falta o motivo da mudança de equipe de "${id}".`)
-    if (refused.has(`${change.action}:${id}`)) problems.push(`O usuário já rejeitou esta mudança de equipe para "${id}" nesta missão.`)
+    const repeated = repeatProblem(change, ctx)
+    if (repeated) problems.push(repeated)
     if (change.action === 'convene') {
       if (!usable(ctx.agents, id)) problems.push(`O agente "${id}" não existe ou está inativo.`)
       else if (team.has(id)) problems.push(`O agente "${id}" já faz parte da equipe.`)
@@ -370,6 +400,33 @@ export function validateProposal(input: DynamicProposalInput, ctx: PlanContext):
 }
 
 // ---------- execução (sequencial) ----------
+
+/** Papel de execução de cada modo (getStepCliAndArgs): é daqui que saem as permissões do CLI, nunca da proposta. */
+export const MODE_STEP_ROLE = { analyze: 'analyzing', implement: 'developing', review: 'reviewing', verify: 'reviewing' } as const
+
+export interface StepBlocker {
+  reason: 'not_eligible' | 'agent_unavailable' | 'not_in_team' | 'mode_not_allowed' | 'limit_reached'
+  message: string
+}
+
+/** Conferência feita na hora de executar: o mundo pode ter mudado desde a aprovação. null = pode rodar. */
+export function stepBlocker(step: PlannedStep, ctx: PlanContext): StepBlocker | null {
+  if (!eligibleSteps(ctx.steps).some((s) => s.id === step.id)) {
+    return { reason: 'not_eligible', message: 'o passo não está aprovado ou depende de passos que não terminaram.' }
+  }
+  const agent = usable(ctx.agents, step.agentId)
+  if (!agent) return { reason: 'agent_unavailable', message: `o agente "${step.agentId}" está inativo ou com o CLI indisponível.` }
+  if (!teamOf(ctx.techLeadId, ctx.proposals).includes(step.agentId)) {
+    return { reason: 'not_in_team', message: `o agente "${step.agentId}" não faz parte da equipe aprovada.` }
+  }
+  if (!modeAllowed(step.mode, agent.roleCategory)) {
+    return { reason: 'mode_not_allowed', message: `o modo "${step.mode}" não é permitido para o agente "${step.agentId}" (categoria ${agent.roleCategory ?? 'indefinida'}).` }
+  }
+  const started = ctx.steps.filter((s) => s.startedAt !== null)
+  const hits = checkLimits(ctx.limits, usageOf([...started, step], ctx.proposals, ctx.techLeadId))
+  if (hits.length) return { reason: 'limit_reached', message: `limite da missão atingido: ${hits.map((h) => `${h.limit} = ${h.value} (máximo ${h.max})`).join(', ')}.` }
+  return null
+}
 
 const stepRef = (revision: number, key: string) => `${revision}:${key}`
 

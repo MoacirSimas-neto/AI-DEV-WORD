@@ -434,13 +434,13 @@ test('compatibilidade: o fluxo clássico não aprova nem esclarece missão dinâ
   await assert.rejects(runner.clarify(dynamic.id, 'resposta'), /não está aguardando esclarecimento/)
   assert.equal(launched, 0)
 
-  // Reinício com uma clássica e uma dinâmica "rodando": só a clássica falha.
+  // Reinício com uma clássica e uma dinâmica "rodando": só a clássica falha; a dinâmica para à espera do usuário (10.3).
   tasks.updateMission(dynamic.id, { phase: 'executing' })
   const classic = tasks.createMission(tasks.create(1, TASK).id, 1)
   tasks.updateMission(classic.id, { phase: 'developing' })
   runner.recover()
   assert.equal(tasks.getMission(classic.id)!.phase, 'failed')
-  assert.equal(tasks.getMission(dynamic.id)!.phase, 'executing')
+  assert.equal(tasks.getMission(dynamic.id)!.phase, 'awaiting_decision')
   assert.equal(tasks.getMission(dynamic.id)!.mode, 'dynamic')
   // O cancelamento do fluxo clássico continua funcionando para qualquer missão aberta.
   runner.cancel(dynamic.id)

@@ -107,7 +107,8 @@ const SEEN = new Set<DynamicProposal['status']>(['pending', 'rejected', 'adjust_
 function proposalSignature(p: Pick<DynamicProposalInput, 'kind' | 'teamChanges' | 'steps'>): string {
   return JSON.stringify([
     p.kind,
-    p.teamChanges.map((c) => [c.action, c.agentId]).sort(),
+    // Com o objetivo: convocar o mesmo agente para outra necessidade é outra proposta.
+    p.teamChanges.map((c) => [c.action, c.agentId, (c.action === 'convene' ? c.task : c.reason).toLowerCase().replace(/\s+/g, ' ').trim()]).sort(),
     p.steps.map((s) => [s.key, s.agentId, s.mode, s.objective.toLowerCase().replace(/\s+/g, ' ').trim(), [...s.dependsOn].sort()]),
   ])
 }

@@ -488,6 +488,8 @@ export interface DynamicProposal extends DynamicProposalInput {
   decidedBy: string | null
   /** Texto do usuário ao rejeitar ou pedir ajustes. */
   feedback: string | null
+  /** Calculado ao enviar: agentes desta proposta cuja mudança de equipe o usuário já rejeitou antes, e em quais revisões. */
+  previouslyRejected?: { agentId: string; action: TeamChange['action']; revisions: number[] }[]
 }
 
 /** Uma rodada Dev -> QA da missão. A lista preserva o histórico do retrabalho. */
@@ -677,6 +679,20 @@ export type MissionEventType =
   | 'tests.executed'
   /** A missão atingiu o limite de eventos: os seguintes não foram gravados. */
   | 'log.truncated'
+  // ----- modo dinâmico -----
+  /** declared: o Tech Lead respondeu com uma proposta. Não é decisão nem execução. */
+  | 'proposal.declared'
+  /** observed: o backend recusou a resposta do Tech Lead (data: code, problems). */
+  | 'proposal.invalid'
+  /** observed: o backend aplicou uma entrada ou saída de agente que o usuário aprovou. */
+  | 'team.joined'
+  | 'team.released'
+  /** observed: os passos de uma proposta aprovada viraram o plano vigente. */
+  | 'plan.revised'
+  | 'step.started'
+  | 'step.finished'
+  /** observed: a missão parou à espera de decisão humana (data: reason). */
+  | 'mission.blocked'
 
 /** Um fato da trilha de execução de uma missão. Textos passam por remoção de segredos; nunca traz prompts nem conteúdo de arquivos. */
 export interface MissionEvent {
@@ -702,6 +718,10 @@ export type ServerMessage =
   | { type: 'mission-events'; projectId: number; missionId: number | null; events: MissionEvent[] }
   /** Evento novo, ao vivo. */
   | { type: 'mission-event'; event: MissionEvent }
+  /** Resposta a plan-list e aviso a cada mudança: todas as revisões, em ordem. */
+  | { type: 'mission-plan'; projectId: number; missionId: number; proposals: DynamicProposal[]; steps: PlannedStep[] }
+  /** Resultado de proposal-decide para quem pediu. applied=false com ok=true = a decisão já estava registrada. */
+  | { type: 'proposal-result'; opId: string; missionId: number; proposalId: number; ok: boolean; applied: boolean; status: ProposalStatus | null; message: string }
   | {
       type: 'snapshot'
       agents: AgentInfo[]
@@ -783,7 +803,16 @@ export type ClientMessage =
   | { type: 'task-update'; taskId: number; task: TaskInput }
   | { type: 'task-delete'; taskId: number }
   /** Modo equipe: o planejador começa a planejar a tarefa (com equipe padrão ou personalizada). */
-  | { type: 'mission-start'; taskId: number; team?: Partial<MissionTeamSelection> }
+  | { type: 'mission-start'; taskId: number; team?: Partial<MissionTeamSelection>; mode?: MissionMode; limits?: Partial<DynamicLimits> }
+  /**
+   * Decisão humana sobre uma proposta de missão dinâmica. `revision` é a que o usuário viu;
+   * `opId` identifica o clique: o reenvio da mesma decisão não executa nada de novo.
+   */
+  | { type: 'proposal-decide'; missionId: number; proposalId: number; revision: number; decision: ProposalDecision; feedback?: string; opId: string }
+  /** O usuário confirma o encerramento de uma missão dinâmica que aguarda decisão. */
+  | { type: 'mission-close'; missionId: number }
+  /** Propostas (com as decisões) e passos de uma missão dinâmica. Também serve para retomar depois de reconectar. */
+  | { type: 'plan-list'; projectId: number; missionId: number }
   /** Aprova o plano e libera o Dev. */
   | { type: 'mission-approve'; missionId: number }
   /** Rejeita o plano ou interrompe a missão. */

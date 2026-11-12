@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
 import type {
   DynamicProposal,
@@ -108,12 +109,14 @@ export interface PlanQuery {
 /**
  * Propostas do Tech Lead e passos dos planos aprovados das missões dinâmicas.
  * Só guarda e aplica: a validação do conteúdo é do coordenador (validateProposal), antes de `propose`.
+ * Emite 'change' (missionId) quando propostas ou passos de uma missão mudam.
  */
-export class PlanStore {
+export class PlanStore extends EventEmitter {
   private readonly db: DatabaseSync
   private readonly tasks: TaskStore
 
   constructor(db: DatabaseSync, tasks: TaskStore) {
+    super()
     this.db = db
     this.tasks = tasks
     this.db.exec(SCHEMA)
@@ -154,6 +157,10 @@ export class PlanStore {
    * Uma proposta pendente anterior vira superseded: uma aprovação atrasada dela não vale mais.
    */
   propose(missionId: number, author: string, input: DynamicProposalInput): DynamicProposal {
+    return this.changed(missionId, this.proposeTx(missionId, author, input))
+  }
+
+  private proposeTx(missionId: number, author: string, input: DynamicProposalInput): DynamicProposal {
     return this.tx(() => {
       const mission = this.dynamicMission(missionId)
       if (mission.phase !== 'awaiting_approval') assertTransition(mission.phase, 'awaiting_approval')
@@ -191,6 +198,12 @@ export class PlanStore {
     })
   }
 
+  /** Avisa quem exibe o plano. Fora da transação: quem ouve lê o estado já gravado. */
+  private changed<T>(missionId: number, value: T): T {
+    this.emit('change', missionId)
+    return value
+  }
+
   /**
    * Aplica a decisão humana de uma vez: estado da proposta, passos do plano e fase da missão.
    * `applied: false` = a mesma decisão já tinha sido aplicada (repetição). Lança se a decisão é
@@ -200,7 +213,17 @@ export class PlanStore {
     proposalId: number,
     revision: number,
     decision: ProposalDecision,
-    options: { decidedBy?: string; feedback?: string } = {},
+    options: { decidedBy?: string; feedback?: string; /** Roda dentro da transação, só quando a decisão é aplicada. */ apply?: () => void } = {},
+  ): { proposal: DynamicProposal; applied: boolean } {
+    const result = this.decideTx(proposalId, revision, decision, options)
+    return result.applied ? this.changed(result.proposal.missionId, result) : result
+  }
+
+  private decideTx(
+    proposalId: number,
+    revision: number,
+    decision: ProposalDecision,
+    options: { decidedBy?: string; feedback?: string; apply?: () => void },
   ): { proposal: DynamicProposal; applied: boolean } {
     return this.tx(() => {
       const proposal = this.getProposal(proposalId)
@@ -231,6 +254,7 @@ export class PlanStore {
           insert.run(proposal.missionId, proposal.projectId, proposal.id, proposal.revision, step.key, seq, step.agentId, step.mode, step.objective, JSON.stringify(step.dependsOn), JSON.stringify(step.inputs)),
         )
       }
+      options.apply?.()
       const next = phaseAfterDecision(proposal.kind, decision, nextStep(this.listSteps({ projectId: mission.projectId, missionId: mission.id })) !== null)
       assertTransition(mission.phase, next)
       this.tasks.updateMission(mission.id, { phase: next })
@@ -244,7 +268,8 @@ export class PlanStore {
       .prepare(`UPDATE mission_steps SET status = 'running', started_at = ?, correlation_id = ? WHERE id = ? AND status = 'approved'`)
       .run(new Date().toISOString(), correlationId, stepId)
     if (updated.changes !== 1) throw new Error('Este passo não está aprovado para execução.')
-    return this.getStep(stepId)!
+    const step = this.getStep(stepId)!
+    return this.changed(step.missionId, step)
   }
 
   finishStep(stepId: number, status: 'completed' | 'failed' | 'interrupted' | 'cancelled', outcome: { result?: string; error?: string } = {}): PlannedStep {
@@ -253,13 +278,14 @@ export class PlanStore {
     this.db
       .prepare(`UPDATE mission_steps SET status = ?, finished_at = ?, result = ?, error = ? WHERE id = ? AND status = 'running'`)
       .run(status, new Date().toISOString(), redact(outcome.result ?? '').slice(0, MAX_RESULT), outcome.error ? redact(outcome.error) : null, stepId)
-    return this.getStep(stepId)!
+    return this.changed(step.missionId, this.getStep(stepId)!)
   }
 
   /** Na inicialização: passos que tinham um CLI rodando morreram com o app anterior. Nenhum é relançado. */
   interruptRunning(): PlannedStep[] {
     const lost = this.db.prepare(`SELECT ${STEP_COLUMNS} FROM mission_steps WHERE status = 'running'`).all().map(toStep)
     this.setSteps(`status = 'running'`, 'interrupted', 'Interrompido: o app foi fechado durante a execução.')
+    for (const missionId of new Set(lost.map((s) => s.missionId))) this.emit('change', missionId)
     return lost.map((s) => this.getStep(s.id)!)
   }
 
@@ -270,6 +296,7 @@ export class PlanStore {
       this.db.prepare(`UPDATE mission_proposals SET status = 'superseded', decided_at = ? WHERE mission_id = ? AND status = 'pending'`).run(now, missionId)
       this.setSteps(`status IN ('approved', 'running') AND mission_id = ${Number(missionId)}`, 'cancelled', null)
     })
+    this.emit('change', missionId)
   }
 
   private setSteps(where: string, status: StepStatus, error: string | null) {
