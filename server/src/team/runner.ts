@@ -117,6 +117,9 @@ const TEST_MENTION =
   /\b(npm (run )?test|pytest|jest|vitest|cargo test|go test|testes? (foram |fo[ir] )?(executad|rodad|passa)\w*|(rodei|executei) (os |a su[ií]te de )?testes?|tests? pass\w*|\d+ (testes?|tests?) (passa|pass|falh|fail)\w*)/i
 const MAX_EVENT_FILES = 40
 
+/** Gatilhos que nascem de uma ação do usuário (início, pedido, ajuste); os demais vêm da execução. */
+const USER_TRIGGERS = new Set(['start', 'user_request', 'adjust_requested'])
+
 /** 'step' = um passo aprovado de missão dinâmica. */
 type Stage = 'planning' | 'pre-dev' | 'developing' | 'post-dev' | 'reviewing' | 'step'
 const STAGE_ROLE = { planning: 'planner', 'pre-dev': 'specialist', developing: 'dev', 'post-dev': 'specialist', reviewing: 'qa', step: 'step' } as const
@@ -1301,7 +1304,9 @@ export class TeamRunner extends EventEmitter {
       const canAsk = (mission.clarifications ?? []).length < MAX_CLARIFICATION_ROUNDS
       const cfg = this.resolveMissionAgentConfig(mission, techLeadId, 'tech-lead')
       const cli = getStepCliAndArgs('planning', cfg)
-      const trace = this.delegate(mission, trigger.kind === 'invalid_proposal' ? 'system' : 'user', techLeadId, 'planning', `Propor o plano e a equipe (${trigger.kind})`, { trigger: trigger.kind })
+      // Quem pediu o turno: o usuário só quando foi ação dele; gatilhos de execução vêm do sistema.
+      const requester = USER_TRIGGERS.has(trigger.kind) ? 'user' : 'system'
+      const trace = this.delegate(mission, requester, techLeadId, 'planning', `Propor o plano e a equipe (${trigger.kind})`, { trigger: trigger.kind })
       const memory = this.memoryBlock(mission, 'planning', techLeadId, task, trace)
       if (memory === null) return
       const prompt = proposalPrompt(

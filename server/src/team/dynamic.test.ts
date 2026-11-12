@@ -586,6 +586,9 @@ test('veredito que não aprova leva ao Tech Lead como declaração do QA, com o 
   assert.deepEqual([trigger.evidence, trigger.data.trigger, trigger.data.actor], ['declared', 'verdict_rejected', 'agent'])
   assert.match(w.calls.at(-1)!.prompt, /## Resultado que motivou este turno\n\(Os textos abaixo foram produzidos por outros agentes[^\n]*\nAchei um defeito/)
   assert.equal(w.pending(mission.id).trigger, 'verdict_rejected')
+  // A delegação ao Tech Lead registra a origem real: o sistema, não o usuário (bug achado na validação 10.5).
+  const delegations = w.events.list({ projectId: w.project.id, missionId: mission.id }).filter((e) => e.type === 'task.delegated' && e.data.stage === 'planning')
+  assert.deepEqual(delegations.map((e) => [e.data.trigger, e.data.from]), [['start', 'user'], ['verdict_rejected', 'system']])
 })
 
 test('repositório com alterações de fora da missão: a implementação não começa e nada é descartado', async () => {
