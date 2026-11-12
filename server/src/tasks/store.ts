@@ -17,6 +17,7 @@ import type {
   TaskStatus,
 } from '../../../shared/protocol.ts'
 import type { HistoryStore } from '../history/store.ts'
+import { OPEN_PHASES } from '../../../shared/missionPhases.ts'
 import { resolveLimits } from '../team/coordinator.ts'
 
 const SCHEMA = `
@@ -86,7 +87,7 @@ const EXTRA_MISSION_COLUMNS: [string, string][] = [
   ['lead_turns', 'INTEGER NOT NULL DEFAULT 0'],
 ]
 
-export const OPEN_PHASES: MissionPhase[] = ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing', 'executing', 'awaiting_decision']
+export { OPEN_PHASES }
 /** Fases em que um processo de CLI está rodando (não sobrevivem a um reinício). */
 const RUNNING_PHASES = "('planning', 'developing', 'reviewing')"
 
