@@ -960,6 +960,7 @@ export class TeamRunner extends EventEmitter {
       const stepInput = passPromptAsArg ? undefined : fullPrompt
       run.proc = this.launch(cli, stepArgs, {
         cwd,
+        label: `missão #${missionId} · ${agentId} · ${cli}`,
         input: stepInput,
         timeoutMs: this.stepTimeoutMs,
         onOutput: (text) => {
@@ -975,6 +976,7 @@ export class TeamRunner extends EventEmitter {
         effort,
         args,
         promptVia: passPromptAsArg ? 'argument' : 'stdin',
+        guarded: run.proc.guarded ?? false,
         prompt: fingerprint(fullPrompt),
         timeoutMs: this.stepTimeoutMs,
       })

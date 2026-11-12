@@ -3,6 +3,7 @@ import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { findCli, probeCli } from './cli/probe.ts'
 import { startCli } from './cli/run.ts'
+import { ProcessSupervisor, setSupervisor } from './cli/supervisor.ts'
 import { ALLOWED_ORIGINS, DATA_DIR, DATABASE_FILE, HOST, LOCK_FILE, PORT } from './config.ts'
 import { acquireInstanceLock, type InstanceLock } from './db/database.ts'
 import { GitService } from './git/service.ts'
@@ -29,6 +30,15 @@ try {
   process.exit(1)
 }
 process.on('exit', () => instanceLock.release())
+
+// Todo CLI (missão ou terminal) roda sob um guardião ligado a este supervisor: se o backend
+// morrer, inclusive à força, o canal fecha e o guardião encerra a árvore do CLI.
+try {
+  setSupervisor(await ProcessSupervisor.start())
+} catch (error) {
+  console.error(`Não foi possível iniciar o supervisor de processos: ${error instanceof Error ? error.message : String(error)}`)
+  process.exit(1)
+}
 const projects = new ProjectStore(DATABASE_FILE)
 const history = new HistoryStore(projects.db)
 const tasks = new TaskStore(projects.db, history)

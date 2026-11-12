@@ -1,4 +1,6 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
+import path from 'node:path'
+import { getSupervisor } from './supervisor.ts'
 
 export interface CliResult {
   code: number
@@ -79,10 +81,14 @@ export interface StartOptions {
   timeoutMs?: number
   /** Cada pedaço de saída (stdout e stderr), assim que chega. */
   onOutput?: (text: string) => void
+  /** Identifica o processo no supervisor (ex.: "missão #3 · dev"). */
+  label?: string
 }
 
 export interface RunningCli {
   done: Promise<CliResult & { timedOut: boolean }>
+  /** true = roda sob o guardião do supervisor (encerrado junto com o backend). */
+  guarded?: boolean
   /** Encerra o processo e os filhos dele. */
   kill(): void
 }
@@ -94,12 +100,17 @@ const MAX_CAPTURE = 1_000_000
  * Windows o shim .cmd não aceita texto livre como argumento (ver planSpawn).
  */
 export function startCli(executable: string, args: string[], options: StartOptions): RunningCli {
-  const plan = planSpawn(executable, args)
-  const child = spawn(plan.file, plan.args, {
+  const launch = guardedLaunch(planSpawn(executable, args), options.env ?? process.env, options.label ?? path.basename(executable))
+  const child = spawn(launch.file, launch.args, {
     cwd: options.cwd,
-    env: options.env ?? process.env,
+    env: launch.env,
     windowsHide: true,
-    windowsVerbatimArguments: plan.verbatim,
+    windowsVerbatimArguments: launch.verbatim,
+    // O guardião precisa sobreviver à queda do backend para encerrar o CLI:
+    // - Windows: sem detached, o libuv põe o filho num Job Object que morre com o backend; o
+    //   guardião morreria junto e o neto (cmd.exe -> node) escaparia do job (silent breakaway).
+    // - Linux: detached faz o guardião liderar o próprio grupo; encerrar o grupo leva o CLI junto.
+    detached: launch.guarded,
   })
   let stdout = ''
   let stderr = ''
@@ -117,7 +128,7 @@ export function startCli(executable: string, args: string[], options: StartOptio
   child.stdin.on('error', () => {}) // o processo pode sair antes de ler tudo
   child.stdin.end(options.input ?? '')
 
-  const kill = () => killTree(child)
+  const kill = () => killTree(child, launch.guarded)
   const timer = options.timeoutMs
     ? setTimeout(() => {
         timedOut = true
@@ -134,15 +145,30 @@ export function startCli(executable: string, args: string[], options: StartOptio
       resolve({ code: code ?? -1, stdout, stderr, timedOut })
     })
   })
-  return { done, kill }
+  return { done, kill, guarded: launch.guarded }
+}
+
+/** Com supervisor instalado, o CLI roda sob o guardião; sem ele (testes unitários), direto. */
+export function guardedLaunch(plan: SpawnPlan, env: NodeJS.ProcessEnv, label: string) {
+  const supervisor = getSupervisor()
+  if (!supervisor) return { ...plan, env, guarded: false }
+  const reg = supervisor.register({ file: plan.file, args: plan.args, verbatim: plan.verbatim }, label)
+  return { file: reg.command, args: reg.args, verbatim: false, env: { ...env, ...reg.env }, guarded: true }
 }
 
 /** No Windows o CLI roda como neto (cmd.exe -> node): só o taskkill /T derruba a árvore. */
-function killTree(child: ChildProcess) {
+function killTree(child: ChildProcess, groupLeader = false) {
   if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return
+  killTreeByPid(child.pid, groupLeader)
+}
+
+/** Encerra o processo e os descendentes dele (só a árvore que este backend iniciou). */
+export function killTreeByPid(pid: number, groupLeader = false) {
   if (process.platform === 'win32') {
-    execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {})
+    execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => {})
   } else {
-    child.kill('SIGTERM')
+    try {
+      process.kill(groupLeader ? -pid : pid, 'SIGTERM')
+    } catch {}
   }
 }
