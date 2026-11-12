@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
-import type { DynamicProposal, MissionEvent, PlannedStep } from '../../../shared/protocol.ts'
+import type { DynamicProposal, MissionEvent, PendingReplanRequest, PlannedStep } from '../../../shared/protocol.ts'
 import { mergeEvents } from '../ui/dynamicView.ts'
 import type { Send, Subscribe } from './useServer.ts'
 
 export interface PlanState {
   proposals: DynamicProposal[]
   steps: PlannedStep[]
+  pendingReplan: PendingReplanRequest | null
   loaded: boolean
 }
 
-const EMPTY: PlanState = { proposals: [], steps: [], loaded: false }
+const EMPTY: PlanState = { proposals: [], steps: [], pendingReplan: null, loaded: false }
 
 /**
  * Propostas e passos de uma missão dinâmica. Pede ao backend ao montar e a cada reconexão
@@ -23,7 +24,7 @@ export function usePlan(send: Send, subscribe: Subscribe, online: boolean, proje
     if (!projectId || !missionId) return
     const unsubscribe = subscribe((msg) => {
       if (msg.type === 'mission-plan' && msg.projectId === projectId && msg.missionId === missionId) {
-        setPlan({ proposals: msg.proposals, steps: msg.steps, loaded: true, key: `${projectId}:${missionId}` })
+        setPlan({ proposals: msg.proposals, steps: msg.steps, pendingReplan: msg.pendingReplan ?? null, loaded: true, key: `${projectId}:${missionId}` })
       }
     })
     if (online) send({ type: 'plan-list', projectId, missionId })

@@ -139,6 +139,14 @@ export function DynamicMissionMonitor({ mission, task, agents, configs, online, 
         <p className="dyn-dim dyn-waiting">{nameOf(techLeadId)} está analisando. A proposta aparece aqui para a sua decisão; nada é executado antes.</p>
       )}
 
+      {plan.pendingReplan && (
+        <section className="dyn-trigger" role="status" aria-label="Alteração aguardando ponto seguro">
+          <h5>Alteração solicitada pelo chat</h5>
+          <p>{plan.pendingReplan.detail}</p>
+          <p className="dyn-dim">A equipe está concluindo o passo atual. O Tech Lead será consultado assim que o passo terminar (ponto seguro).</p>
+        </section>
+      )}
+
       <ClarificationBox mission={mission} online={online} send={send} />
 
       {pending && (

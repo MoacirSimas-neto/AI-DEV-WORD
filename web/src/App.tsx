@@ -168,6 +168,7 @@ function App() {
                   tasks={tasks}
                   initialConversationId={chatConversationId}
                   onOpenObservability={(missionId) => openObservability(missionId)}
+                  onOpenOffice={() => setActiveTab('office')}
                 />
               </Suspense>
             </ErrorBoundary>

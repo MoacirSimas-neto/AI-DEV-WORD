@@ -420,3 +420,96 @@ export function prepareBlocker(s: {
   if (!s.agentAvailable) return 'O CLI do Tech Lead está indisponível.'
   return null
 }
+
+// ---------- chat durante missão ativa (Etapa 12.3) ----------
+
+export interface ChatMilestone {
+  id: number
+  at: string
+  text: string
+  tone: ChatMissionTone
+}
+
+const MILESTONE_TYPES = new Set([
+  'proposal.declared',
+  'approval.received',
+  'step.started',
+  'step.finished',
+  'mission.blocked',
+  'replan.triggered',
+  'chat.replan_requested',
+  'mission.completed',
+  'mission.cancelled',
+  'mission.failed',
+])
+
+/** Converte apenas eventos-marco reais em atualizações discretas para o chat (sem duplicar a Observabilidade). */
+export function chatMissionMilestones(events: MissionEvent[], nameOf: (id: string) => string): ChatMilestone[] {
+  const out: ChatMilestone[] = []
+  for (const ev of events) {
+    if (!MILESTONE_TYPES.has(ev.type)) continue
+    const who = ev.agentId ? nameOf(ev.agentId) : 'Agente'
+    let text = ev.summary
+    let tone: ChatMissionTone = 'wait'
+    if (ev.type === 'proposal.declared') {
+      const rev = typeof ev.data.revision === 'number' ? ` (revisão ${ev.data.revision})` : ''
+      text = `${who} preparou a proposta${rev}.`
+      tone = 'decide'
+    } else if (ev.type === 'approval.received') {
+      const dec = ev.data.decision
+      const rev = typeof ev.data.revision === 'number' ? ` a revisão ${ev.data.revision}` : ''
+      text = dec === 'approved' ? `Você aprovou${rev}.` : dec === 'rejected' ? `Você rejeitou${rev}.` : `Você pediu ajustes${rev}.`
+      tone = dec === 'approved' ? 'done' : 'decide'
+    } else if (ev.type === 'step.started') {
+      const key = typeof ev.data.key === 'string' ? ` (${ev.data.key})` : ''
+      text = `${who} iniciou o passo${key}.`
+      tone = 'run'
+    } else if (ev.type === 'step.finished') {
+      const key = typeof ev.data.key === 'string' ? ` (${ev.data.key})` : ''
+      const ok = ev.state === 'completed'
+      text = ok ? `${who} concluiu o passo${key}.` : `${who} encerrou o passo${key} com falha.`
+      tone = ok ? 'done' : 'fail'
+    } else if (ev.type === 'mission.blocked') {
+      text = `Ocorreu um bloqueio: ${ev.summary}`
+      tone = 'fail'
+    } else if (ev.type === 'chat.replan_requested') {
+      text = ev.data.queued ? 'Alteração solicitada: aguardando o fim do passo atual (ponto seguro).' : 'Alteração solicitada pelo chat.'
+      tone = 'wait'
+    } else if (ev.type === 'replan.triggered') {
+      text = `${who} está preparando uma nova proposta.`
+      tone = 'wait'
+    } else if (ev.type === 'mission.completed') {
+      text = 'A missão foi concluída.'
+      tone = 'done'
+    } else if (ev.type === 'mission.cancelled') {
+      text = 'A missão foi cancelada.'
+      tone = 'off'
+    } else if (ev.type === 'mission.failed') {
+      text = 'A missão falhou.'
+      tone = 'fail'
+    }
+    out.push({ id: ev.id, at: ev.at, text, tone })
+  }
+  return out.slice(-8)
+}
+
+/** Motivo pelo qual não dá para pedir alteração pelo chat agora (null = disponível). */
+export function chatReplanBlocker(s: {
+  online: boolean
+  mission: Pick<MissionInfo, 'mode' | 'phase'> | null | undefined
+  hasPendingReplan: boolean
+  requesting: boolean
+}): string | null {
+  if (!s.online) return 'Sem conexão com o backend.'
+  if (!s.mission) return 'Carregando missão…'
+  if (s.mission.mode !== 'dynamic') return 'Missão clássica não usa replanejamento dinâmico.'
+  if (!['planning', 'awaiting_approval', 'awaiting_clarification', 'awaiting_decision', 'executing', 'developing', 'reviewing'].includes(s.mission.phase)) {
+    return 'A missão já foi encerrada.'
+  }
+  if (s.requesting) return 'Enviando solicitação…'
+  if (s.hasPendingReplan) return 'Já existe uma solicitação aguardando o próximo ponto seguro.'
+  if (s.mission.phase === 'awaiting_approval') return 'Há uma proposta pendente: use "Pedir ajustes" nela ou decida primeiro.'
+  if (s.mission.phase === 'planning') return 'O Tech Lead já está preparando uma proposta.'
+  if (s.mission.phase === 'awaiting_clarification') return 'Responda primeiro à pergunta da missão.'
+  return null
+}

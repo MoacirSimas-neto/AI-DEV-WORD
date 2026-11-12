@@ -723,6 +723,114 @@
   margin-top: 10px;
   color: var(--ink); /* o monitor tem fundo creme; o chat herdaria texto claro */
 }
+.chat-replan-btn {
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+  border-radius: 6px;
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.chat-replan-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.chat-mission-summary {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.chat-mission-objective {
+  margin: 0;
+  color: #e2e8f0;
+}
+.chat-mission-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--chat-dim);
+}
+.chat-mission-queued {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #bae6fd;
+}
+.chat-mission-blocker {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+}
+.chat-milestones {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px solid var(--chat-line);
+  padding-top: 6px;
+}
+.chat-milestone {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--chat-dim);
+}
+.chat-milestone time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.chat-milestone-done {
+  color: #6ee7b7;
+}
+.chat-milestone-decide {
+  color: #fcd34d;
+}
+.chat-milestone-fail {
+  color: #fca5a5;
+}
+.chat-replan-box {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-replan-label {
+  font-size: 12.5px;
+  color: #e2e8f0;
+}
+.chat-replan-input {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid var(--chat-line);
+  background: rgba(15, 23, 42, 0.85);
+  color: #f8fafc;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  resize: vertical;
+}
+.chat-replan-actions {
+  display: flex;
+  gap: 8px;
+}
+.chat-mission-toggle {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
 
 @media (max-width: 1440px) {
   .chat-shell {

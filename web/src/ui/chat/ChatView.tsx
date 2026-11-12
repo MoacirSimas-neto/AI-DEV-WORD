@@ -2,9 +2,10 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent 
 import { isOpenMission } from '../../../../shared/missionPhases.ts'
 import { CHAT_LIMITS, type AgentConfig, type AgentInfo, type ChatConversation, type ChatMessage, type ChatMissionLink, type MissionInfo, type TaskInfo } from '../../../../shared/protocol.ts'
 import { useChat } from '../../net/useChat.ts'
+import { useMissionEvents, usePlan } from '../../net/useMission.ts'
 import type { Send, Subscribe } from '../../net/useServer.ts'
 import { DynamicMissionMonitor } from '../DynamicMissionMonitor.tsx'
-import { chatMissionState, prepareBlocker } from '../dynamicView.ts'
+import { chatMissionMilestones, chatMissionState, chatReplanBlocker, currentObjective, pendingProposal, prepareBlocker, STEP_STATUS_LABEL, teamView } from '../dynamicView.ts'
 import { Markdown } from './markdown.tsx'
 import './chat.css'
 
@@ -24,6 +25,7 @@ interface Props {
   /** Conversa a abrir ao montar (vindo de "Voltar ao chat"). */
   initialConversationId?: number | null
   onOpenObservability?: (missionId: number) => void
+  onOpenOffice?: () => void
 }
 
 const AVAILABILITY: Record<string, { label: string; tone: 'ok' | 'warn' | 'off' }> = {
@@ -75,7 +77,7 @@ const MessageItem = memo(function MessageItem({ message, name, live }: { message
   )
 })
 
-export function ChatView({ projectId, projectName, agents, configs, online, send, subscribe, onOpenTasks, links = [], missions = [], tasks = [], initialConversationId, onOpenObservability }: Props) {
+export function ChatView({ projectId, projectName, agents, configs, online, send, subscribe, onOpenTasks, links = [], missions = [], tasks = [], initialConversationId, onOpenObservability, onOpenOffice }: Props) {
   const chat = useChat(send, subscribe, online, projectId)
   const { state } = chat
   const planners = agents.filter((a) => {
@@ -381,42 +383,25 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
             <section className="chat-missions" aria-label="Missões desta conversa">
               {convLinks.map((l) => {
                 const m = missionOf(l.missionId)
-                const st = chatMissionState(m)
-                const open = !!m && isOpenMission(m)
+                const lastUserMsg = [...state.messages].reverse().find((msg) => msg.role === 'user')?.content ?? ''
                 return (
-                  <article key={l.missionId} className={`chat-mission chat-mission-${st.tone}`} aria-label={`Missão #${l.missionId}`}>
-                    <header className="chat-mission-head">
-                      <strong>Missão #{l.missionId}</strong>
-                      <span className={`chat-mission-chip chat-mission-chip-${st.tone}`}>{st.label}</span>
-                      <span className="chat-mission-meta">
-                        {l.context.sentMessages} msg da conversa no contexto
-                        {l.context.omittedMessages > 0 ? ` · ${l.context.omittedMessages} mais antiga(s) de fora` : ''}
-                      </span>
-                      <span className="chat-mission-actions">
-                        {open && (
-                          <button type="button" className="chat-link" onClick={onOpenTasks}>
-                            Abrir em Tarefas
-                          </button>
-                        )}
-                        {onOpenObservability && (
-                          <button type="button" className="chat-link" onClick={() => onOpenObservability(l.missionId)}>
-                            Trilha de eventos
-                          </button>
-                        )}
-                      </span>
-                    </header>
-                    {open && m && (
-                      <DynamicMissionMonitor
-                        mission={m}
-                        task={tasks.find((t) => t.id === m.taskId) ?? null}
-                        agents={agents}
-                        configs={configs}
-                        online={online}
-                        send={send}
-                        subscribe={subscribe}
-                      />
-                    )}
-                  </article>
+                  <ChatMissionCard
+                    key={l.missionId}
+                    link={l}
+                    mission={m}
+                    task={m ? (tasks.find((t) => t.id === m.taskId) ?? null) : null}
+                    agents={agents}
+                    configs={configs}
+                    online={online}
+                    send={send}
+                    subscribe={subscribe}
+                    onOpenTasks={onOpenTasks}
+                    onOpenObservability={onOpenObservability}
+                    onOpenOffice={onOpenOffice}
+                    requestingReplan={state.requestingReplan}
+                    onRequestReplan={(missionId, detail) => chat.requestReplan(missionId, detail)}
+                    lastUserMessage={lastUserMsg}
+                  />
                 )
               })}
             </section>
@@ -506,5 +491,201 @@ export function ChatView({ projectId, projectName, agents, configs, online, send
         </footer>
       </section>
     </div>
+  )
+}
+
+function ChatMissionCard({
+  link,
+  mission,
+  task,
+  agents,
+  configs,
+  online,
+  send,
+  subscribe,
+  onOpenTasks,
+  onOpenObservability,
+  onOpenOffice,
+  requestingReplan,
+  onRequestReplan,
+  lastUserMessage,
+}: {
+  link: ChatMissionLink
+  mission: MissionInfo | undefined
+  task: TaskInfo | null
+  agents: AgentInfo[]
+  configs: AgentConfig[]
+  online: boolean
+  send: Send
+  subscribe: Subscribe
+  onOpenTasks: () => void
+  onOpenObservability?: (missionId: number) => void
+  onOpenOffice?: () => void
+  requestingReplan: boolean
+  onRequestReplan: (missionId: number, detail: string) => void
+  lastUserMessage: string
+}) {
+  const st = chatMissionState(mission)
+  const open = !!mission && isOpenMission(mission)
+  const plan = usePlan(send, subscribe, online, open ? mission.projectId : null, open ? mission.id : null)
+  const events = useMissionEvents(send, subscribe, online, open ? mission.projectId : null, open ? mission.id : null)
+  const nameOf = (id: string) => mission?.teamSnapshot?.[id]?.name ?? configs.find((c) => c.agentId === id)?.name ?? agents.find((a) => a.id === id)?.name ?? id
+
+  const objective = currentObjective(plan.proposals)
+  const pending = pendingProposal(plan.proposals)
+  const activeSteps = plan.steps.filter((s) => s.status !== 'superseded')
+  const runningStep = activeSteps.find((s) => s.status === 'running')
+  const nextStep = activeSteps.find((s) => s.status === 'approved')
+  const team = mission ? teamView(mission.plannerId || 'architect', plan.proposals) : { active: [], released: [] }
+  const milestones = chatMissionMilestones(events, nameOf)
+  const replanBlocker = chatReplanBlocker({
+    online,
+    mission,
+    hasPendingReplan: !!plan.pendingReplan,
+    requesting: requestingReplan,
+  })
+
+  const [replanOpen, setReplanOpen] = useState(false)
+  const [replanText, setReplanText] = useState('')
+  const needsHumanAction = !!mission && ['awaiting_approval', 'awaiting_decision', 'awaiting_clarification'].includes(mission.phase)
+  const [showDetails, setShowDetails] = useState(false)
+  const expanded = needsHumanAction || showDetails
+
+  return (
+    <article className={`chat-mission chat-mission-${st.tone}`} aria-label={`Missão #${link.missionId}`}>
+      <header className="chat-mission-head">
+        <strong>Missão #{link.missionId}</strong>
+        <span className={`chat-mission-chip chat-mission-chip-${st.tone}`}>{st.label}</span>
+        <span className="chat-mission-meta">
+          {link.context.sentMessages} msg da conversa no contexto
+          {link.context.omittedMessages > 0 ? ` · ${link.context.omittedMessages} mais antiga(s) de fora` : ''}
+        </span>
+        <span className="chat-mission-actions">
+          {open && mission && (
+            <button
+              type="button"
+              className="chat-replan-btn"
+              disabled={!!replanBlocker}
+              title={replanBlocker ?? 'Enviar pedido formal de alteração do plano ao Tech Lead'}
+              onClick={() => {
+                if (!replanText.trim() && lastUserMessage) setReplanText(lastUserMessage.slice(0, 1000))
+                setReplanOpen((v) => !v)
+              }}
+            >
+              Solicitar alteração
+            </button>
+          )}
+          {onOpenOffice && (
+            <button type="button" className="chat-link" onClick={onOpenOffice}>
+              Escritório
+            </button>
+          )}
+          {open && (
+            <button type="button" className="chat-link" onClick={onOpenTasks}>
+              Abrir em Tarefas
+            </button>
+          )}
+          {onOpenObservability && (
+            <button type="button" className="chat-link" onClick={() => onOpenObservability(link.missionId)}>
+              Trilha de eventos
+            </button>
+          )}
+        </span>
+      </header>
+
+      {mission && (
+        <div className="chat-mission-summary">
+          {objective && <p className="chat-mission-objective">{objective}</p>}
+          <div className="chat-mission-facts">
+            {team.active.length > 0 && <span>Equipe: {team.active.map(nameOf).join(', ')}</span>}
+            {runningStep && (
+              <span>
+                Em andamento: <code>r{runningStep.revision}/{runningStep.key}</code> ({nameOf(runningStep.agentId)})
+              </span>
+            )}
+            {!runningStep && nextStep && (
+              <span>
+                Próximo passo: <code>r{nextStep.revision}/{nextStep.key}</code> ({nameOf(nextStep.agentId)} · {STEP_STATUS_LABEL[nextStep.status]})
+              </span>
+            )}
+            {pending && <span>Proposta pendente: Revisão {pending.revision}</span>}
+          </div>
+          {plan.pendingReplan && (
+            <p className="chat-mission-queued" role="status">
+              <strong>Alteração na fila (ponto seguro):</strong> {plan.pendingReplan.detail}
+            </p>
+          )}
+          {mission.error && (
+            <p className="chat-mission-blocker" role="alert">
+              <strong>Bloqueio:</strong> {mission.error}
+            </p>
+          )}
+          {milestones.length > 0 && (
+            <ul className="chat-milestones" aria-label="Atualizações da missão">
+              {milestones.map((ev) => (
+                <li key={ev.id} className={`chat-milestone chat-milestone-${ev.tone}`}>
+                  <time dateTime={ev.at}>{timeOf(ev.at)}</time>
+                  <span>{ev.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {replanOpen && mission && open && (
+        <div className="chat-replan-box" role="region" aria-label="Solicitar alteração da missão">
+          <label className="chat-replan-label" htmlFor={`replan-input-${mission.id}`}>
+            Revise o pedido antes de enviar ao replanejamento do Tech Lead (a aprovação final continua separada):
+          </label>
+          <textarea
+            id={`replan-input-${mission.id}`}
+            className="chat-replan-input"
+            rows={2}
+            value={replanText}
+            maxLength={2000}
+            placeholder="Descreva o que deseja alterar no plano…"
+            onChange={(e) => setReplanText(e.target.value)}
+          />
+          <div className="chat-replan-actions">
+            <button
+              type="button"
+              className="chat-send"
+              disabled={!replanText.trim() || requestingReplan || !!replanBlocker}
+              onClick={() => {
+                onRequestReplan(mission.id, replanText.trim())
+                setReplanOpen(false)
+                setReplanText('')
+              }}
+            >
+              {requestingReplan ? 'Enviando…' : 'Enviar solicitação'}
+            </button>
+            <button type="button" className="btn-quiet" onClick={() => setReplanOpen(false)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {open && mission && !needsHumanAction && (
+        <div className="chat-mission-toggle">
+          <button type="button" className="chat-link" onClick={() => setShowDetails((v) => !v)}>
+            {showDetails ? 'Ocultar detalhes do plano' : 'Ver detalhes do plano e revisões'}
+          </button>
+        </div>
+      )}
+
+      {open && mission && expanded && (
+        <DynamicMissionMonitor
+          mission={mission}
+          task={task}
+          agents={agents}
+          configs={configs}
+          online={online}
+          send={send}
+          subscribe={subscribe}
+        />
+      )}
+    </article>
   )
 }

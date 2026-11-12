@@ -17,12 +17,14 @@ export interface ChatState {
   sending: boolean
   /** "Preparar missão" aguardando a resposta do backend. */
   preparing: boolean
+  /** "Solicitar alteração" aguardando a resposta do backend. */
+  requestingReplan: boolean
   /** Confirmação do backend (ex.: missão criada). */
   notice: string | null
   error: string | null
 }
 
-const EMPTY: ChatState = { conversations: [], listed: false, selectedId: null, messages: [], hasMore: false, loadingMessages: false, streaming: null, sending: false, preparing: false, notice: null, error: null }
+const EMPTY: ChatState = { conversations: [], listed: false, selectedId: null, messages: [], hasMore: false, loadingMessages: false, streaming: null, sending: false, preparing: false, requestingReplan: false, notice: null, error: null }
 
 /**
  * Estado do chat de um projeto. Tudo vem do backend (fonte da verdade): a tela pede a lista,
@@ -79,11 +81,12 @@ export function useChat(send: Send, subscribe: Subscribe, online: boolean, proje
         if (msg.opId) pending.current.delete(msg.opId)
         if (msg.action === 'send') patch({ sending: false })
         if (msg.action === 'prepare-mission') patch({ preparing: false })
+        if (msg.action === 'request-replan') patch({ requestingReplan: false })
         if (!msg.ok) {
-          patch({ error: msg.message, sending: false, preparing: false, notice: null })
+          patch({ error: msg.message, sending: false, preparing: false, requestingReplan: false, notice: null })
           return
         }
-        if (msg.action === 'prepare-mission') patch({ notice: msg.message, error: null })
+        if (msg.action === 'prepare-mission' || msg.action === 'request-replan') patch({ notice: msg.message, error: null })
         if (msg.action === 'create' && msg.conversationId) {
           select(msg.conversationId)
           // Primeira mensagem digitada sem conversa aberta: segue para a conversa recém-criada.
@@ -153,6 +156,13 @@ export function useChat(send: Send, subscribe: Subscribe, online: boolean, proje
       if (!projectId || !conversationId || state.preparing) return
       patch({ preparing: true, error: null, notice: null })
       send({ type: 'chat-prepare-mission', projectId, conversationId, opId: op('prepare-mission') })
+    },
+    requestReplan(missionId: number, detail: string) {
+      const projectId = projectRef.current
+      const conversationId = selectedRef.current
+      if (!projectId || !conversationId || state.requestingReplan) return
+      patch({ requestingReplan: true, error: null, notice: null })
+      send({ type: 'chat-request-replan', projectId, conversationId, missionId, detail, opId: op('request-replan') })
     },
     cancel() {
       if (projectRef.current && selectedRef.current) send({ type: 'chat-cancel', projectId: projectRef.current, conversationId: selectedRef.current, opId: op('cancel') })
