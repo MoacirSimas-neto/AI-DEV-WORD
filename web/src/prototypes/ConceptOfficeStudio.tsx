@@ -14,11 +14,6 @@ interface AgentDetail {
   activeFile?: string
   progress: number
   skills: string[]
-  metrics: {
-    tasksDone: number
-    evidences: number
-    lastActive: string
-  }
   terminalOutput: string[]
 }
 
@@ -88,7 +83,6 @@ const AGENTS_DETAILS: Record<string, AgentDetail> = {
     currentThought: 'Plano aprovado pelo usuário. Monitorando cumprimento de contratos.',
     progress: 100,
     skills: ['Ponytail v5.3', 'Caveman Lite'],
-    metrics: { tasksDone: 14, evidences: 28, lastActive: 'Há 5 min' },
     terminalOutput: [
       '$ agy plan --project aidw-e2e-etapa8',
       '✔ Diretrizes carregadas com sucesso.',
@@ -108,7 +102,6 @@ const AGENTS_DETAILS: Record<string, AgentDetail> = {
     activeFile: 'src/estoque.js',
     progress: 84,
     skills: ['Ponytail v5.3', 'Caveman Lite'],
-    metrics: { tasksDone: 32, evidences: 94, lastActive: 'Agora' },
     terminalOutput: [
       '$ codex exec --task "Módulo de Cadastro e Estoque"',
       'Lendo especificação de arquitetura de Ada...',
@@ -129,7 +122,6 @@ const AGENTS_DETAILS: Record<string, AgentDetail> = {
     currentThought: 'Aguardando submissão do diff do Dev para inspeção SAST.',
     progress: 0,
     skills: ['Threat Modeling', 'Input Validation'],
-    metrics: { tasksDone: 9, evidences: 18, lastActive: 'Há 12 min' },
     terminalOutput: [
       '$ agy security-check --project aidw-e2e-etapa8',
       'Regras carregadas: OWASP Top 10 + Input Validation.',
@@ -147,7 +139,6 @@ const AGENTS_DETAILS: Record<string, AgentDetail> = {
     currentThought: 'Pronta para execução de testes de ponta a ponta e asserções.',
     progress: 0,
     skills: ['Strict Assertions', 'Boundary Check'],
-    metrics: { tasksDone: 27, evidences: 62, lastActive: 'Há 8 min' },
     terminalOutput: [
       '$ agy qa-suite --project aidw-e2e-etapa8',
       'Configuração pronta.',
@@ -158,13 +149,18 @@ const AGENTS_DETAILS: Record<string, AgentDetail> = {
 
 export function ConceptOfficeStudio() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>('dev')
-  const [bottomRosterCollapsed, setBottomRosterCollapsed] = useState(false)
+  const [sideTab, setSideTab] = useState<'agent' | 'git'>('agent')
+  const [sidePanelOpen, setSidePanelOpen] = useState(true)
+  const [selectedGitFile, setSelectedGitFile] = useState('src/estoque.js')
+  const [commitMessage, setCommitMessage] = useState('')
 
   const handleSelectAgent = useCallback((id: string) => {
-    setSelectedAgentId(prev => (prev === id ? null : id))
+    setSelectedAgentId(id)
+    setSideTab('agent')
+    setSidePanelOpen(true)
   }, [])
 
-  const selectedDetail = selectedAgentId ? AGENTS_DETAILS[selectedAgentId] : null
+  const selectedDetail = selectedAgentId ? AGENTS_DETAILS[selectedAgentId] : AGENTS_DETAILS.dev
 
   return (
     <div className="proto-office-studio-shell">
@@ -199,15 +195,38 @@ export function ConceptOfficeStudio() {
         </div>
 
         <div className="topbar-right">
-          <div className="skills-badge" title="Skills Globais Ativas">
-            <span className="skill-dot" />
-            <span>Ponytail v5.3 + Caveman Lite</span>
-          </div>
-          <span className="tag-live-status">● Sistema Ativo</span>
+          <button
+            type="button"
+            className={`btn-topbar-tab ${sidePanelOpen && sideTab === 'git' ? 'active' : ''}`}
+            onClick={() => {
+              setSideTab('git')
+              setSidePanelOpen(true)
+            }}
+          >
+            🌿 Git Control (2)
+          </button>
+          <button
+            type="button"
+            className={`btn-topbar-tab ${sidePanelOpen && sideTab === 'agent' ? 'active' : ''}`}
+            onClick={() => {
+              setSideTab('agent')
+              setSidePanelOpen(true)
+            }}
+          >
+            👤 Agente Ativo
+          </button>
+          <button
+            type="button"
+            className="btn-topbar-toggle"
+            onClick={() => setSidePanelOpen(!sidePanelOpen)}
+            title="Alternar painel lateral"
+          >
+            {sidePanelOpen ? '⛶ Maximizar Escritório' : '☰ Abrir Painel'}
+          </button>
         </div>
       </header>
 
-      {/* 2. PALCO PRINCIPAL COM O ESCRITÓRIO 2D PHASER E DRAWER RETRÁTIL */}
+      {/* 2. PALCO PRINCIPAL COM O ESCRITÓRIO 2D PHASER E PAINEL LATERAL */}
       <main className="proto-office-stage-layout">
         {/* Visualização Central do Escritório 2D */}
         <div className="office-world-viewport">
@@ -219,163 +238,219 @@ export function ConceptOfficeStudio() {
 
           {/* Dica de interação sutil */}
           <div className="office-canvas-hint">
-            <span>💡 Clique em qualquer agente dentro do escritório para inspecionar</span>
+            <span>💡 Clique em qualquer agente dentro do escritório para ver o terminal dele</span>
           </div>
 
           {/* Dock Flutuante Inferior (Roster dos Agentes) */}
-          <div className={`office-bottom-dock ${bottomRosterCollapsed ? 'is-collapsed' : ''}`}>
-            <div className="dock-header">
-              <span className="dock-title">Equipe no Escritório ({AGENTS_LIST.length})</span>
-              <button
-                type="button"
-                className="btn-dock-toggle"
-                onClick={() => setBottomRosterCollapsed(!bottomRosterCollapsed)}
-              >
-                {bottomRosterCollapsed ? '▲ Expandir' : '▼ Ocultar'}
-              </button>
-            </div>
-
-            {!bottomRosterCollapsed && (
-              <div className="dock-cards">
-                {AGENTS_LIST.map((ag) => {
-                  const isSelected = selectedAgentId === ag.id
-                  const detail = AGENTS_DETAILS[ag.id]
-                  return (
-                    <div
-                      key={ag.id}
-                      className={`dock-agent-card ${isSelected ? 'is-selected' : ''} state-${ag.state}`}
-                      onClick={() => handleSelectAgent(ag.id)}
-                    >
-                      <div className="dock-portrait">
-                        <AgentPortrait agentId={ag.id} fullBody={false} animMode="idle" />
-                        <span className={`status-indicator state-${ag.state}`} />
-                      </div>
-                      <div className="dock-meta">
-                        <strong>{detail?.name ?? ag.name}</strong>
-                        <span>{ag.role}</span>
-                      </div>
-                      {ag.state === 'working' && (
-                        <div className="dock-activity-pulse" title="Trabalhando agora">
-                          ⚡
-                        </div>
-                      )}
+          <div className="office-bottom-dock">
+            <div className="dock-cards">
+              {AGENTS_LIST.map((ag) => {
+                const isSelected = selectedAgentId === ag.id
+                const detail = AGENTS_DETAILS[ag.id]
+                return (
+                  <div
+                    key={ag.id}
+                    className={`dock-agent-card ${isSelected ? 'is-selected' : ''} state-${ag.state}`}
+                    onClick={() => handleSelectAgent(ag.id)}
+                  >
+                    <div className="dock-portrait">
+                      <AgentPortrait agentId={ag.id} fullBody={false} animMode="idle" />
+                      <span className={`status-indicator state-${ag.state}`} />
                     </div>
-                  )
-                })}
-              </div>
-            )}
+                    <div className="dock-meta">
+                      <strong>{detail?.name ?? ag.name}</strong>
+                      <span>{ag.role}</span>
+                    </div>
+                    {ag.state === 'working' && (
+                      <div className="dock-activity-pulse" title="Trabalhando agora">
+                        ⚡
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
 
-        {/* 3. GAVETA LATERAL DO AGENTE (Abre ao clicar no agente) */}
-        {selectedDetail && (
-          <aside className="office-agent-drawer">
-            <header className="drawer-head">
-              <div className="drawer-agent-hero">
-                <div className="drawer-avatar">
-                  <AgentPortrait agentId={selectedDetail.id} fullBody animMode="idle" />
-                </div>
-                <div>
-                  <h3>{selectedDetail.name}</h3>
-                  <p>{selectedDetail.role}</p>
-                  <div className="drawer-tags">
-                    <span className={`badge-state state-${selectedDetail.state}`}>
-                      {selectedDetail.state.toUpperCase()}
-                    </span>
-                    <span className="badge-cli">
-                      {selectedDetail.cli} ({selectedDetail.model})
-                    </span>
-                  </div>
-                </div>
-              </div>
+        {/* 3. PAINEL LATERAL INTEGRADO: AGENTE OU GIT CONTROL */}
+        {sidePanelOpen && (
+          <aside className="office-side-panel">
+            {/* Cabeçalho com Abas Limpas: Agente vs Git */}
+            <div className="panel-tab-bar">
               <button
                 type="button"
-                className="btn-drawer-close"
-                onClick={() => setSelectedAgentId(null)}
+                className={`panel-tab-btn ${sideTab === 'agent' ? 'is-active' : ''}`}
+                onClick={() => setSideTab('agent')}
+              >
+                👤 Agente ({selectedDetail.name.split(' ')[0]})
+              </button>
+              <button
+                type="button"
+                className={`panel-tab-btn ${sideTab === 'git' ? 'is-active' : ''}`}
+                onClick={() => setSideTab('git')}
+              >
+                🌿 Git Control (2)
+              </button>
+              <button
+                type="button"
+                className="btn-panel-close"
+                onClick={() => setSidePanelOpen(false)}
                 title="Fechar painel"
               >
                 ✕
               </button>
-            </header>
+            </div>
 
-            <div className="drawer-body">
-              {/* Atividade Atual */}
-              <div className="drawer-section">
-                <span className="section-eyebrow">Atividade em Andamento</span>
-                <p className="thought-text">{selectedDetail.currentThought}</p>
-                {selectedDetail.progress > 0 && (
-                  <div className="drawer-progress">
-                    <div className="progress-labels">
-                      <span>Progresso da Tarefa:</span>
-                      <strong>{selectedDetail.progress}%</strong>
+            {/* CONTEÚDO DA ABA 1: AGENTE DESPOLUÍDO */}
+            {sideTab === 'agent' && (
+              <div className="panel-content agent-clean-view">
+                {/* Cabeçalho do Agente */}
+                <div className="agent-clean-head">
+                  <div className="agent-clean-portrait">
+                    <AgentPortrait agentId={selectedDetail.id} fullBody animMode="idle" />
+                  </div>
+                  <div className="agent-clean-info">
+                    <div className="info-row-top">
+                      <h3>{selectedDetail.name}</h3>
+                      <span className={`badge-state state-${selectedDetail.state}`}>
+                        {selectedDetail.state.toUpperCase()}
+                      </span>
                     </div>
-                    <div className="progress-track">
-                      <div
-                        className="progress-fill"
-                        style={{ width: `${selectedDetail.progress}%` }}
-                      />
+                    <p className="agent-role-sub">{selectedDetail.role}</p>
+                    <div className="clean-skills-chips">
+                      <span className="cli-chip">{selectedDetail.cli} ({selectedDetail.model})</span>
+                      {selectedDetail.skills.map(s => (
+                        <span key={s} className="skill-chip">✦ {s}</span>
+                      ))}
                     </div>
                   </div>
-                )}
-              </div>
-
-              {/* Terminal PTY do Agente */}
-              <div className="drawer-section">
-                <div className="section-head-split">
-                  <span className="section-eyebrow">Terminal PTY ao Vivo</span>
-                  <span className="session-status">Sessão Interativa</span>
                 </div>
-                <div className="drawer-terminal-box">
-                  <div className="terminal-log-content">
+
+                {/* Atividade Atual Focada */}
+                <div className="agent-activity-strip">
+                  <div className="strip-title-row">
+                    <span className="strip-label">Foco Atual</span>
+                    <span className="strip-percent">{selectedDetail.progress}%</span>
+                  </div>
+                  <p className="strip-thought">{selectedDetail.currentThought}</p>
+                  <div className="strip-bar">
+                    <div className="strip-fill" style={{ width: `${selectedDetail.progress}%` }} />
+                  </div>
+                </div>
+
+                {/* Terminal PTY em Destaque Limpo */}
+                <div className="agent-terminal-clean">
+                  <div className="terminal-clean-header">
+                    <span className="terminal-title">Terminal PTY — Sessão Interativa</span>
+                    <span className="terminal-live-dot">● Ao Vivo</span>
+                  </div>
+                  <div className="terminal-clean-screen">
                     {selectedDetail.terminalOutput.map((line, idx) => (
-                      <div key={idx} className="terminal-line">
+                      <div key={idx} className="term-text-line">
                         {line}
                       </div>
                     ))}
-                  </div>
-                  <div className="terminal-input-row">
-                    <span className="term-prompt">&gt;</span>
-                    <input
-                      type="text"
-                      className="term-input"
-                      placeholder="Enviar comando para o CLI..."
-                      disabled
-                    />
+                    <div className="term-active-prompt">
+                      <span className="prompt-sym">$</span>
+                      <span className="prompt-cursor" />
+                    </div>
                   </div>
                 </div>
               </div>
+            )}
 
-              {/* Skills Injetadas */}
-              <div className="drawer-section">
-                <span className="section-eyebrow">Skills Aplicadas no Prompt</span>
-                <div className="skills-pill-group">
-                  {selectedDetail.skills.map(s => (
-                    <span key={s} className="skill-pill">
-                      ✦ {s}
-                    </span>
-                  ))}
+            {/* CONTEÚDO DA ABA 2: GIT CONTROL INTEGRADO */}
+            {sideTab === 'git' && (
+              <div className="panel-content git-control-view">
+                {/* Resumo do Repositório */}
+                <div className="git-repo-bar">
+                  <div className="git-branch-info">
+                    <span className="git-branch-icon"></span>
+                    <strong>main</strong>
+                    <span className="git-sync-status">Sincronizado com origin</span>
+                  </div>
+                  <span className="git-badge-changes">2 arquivos modificados</span>
                 </div>
-              </div>
 
-              {/* Métricas e Observabilidade */}
-              <div className="drawer-section">
-                <span className="section-eyebrow">Observabilidade</span>
-                <div className="metrics-grid">
-                  <div className="metric-box">
-                    <span className="metric-num">{selectedDetail.metrics.tasksDone}</span>
-                    <span className="metric-lbl">Tarefas Feitas</span>
+                {/* Lista de Arquivos com Status */}
+                <div className="git-files-section">
+                  <span className="git-section-title">Modificações Locais</span>
+                  <div className="git-files-list">
+                    <div
+                      className={`git-file-row ${selectedGitFile === 'src/estoque.js' ? 'is-selected' : ''}`}
+                      onClick={() => setSelectedGitFile('src/estoque.js')}
+                    >
+                      <span className="git-status-tag tag-mod">M</span>
+                      <span className="git-file-name">src/estoque.js</span>
+                      <span className="git-diff-count">+48</span>
+                    </div>
+                    <div
+                      className={`git-file-row ${selectedGitFile === 'tests/estoque.test.js' ? 'is-selected' : ''}`}
+                      onClick={() => setSelectedGitFile('tests/estoque.test.js')}
+                    >
+                      <span className="git-status-tag tag-add">A</span>
+                      <span className="git-file-name">tests/estoque.test.js</span>
+                      <span className="git-diff-count">+110</span>
+                    </div>
                   </div>
-                  <div className="metric-box">
-                    <span className="metric-num">{selectedDetail.metrics.evidences}</span>
-                    <span className="metric-lbl">Evidências</span>
+                </div>
+
+                {/* Prévia do Diff do Arquivo Selecionado */}
+                <div className="git-diff-preview">
+                  <div className="diff-header">
+                    <span>Diff: <strong>{selectedGitFile}</strong></span>
+                    <span className="diff-mode-tag">Unstaged</span>
                   </div>
-                  <div className="metric-box">
-                    <span className="metric-num">{selectedDetail.metrics.lastActive}</span>
-                    <span className="metric-lbl">Última Atividade</span>
+                  <pre className="diff-code-box">
+{selectedGitFile === 'src/estoque.js' ? `+ export class EstoqueService {
++   #produtos = new Map()
++
++   cadastrar(produto) {
++     validarLimiteMonetario(produto.precoCentavos)
++     this.#produtos.set(produto.id, produto)
++     return { ok: true, id: produto.id }
++   }
++
++   calcularValorTotal() {
++     let total = 0n
++     for (const p of this.#produtos.values()) {
++       total += BigInt(p.precoCentavos)
++     }
++     return total
++   }
++ }` : `+ import { test } from 'node:test'
++ import assert from 'node:assert/strict'
++ import { EstoqueService } from '../src/estoque.js'
++
++ test('cálculo monetário não perde centavos', () => {
++   const estoque = new EstoqueService()
++   estoque.cadastrar({ id: 1, precoCentavos: 1999 })
++   assert.equal(estoque.calcularValorTotal(), 1999n)
++ })`}
+                  </pre>
+                </div>
+
+                {/* Formulário de Commit e Ações Git */}
+                <div className="git-commit-form">
+                  <textarea
+                    className="git-commit-input"
+                    placeholder="Mensagem do commit (ex: feat: calcula estoque com centavos inteiros)..."
+                    value={commitMessage}
+                    onChange={e => setCommitMessage(e.target.value)}
+                    rows={2}
+                  />
+                  <div className="git-commit-actions">
+                    <button type="button" className="btn-git-commit">
+                      ✓ Gravar Commit Local
+                    </button>
+                    <button type="button" className="btn-git-push" title="Enviar para repositório remoto">
+                      ⬆ Push
+                    </button>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
           </aside>
         )}
       </main>

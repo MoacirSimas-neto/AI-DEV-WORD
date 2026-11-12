@@ -2955,18 +2955,58 @@
   animation: char-bounce 1s infinite alternate;
 }
 
-/* 3. GAVETA LATERAL DO AGENTE (DRAWER RETRÁTIL) */
-.office-agent-drawer {
-  width: 380px;
-  max-width: 40%;
+/* Botões da Topbar */
+.btn-topbar-tab {
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-topbar-tab:hover {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.btn-topbar-tab.active {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+
+.btn-topbar-toggle {
+  padding: 5px 12px;
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-topbar-toggle:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* 3. PAINEL LATERAL INTEGRADO: AGENTE OU GIT CONTROL */
+.office-side-panel {
+  width: 440px;
+  max-width: 45%;
   height: 100%;
   background: #0d1322;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.6);
+  box-shadow: -10px 0 35px rgba(0, 0, 0, 0.65);
   z-index: 50;
   display: flex;
   flex-direction: column;
-  animation: slide-in-drawer 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: slide-in-drawer 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
 }
 
@@ -2975,73 +3015,123 @@
   to { transform: translateX(0); }
 }
 
-.drawer-head {
+/* Barra de Abas do Painel Lateral */
+.panel-tab-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 16px;
+  background: #080c16;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: #090e1a;
+  padding: 4px 8px;
+  gap: 6px;
 }
 
-.drawer-agent-hero {
+.panel-tab-btn {
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+  transition: all 0.15s ease;
+}
+
+.panel-tab-btn:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.panel-tab-btn.is-active {
+  color: #38bdf8;
+  border-bottom-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.06);
+}
+
+.btn-panel-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.btn-panel-close:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.panel-content {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 16px;
+}
+
+/* -------------------------------------------------------------
+   ABA 1: AGENTE DESPOLUÍDO & FOCO TOTAL NO CÓDIGO/TERMINAL
+   ------------------------------------------------------------- */
+.agent-clean-view {
+  gap: 14px;
+}
+
+.agent-clean-head {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.drawer-avatar {
-  width: 42px;
-  height: 48px;
-  border-radius: 8px;
+.agent-clean-portrait {
+  width: 44px;
+  height: 52px;
+  border-radius: 10px;
   background: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-.drawer-agent-hero h3 {
+.agent-clean-info {
+  flex: 1;
+}
+
+.info-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.info-row-top h3 {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
+  color: #f8fafc;
 }
 
-.drawer-agent-hero p {
+.agent-role-sub {
   margin: 2px 0 6px;
   font-size: 11px;
   color: #94a3b8;
 }
 
-.drawer-tags {
+.clean-skills-chips {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
-.badge-state {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.badge-state.state-working {
-  background: rgba(16, 185, 129, 0.15);
-  color: #34d399;
-}
-
-.badge-state.state-idle {
-  background: rgba(56, 189, 248, 0.15);
-  color: #38bdf8;
-}
-
-.badge-state.state-waiting {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fcd34d;
-}
-
-.badge-cli {
+.cli-chip {
   font-size: 9px;
   font-family: monospace;
   background: rgba(255, 255, 255, 0.06);
@@ -3050,183 +3140,348 @@
   border-radius: 4px;
 }
 
-.btn-drawer-close {
-  background: transparent;
-  border: none;
-  color: #94a3b8;
-  font-size: 16px;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 6px;
+.skill-chip {
+  font-size: 9px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(56, 189, 248, 0.2);
 }
 
-.btn-drawer-close:hover {
-  color: #f8fafc;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.drawer-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
+/* Faixa de Atividade Focada */
+.agent-activity-strip {
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 6px;
 }
 
-.drawer-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.section-eyebrow {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #64748b;
-  font-weight: 700;
-}
-
-.section-head-split {
+.strip-title-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.session-status {
+.strip-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
+.strip-percent {
+  font-size: 11px;
+  font-weight: 700;
+  color: #10b981;
+}
+
+.strip-thought {
+  margin: 0;
+  font-size: 12px;
+  color: #e2e8f0;
+  line-height: 1.45;
+}
+
+.strip-bar {
+  width: 100%;
+  height: 4px;
+  background: #1e293b;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.strip-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981, #38bdf8);
+}
+
+/* Terminal PTY em Destaque */
+.agent-terminal-clean {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #050811;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  min-height: 280px;
+}
+
+.terminal-clean-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #090e1a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.terminal-title {
+  font-size: 11px;
+  font-family: monospace;
+  color: #94a3b8;
+}
+
+.terminal-live-dot {
   font-size: 10px;
   color: #10b981;
   font-family: monospace;
 }
 
-.thought-text {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #e2e8f0;
-  background: #111827;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+.terminal-clean-screen {
+  flex: 1;
+  padding: 12px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #cbd5e1;
+  overflow-y: auto;
 }
 
-.drawer-progress {
+.term-text-line {
+  margin-bottom: 3px;
+  word-break: break-all;
+}
+
+.term-active-prompt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.prompt-sym {
+  color: #10b981;
+  font-weight: 700;
+}
+
+.prompt-cursor {
+  width: 7px;
+  height: 14px;
+  background: #38bdf8;
+  animation: cursor-blink 1s infinite;
+}
+
+/* -------------------------------------------------------------
+   ABA 2: GIT CONTROL INTEGRADO
+   ------------------------------------------------------------- */
+.git-control-view {
+  gap: 14px;
+}
+
+.git-repo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+
+.git-branch-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.git-branch-icon {
+  font-size: 14px;
+  color: #38bdf8;
+}
+
+.git-sync-status {
+  font-size: 10px;
+  color: #64748b;
+  margin-left: 4px;
+}
+
+.git-badge-changes {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  font-weight: 700;
+  border-radius: 4px;
+}
+
+/* Seção de Arquivos Modificados */
+.git-files-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.git-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
+.git-files-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.progress-labels {
+.git-file-row {
   display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: #94a3b8;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.progress-track {
-  width: 100%;
-  height: 5px;
+.git-file-row:hover {
   background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.git-file-row.is-selected {
+  background: #1e293b;
+  border-color: #38bdf8;
+}
+
+.git-status-tag {
+  font-size: 10px;
+  font-weight: 800;
+  font-family: monospace;
+  padding: 1px 5px;
   border-radius: 3px;
-  overflow: hidden;
 }
 
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #10b981, #38bdf8);
+.tag-mod { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+.tag-add { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+
+.git-file-name {
+  flex: 1;
+  font-size: 12px;
+  font-family: monospace;
+  color: #f1f5f9;
 }
 
-/* Terminal no Drawer */
-.drawer-terminal-box {
+.git-diff-count {
+  font-size: 11px;
+  font-family: monospace;
+  color: #10b981;
+}
+
+/* Prévia do Diff */
+.git-diff-preview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   background: #050811;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   overflow: hidden;
+  min-height: 180px;
 }
 
-.terminal-log-content {
-  padding: 10px 12px;
+.diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #090e1a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.diff-mode-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+}
+
+.diff-code-box {
+  margin: 0;
+  padding: 12px;
   font-family: "JetBrains Mono", Consolas, monospace;
   font-size: 11px;
   line-height: 1.5;
-  color: #cbd5e1;
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-.terminal-line {
-  margin-bottom: 2px;
-}
-
-.terminal-input-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: #090e1a;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.term-prompt {
-  font-family: monospace;
-  font-size: 11px;
-  color: #10b981;
-  font-weight: 700;
-}
-
-.term-input {
-  flex: 1;
+  color: #34d399;
   background: transparent;
-  border: none;
-  color: #94a3b8;
-  font-size: 11px;
-  font-family: monospace;
-  outline: none;
+  overflow-y: auto;
+  white-space: pre;
 }
 
-/* Skills Pills */
-.skills-pill-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.skill-pill {
-  font-size: 10px;
-  padding: 3px 8px;
-  background: rgba(56, 189, 248, 0.12);
-  color: #38bdf8;
-  border-radius: 4px;
-  border: 1px solid rgba(56, 189, 248, 0.2);
-}
-
-/* Métricas */
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.metric-box {
-  background: #111827;
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  padding: 8px;
-  border-radius: 6px;
+/* Formulário de Commit */
+.git-commit-form {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  gap: 8px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px;
 }
 
-.metric-num {
-  font-size: 15px;
-  font-weight: 700;
+.git-commit-input {
+  background: #090e1a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
   color: #f8fafc;
+  resize: none;
+  outline: none;
+  font-family: inherit;
 }
 
-.metric-lbl {
-  font-size: 9px;
-  color: #64748b;
-  margin-top: 2px;
+.git-commit-input:focus {
+  border-color: #38bdf8;
+}
+
+.git-commit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-git-commit {
+  flex: 1;
+  padding: 8px;
+  background: #2563eb;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-git-commit:hover {
+  background: #1d4ed8;
+}
+
+.btn-git-push {
+  padding: 8px 16px;
+  background: #10b981;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-git-push:hover {
+  background: #059669;
 }
