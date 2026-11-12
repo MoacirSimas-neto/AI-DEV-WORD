@@ -258,21 +258,19 @@ export function ConceptLivingWorkspace() {
         </div>
 
         {/* Painel Lateral de Inspeção do Agente Ativo */}
-        <aside className="proto-living-sidebar">
-          <div className="proto-sidebar-glass">
-            <div className="proto-agent-hero">
-              <div className="proto-hero-avatar" style={{ borderColor: activeStation.color }}>
-                <span>{activeStation.agentIcon}</span>
-              </div>
-              <div className="proto-hero-meta">
-                <h3>{activeStation.agentName}</h3>
-                <p>{activeStation.agentRole}</p>
-                <div className="proto-hero-badges">
-                  <span className={`tag tag-${activeStation.status}`}>{activeStation.status.toUpperCase()}</span>
-                </div>
-              </div>
+        <aside className="proto-inspector-glass">
+          <div className="proto-glass-header">
+            <div className="proto-glass-avatar" style={{ borderColor: activeStation.color }}>
+              <span>{activeStation.agentIcon}</span>
             </div>
+            <div>
+              <h3>{activeStation.agentName}</h3>
+              <p>{activeStation.agentRole}</p>
+            </div>
+            <span className={`tag tag-${activeStation.status}`}>{activeStation.status.toUpperCase()}</span>
+          </div>
 
+          <div className="proto-glass-body">
             <div className="proto-glass-section">
               <h4>Atividade em Andamento</h4>
               <p className="proto-activity-desc">{activeStation.currentAction}</p>

@@ -258,7 +258,7 @@ export function ConceptHybridWorkspace() {
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
-            {/* Palco Espacial Isométrico Arrastável */}
+            {/* Palco do Escritório Tecnológico 2.5D */}
             <div 
               className={`proto-mix-iso-canvas ${isIsoPerspective ? 'is-iso' : 'is-flat'} ${isDragging ? 'is-dragging' : ''}`}
               style={{
@@ -268,63 +268,185 @@ export function ConceptHybridWorkspace() {
                 transition: isDragging ? 'none' : 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
               }}
             >
-              <div className="proto-mix-grid-floor" />
+              {/* Piso de Madeira Escura / Carpete Tech de Escritório */}
+              <div className="proto-office-floor">
+                {/* Divisões de Áreas do Escritório */}
+                <div className="office-zone zone-planning">
+                  <span className="zone-title">📐 Sala de Arquitetura & Planning</span>
+                </div>
+                <div className="office-zone zone-dev">
+                  <span className="zone-title">💻 Bancada de Engenharia (Dev Lab)</span>
+                </div>
+                <div className="office-zone zone-security">
+                  <span className="zone-title">🛡️ Central de Segurança & NOC</span>
+                </div>
+                <div className="office-zone zone-qa">
+                  <span className="zone-title">🔍 Laboratório de Qualidade QA</span>
+                </div>
+                <div className="office-zone zone-lounge">
+                  <span className="zone-title">☕ Coffee Lounge & Descompressão</span>
+                </div>
+              </div>
 
-              {/* Linhas de Fluxo de Dados Animadas */}
+              {/* MOBÍLIA E AMBIENTAÇÃO DE ESCRITÓRIO */}
+
+              {/* 1. Lousa de Arquitetura / Whiteboard */}
+              <div className="office-prop prop-whiteboard" title="Quadro Branco de Arquitetura e Decisões">
+                <div className="whiteboard-frame">
+                  <div className="whiteboard-header">
+                    <span>📋 Arquitetura: Módulo Estoque</span>
+                  </div>
+                  <div className="whiteboard-diagram">
+                    <span className="wb-box">Map()</span>
+                    <span className="wb-arrow">➔</span>
+                    <span className="wb-box">Centavos (Int)</span>
+                    <span className="wb-arrow">➔</span>
+                    <span className="wb-box">Immutable</span>
+                  </div>
+                  <div className="whiteboard-postits">
+                    <span className="postit postit-yellow">BigInt Safe</span>
+                    <span className="postit postit-pink">Sem Floats</span>
+                    <span className="postit postit-cyan">110 Testes</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Rack de Servidores / CI/CD Local */}
+              <div className="office-prop prop-server-rack" title="Rack de Servidores e Trilha de Observabilidade">
+                <div className="server-tower">
+                  <div className="server-unit">
+                    <span className="srv-label">NODE.JS RUNTIME</span>
+                    <div className="srv-leds">
+                      <span className="led led-green" />
+                      <span className="led led-blue blink-fast" />
+                    </div>
+                  </div>
+                  <div className="server-unit">
+                    <span className="srv-label">SQLITE OBSERVABILITY</span>
+                    <div className="srv-leds">
+                      <span className="led led-green" />
+                      <span className="led led-blue blink-slow" />
+                    </div>
+                  </div>
+                  <div className="server-unit">
+                    <span className="srv-label">PTY PROCESS MASTER</span>
+                    <div className="srv-leds">
+                      <span className="led led-green" />
+                      <span className="led led-amber" />
+                    </div>
+                  </div>
+                  <div className="server-vent">
+                    <span className="fan-blade">❄</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Estação de Café & Descompressão */}
+              <div className="office-prop prop-coffee-station" title="Café Gourmet da Equipe">
+                <div className="coffee-counter">
+                  <div className="espresso-machine">
+                    <span className="steam-particle s1">♨️</span>
+                    <span className="coffee-icon">☕</span>
+                    <span className="coffee-label">EXPRESSO DEV</span>
+                  </div>
+                  <div className="water-cooler" title="Bebedouro">
+                    <span className="water-bottle">💧</span>
+                  </div>
+                  <div className="office-plant" title="Costela de Adão (Monstera)">
+                    <span className="plant-leaf">🪴</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Linhas de Fluxo Físico entre as Mesas */}
               <svg className="proto-flow-lines" viewBox="0 0 100 100" preserveAspectRatio="none">
-                <path d="M 20 30 Q 35 25 50 50" className="flow-path flow-active" />
-                <path d="M 50 50 Q 65 75 80 40" className="flow-path flow-pending" />
-                <path d="M 80 40 Q 60 70 50 80" className="flow-path flow-pending" />
+                <path d="M 22 28 Q 36 24 50 48" className="flow-path flow-active" />
+                <path d="M 50 48 Q 65 72 78 38" className="flow-path flow-pending" />
+                <path d="M 78 38 Q 62 68 50 78" className="flow-path flow-pending" />
               </svg>
 
-              {/* Estações 2.5D com Avatares Vivos */}
+              {/* MESAS DE TRABALHO DE ESCRITÓRIO DOS AGENTES */}
               {MEMBERS.map((m, idx) => {
                 const isSelected = selectedMember.id === m.id
-                // Coordenadas das estações no plano
+                // Coordenadas das estações de trabalho de cada agente no escritório
                 const positions = [
-                  { x: 20, y: 30 },
-                  { x: 50, y: 50 },
-                  { x: 80, y: 40 },
-                  { x: 50, y: 80 }
+                  { x: 22, y: 28, room: 'Arquitetura' },
+                  { x: 50, y: 48, room: 'Dev Lab' },
+                  { x: 78, y: 38, room: 'Segurança' },
+                  { x: 50, y: 78, room: 'QA Lab' }
                 ]
                 const pos = positions[idx]
 
                 return (
                   <div
                     key={m.id}
-                    className={`proto-mix-pod ${isSelected ? 'is-selected' : ''} state-${m.state}`}
-                    style={{ left: `${pos.x}%`, top: `${pos.y}%`, borderColor: m.avatarColor }}
+                    className={`office-workstation ${isSelected ? 'is-selected' : ''} state-${m.state}`}
+                    style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
                     onClick={() => {
                       if (hasDraggedRef.current) return
                       setSelectedMember(m)
                     }}
                   >
-                    {/* Personagem com Glow e Animação */}
-                    <div className="proto-mix-char-holder" style={{ background: `radial-gradient(circle, ${m.avatarColor}33 0%, transparent 70%)` }}>
-                      <div className={`proto-mix-char ${m.state === 'active' ? 'char-pulse' : ''}`}>
-                        <span className="char-emoji">{m.avatarIcon}</span>
-                        <span className={`status-beacon beacon-${m.state}`} />
-                      </div>
-                      {m.state === 'active' && (
-                        <div className="proto-coding-particles">
-                          <span className="cp1">⚡</span>
-                          <span className="cp2">💻</span>
+                    {/* Mesa de Madeira e Setup Físico do Desenvolvedor */}
+                    <div className="desk-surface">
+                      {/* Monitores Duplos com Telas Ligadas */}
+                      <div className="desk-monitors">
+                        <div className={`screen-monitor screen-ide ${m.state === 'active' ? 'screen-glow-active' : ''}`}>
+                          <div className="code-lines">
+                            <span className="cline c1" />
+                            <span className="cline c2" />
+                            <span className="cline c3" />
+                          </div>
                         </div>
-                      )}
+                        <div className="screen-monitor screen-terminal">
+                          <span className="term-prompt">$</span>
+                          <span className="term-cursor">_</span>
+                        </div>
+                      </div>
+
+                      {/* Itens na Mesa: Teclado, Mouse e Xícara */}
+                      <div className="desk-accessories">
+                        <div className="desk-keyboard" />
+                        <div className="desk-mouse" />
+                        <div className="desk-coffee-mug" title="Café quentinho">☕</div>
+                      </div>
+
+                      {/* Cadeira de Escritório Ergonômica com o Agente Sentado */}
+                      <div className="desk-chair-wrapper">
+                        <div className="ergonomic-chair">
+                          <div className={`agent-seated ${m.state === 'active' ? 'is-typing' : ''}`}>
+                            <div className="agent-avatar-face" style={{ borderColor: m.avatarColor, boxShadow: `0 0 14px ${m.avatarColor}55` }}>
+                              <span className="agent-face-emoji">{m.avatarIcon}</span>
+                              <span className={`status-led led-${m.state}`} />
+                            </div>
+
+                            {/* Efeitos de Digitação e Código Flutuante no Dev */}
+                            {m.state === 'active' && (
+                              <div className="agent-typing-fx">
+                                <span className="type-spark s1">⚡</span>
+                                <span className="type-spark s2">💻</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Balão de Pensamento / Tarefa Ativa */}
-                    <div className="proto-mix-thought">
-                      <strong style={{ color: m.avatarColor }}>{m.name}</strong>
-                      <p>{m.currentThought}</p>
+                    {/* Balão de Pensamento / Diálogo de Escritório */}
+                    <div className="office-thought-bubble">
+                      <div className="bubble-header">
+                        <strong style={{ color: m.avatarColor }}>{m.name}</strong>
+                        <span className="bubble-room">{pos.room}</span>
+                      </div>
+                      <p className="bubble-thought">{m.currentThought}</p>
                     </div>
 
-                    {/* Base da Estação com Progresso */}
-                    <div className="proto-mix-pod-base">
-                      <span className="pod-role">{m.role}</span>
+                    {/* Placa de Identificação da Mesa */}
+                    <div className="desk-nameplate" style={{ borderLeftColor: m.avatarColor }}>
+                      <span className="nameplate-role">{m.role}</span>
                       {m.progress > 0 && (
-                        <div className="pod-bar">
-                          <div className="pod-bar-fill" style={{ width: `${m.progress}%`, background: m.avatarColor }} />
+                        <div className="nameplate-bar">
+                          <div className="nameplate-fill" style={{ width: `${m.progress}%`, background: m.avatarColor }} />
                         </div>
                       )}
                     </div>

@@ -464,7 +464,7 @@ function App() {
 
         {/* ABA 8: LABORATÓRIO DE PROTÓTIPOS VISUAIS (ETAPA 9.1) */}
         {activeTab === 'prototypes' && (
-          <div className="full-view-container" style={{ position: 'fixed', inset: 0, zIndex: 9999 }}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, width: '100%', height: '100%', overflow: 'hidden' }}>
             <ErrorBoundary fallbackTitle="Falha no laboratório de protótipos">
               <PrototypeShowcase onBackToApp={() => setActiveTab('office')} />
             </ErrorBoundary>
