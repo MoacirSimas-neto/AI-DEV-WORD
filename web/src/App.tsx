@@ -13,6 +13,7 @@ import { MemoryCenter } from './ui/MemoryCenter.tsx'
 import { MissionMonitor } from './ui/MissionMonitor.tsx'
 import { ObservabilityCenter } from './ui/ObservabilityCenter.tsx'
 import { ProjectBar } from './ui/ProjectBar.tsx'
+import { PrototypeShowcase } from './prototypes/PrototypeShowcase.tsx'
 import { TaskPanel } from './ui/TaskPanel.tsx'
 import { TeamRoster } from './ui/TeamRoster.tsx'
 
@@ -22,7 +23,7 @@ const STATUS: Record<ConnectionStatus, { label: string; tone: string }> = {
   offline: { label: 'Backend desconectado', tone: 'error' },
 }
 
-export type NavTab = 'home' | 'office' | 'tasks' | 'history' | 'agents' | 'memory' | 'observability'
+export type NavTab = 'home' | 'office' | 'tasks' | 'history' | 'agents' | 'memory' | 'observability' | 'prototypes'
 
 function App() {
   const {
@@ -192,6 +193,15 @@ function App() {
               }}
             >
               Observabilidade
+            </button>
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'prototypes' ? 'nav-tab-active' : ''}`}
+              style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+              onClick={() => setActiveTab('prototypes')}
+              title="Laboratório de Protótipos Visuais da Etapa 9.1"
+            >
+              ✨ Protótipos Redesign
             </button>
           </nav>
 
@@ -448,6 +458,15 @@ function App() {
                 onClose={() => setActiveTab('office')}
                 onSelectAgentInOffice={selectAgent}
               />
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {/* ABA 8: LABORATÓRIO DE PROTÓTIPOS VISUAIS (ETAPA 9.1) */}
+        {activeTab === 'prototypes' && (
+          <div className="full-view-container" style={{ position: 'fixed', inset: 0, zIndex: 9999 }}>
+            <ErrorBoundary fallbackTitle="Falha no laboratório de protótipos">
+              <PrototypeShowcase onBackToApp={() => setActiveTab('office')} />
             </ErrorBoundary>
           </div>
         )}
