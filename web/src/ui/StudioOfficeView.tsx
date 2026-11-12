@@ -32,6 +32,28 @@ interface Props {
   onOpenObservability: (missionId?: number | null, agentId?: string | null) => void
 }
 
+function formatDockRole(ag: AgentInfo): string {
+  const text = `${ag.role || ''} ${ag.name || ''} ${ag.id || ''}`.toLowerCase()
+  if (text.includes('dado') || text.includes('data') || text.includes('sql') || text.includes('banco')) {
+    return text.includes('2') || text.includes('alt') || ag.id.endsWith('2') ? 'Dados (Alt)' : 'Eng. Dados'
+  }
+  if (text.includes('seguran') || text.includes('sec') || text.includes('security') || text.includes('audit')) {
+    return text.includes('2') || text.includes('alt') || ag.id.endsWith('2') ? 'Segurança (Alt)' : 'Segurança'
+  }
+  if (text.includes('arquit') || text.includes('architect') || ag.id === 'architect' || ag.id === 'lead') return 'Tech Lead'
+  if (text.includes('qa') || text.includes('qualidade') || text.includes('test') || ag.id === 'qa') return 'QA Tester'
+  if (text.includes('dev') || text.includes('desenvolv') || ag.id === 'dev') return 'Desenvolvedor'
+  if (text.includes('tutor') || text.includes('mentor') || ag.id === 'tutor') return 'Mentor'
+  if (text.includes('design') || text.includes('ui') || text.includes('ux')) return 'Designer'
+  if (text.includes('doc') || text.includes('texto') || text.includes('manual')) return 'Docs'
+  if (text.includes('devops') || text.includes('infra') || text.includes('cloud')) return 'DevOps'
+  if (text.includes('mobile') || text.includes('app')) return 'Mobile'
+  if (text.includes('ia') || text.includes('ai') || text.includes('pesquis')) return 'Pesquisa IA'
+  if (ag.role && ag.role.length <= 16) return ag.role
+  if (ag.role) return ag.role.slice(0, 14) + '…'
+  return 'Especialista'
+}
+
 export function StudioOfficeView({
   agents,
   configs,
@@ -148,7 +170,7 @@ export function StudioOfficeView({
           <div className="dock-cards">
             {agents.map((ag) => {
               const isSelected = selectedAgentId === ag.id
-              const roleDisplay = ag.role || (ag.id === 'lead' ? 'Arquiteta' : ag.id === 'dev' ? 'Desenvolvedor' : ag.id === 'sec' ? 'Segurança' : 'QA')
+              const roleDisplay = formatDockRole(ag)
 
               return (
                 <button
@@ -156,7 +178,7 @@ export function StudioOfficeView({
                   type="button"
                   className={`dock-agent-pill ${isSelected ? 'is-selected' : ''} state-${ag.state}`}
                   onClick={() => handleSelectAgent(ag.id)}
-                  title={`${ag.name} (${roleDisplay}) · Clique para abrir terminal`}
+                  title={`${ag.name} · ${ag.role || roleDisplay} (Clique para abrir terminal)`}
                 >
                   <div className="dock-mini-portrait">
                     <AgentPortrait

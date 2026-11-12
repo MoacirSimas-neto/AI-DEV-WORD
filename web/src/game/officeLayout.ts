@@ -45,7 +45,7 @@ export const SPECIALIST_SLOTS = [
     key: 'slot-0',
     podX: 22,
     podY: 94,
-    seat: { x: 32 * U, y: 106 * U },
+    seat: { x: 32 * U, y: 104 * U },
     rest: { x: 26 * U, y: 121 * U },
     wander: { x: 22 * U, y: 78 * U, width: 22 * U, height: 11 * U },
     accent: 0x38bdf8,
@@ -55,7 +55,7 @@ export const SPECIALIST_SLOTS = [
     key: 'slot-1',
     podX: 48,
     podY: 94,
-    seat: { x: 58 * U, y: 106 * U },
+    seat: { x: 58 * U, y: 104 * U },
     rest: { x: 52 * U, y: 121 * U },
     wander: { x: 46 * U, y: 78 * U, width: 22 * U, height: 11 * U },
     accent: 0x34d399,
@@ -65,7 +65,7 @@ export const SPECIALIST_SLOTS = [
     key: 'slot-2',
     podX: 170,
     podY: 94,
-    seat: { x: 180 * U, y: 106 * U },
+    seat: { x: 180 * U, y: 104 * U },
     rest: { x: 174 * U, y: 121 * U },
     wander: { x: 168 * U, y: 78 * U, width: 22 * U, height: 11 * U },
     accent: 0xa855f7,
@@ -75,7 +75,7 @@ export const SPECIALIST_SLOTS = [
     key: 'slot-3',
     podX: 196,
     podY: 94,
-    seat: { x: 206 * U, y: 106 * U },
+    seat: { x: 206 * U, y: 104 * U },
     rest: { x: 200 * U, y: 121 * U },
     wander: { x: 192 * U, y: 78 * U, width: 20 * U, height: 11 * U },
     accent: 0xf59e0b,
@@ -85,7 +85,7 @@ export const SPECIALIST_SLOTS = [
     key: 'slot-4',
     podX: null,
     podY: null,
-    seat: { x: 86 * U, y: 108 * U },
+    seat: { x: 86 * U, y: 106 * U },
     rest: { x: 80 * U, y: 122 * U },
     wander: { x: 74 * U, y: 80 * U, width: 24 * U, height: 11 * U },
     accent: 0x22d3ee,
@@ -95,7 +95,7 @@ export const SPECIALIST_SLOTS = [
     key: 'slot-5',
     podX: null,
     podY: null,
-    seat: { x: 154 * U, y: 108 * U },
+    seat: { x: 154 * U, y: 106 * U },
     rest: { x: 160 * U, y: 122 * U },
     wander: { x: 142 * U, y: 80 * U, width: 24 * U, height: 11 * U },
     accent: 0xf43f5e,
@@ -150,7 +150,7 @@ export function computeOfficePlacement(agents: AgentInfo[], requestedPage = 0): 
     visible.push({
       agent,
       stationKey: desk.id,
-      seat: { x: (desk.x + 28) * U, y: 59 * U },
+      seat: { x: (desk.x + 28) * U, y: 56 * U },
       rest: { x: desk.restX * U, y: 73 * U },
     })
   }
@@ -458,11 +458,11 @@ function drawRugAndMeetingZone(scene: Phaser.Scene, p: Paint, _callbacks?: Offic
   scene.add
     .text(120 * U, 116 * U, 'MESA DE MISSÕES', {
       fontFamily: FONT,
-      fontSize: '10px',
-      fontStyle: '700',
-      color: '#7dd3fc',
-      backgroundColor: '#090d16cc',
-      padding: { x: 6, y: 2 },
+      fontSize: '11px',
+      fontStyle: '800',
+      color: '#38bdf8',
+      backgroundColor: '#090d16ee',
+      padding: { x: 8, y: 2 },
       resolution: 2,
     })
     .setOrigin(0.5, 0)
@@ -525,10 +525,19 @@ function drawDesk(
   p(x + 38, 50, 1, 1, C.paper)
   p(x + 35, 50, 3, 1, accent)
 
-  // Plaquinha com o papel do agente
-  p(x + 8, 58, 26, 4, C.parchment)
+  // Plaquinha executiva da estação com acabamento limpo e alto contraste
+  p(x + 6, 57, 30, 6, 0x0f172a)
+  p(x + 7, 58, 28, 4, 0x1e293b)
+  p(x + 6, 57, 30, 1, 0x38bdf8, 0.6)
+
   scene.add
-    .text((x + 21) * U, 60 * U, plate, { fontFamily: FONT, fontSize: '10px', fontStyle: '700', color: '#1e293b', resolution: 2 })
+    .text((x + 21) * U, 60 * U, plate, {
+      fontFamily: FONT,
+      fontSize: '11px',
+      fontStyle: '800',
+      color: '#f8fafc',
+      resolution: 2,
+    })
     .setOrigin(0.5)
     .setDepth(66 * U + 1)
 
@@ -560,15 +569,17 @@ function drawSpecialistStation(
     p(x + 4, y + 1, 7, 4, 0x0f172a)
     p(x + 6, y + 6, 3, 1, C.metalDark)
 
-    // Plaquinha frontal de alto contraste
-    p(x + 2, y + 8, 16, 4, 0x0f172a)
+    // Plaquinha frontal executiva de alto contraste
+    p(x + 1, y + 8, 18, 6, 0x0f172a)
+    p(x + 2, y + 9, 16, 4, 0x1e293b)
+    p(x + 1, y + 8, 18, 1, slot.accent, 0.7)
 
     const plateText = scene.add
-      .text((x + 10) * U, (y + 10) * U, slot.defaultPlate, {
+      .text((x + 10) * U, (y + 11) * U, slot.defaultPlate, {
         fontFamily: FONT,
-        fontSize: '10px',
-        fontStyle: '700',
-        color: '#7dd3fc',
+        fontSize: '10.5px',
+        fontStyle: '800',
+        color: '#f8fafc',
         resolution: 2,
       })
       .setOrigin(0.5)

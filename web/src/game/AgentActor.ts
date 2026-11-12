@@ -7,15 +7,38 @@ import { makePixelTexture } from './pixelArt.ts'
 const WALK_SPEED = 96 // pixels do mundo por segundo
 
 const BUBBLE_STYLE: Record<AgentState, { text: string; bg: string; fg: string }> = {
-  idle: { text: '', bg: '#0f172a', fg: '#f8fafc' },
-  waiting: { text: 'ESPERA', bg: '#f59e0b', fg: '#0f172a' },
-  working: { text: 'EXEC', bg: '#10b981', fg: '#052e16' },
-  planning: { text: 'PLAN', bg: '#38bdf8', fg: '#082f49' },
-  approval: { text: 'APROVAR', bg: '#f59e0b', fg: '#0f172a' },
-  reviewing: { text: 'QA REV', bg: '#a855f7', fg: '#faf5ff' },
-  done: { text: 'PRONTO', bg: '#22c55e', fg: '#052e16' },
-  offline: { text: 'OFF', bg: '#334155', fg: '#cbd5e1' },
-  error: { text: 'ERRO', bg: '#ef4444', fg: '#fef2f2' },
+  idle: { text: '', bg: 'transparent', fg: 'transparent' },
+  waiting: { text: 'ESPERA', bg: 'rgba(245, 158, 11, 0.95)', fg: '#0f172a' },
+  working: { text: '⚡ EXEC', bg: 'rgba(16, 185, 129, 0.95)', fg: '#052e16' },
+  planning: { text: '◈ PLAN', bg: 'rgba(56, 189, 248, 0.95)', fg: '#082f49' },
+  approval: { text: '⏳ APROVAR', bg: 'rgba(245, 158, 11, 0.95)', fg: '#0f172a' },
+  reviewing: { text: '🔍 QA', bg: 'rgba(192, 132, 252, 0.95)', fg: '#3b0764' },
+  done: { text: '', bg: 'transparent', fg: 'transparent' }, // Silencioso e limpo na mesa; LED e placa já comunicam
+  offline: { text: 'OFF', bg: 'rgba(51, 65, 85, 0.85)', fg: '#cbd5e1' },
+  error: { text: '⚠ ERRO', bg: 'rgba(239, 68, 68, 0.95)', fg: '#fef2f2' },
+}
+
+function formatStationPlate(agent: AgentInfo): string {
+  const name = agent.name.trim()
+  const role = (agent.role || '').toLowerCase()
+  const text = `${name} ${role}`.toLowerCase()
+
+  if (text.includes('dado') || text.includes('data') || text.includes('sql') || text.includes('banco')) {
+    return text.includes('2') || text.includes('alt') || agent.id.endsWith('2') ? 'Dados (B)' : 'Dados'
+  }
+  if (text.includes('seguran') || text.includes('sec') || text.includes('audit')) {
+    return text.includes('2') || text.includes('alt') || agent.id.endsWith('2') ? 'Segurança (B)' : 'Segurança'
+  }
+  if (text.includes('design') || text.includes('ui') || text.includes('ux')) return 'Design'
+  if (text.includes('doc') || text.includes('texto') || text.includes('manual')) return 'Docs'
+  if (text.includes('devops') || text.includes('infra') || text.includes('cloud')) return 'DevOps'
+  if (text.includes('mobile') || text.includes('app')) return 'Mobile'
+  if (text.includes('ia') || text.includes('ai') || text.includes('pesquis')) return 'IA'
+
+  if (name.length <= 8) return name
+  const first = name.split(' ')[0]
+  if (first && first.length <= 8 && first.toLowerCase() !== 'especialista') return first
+  return name.slice(0, 6) + '.'
 }
 
 const LED_COLOR: Partial<Record<AgentState, number>> = {
@@ -116,13 +139,13 @@ export class AgentActor {
       })
       .setOrigin(0.5, 0)
     this.bubble = scene.add
-      .text(0, -68, '', {
+      .text(0, -64, '', {
         fontFamily: FONT,
-        fontSize: '10px',
-        fontStyle: '700',
+        fontSize: '9.5px',
+        fontStyle: '800',
         color: '#0f172a',
         backgroundColor: '#38bdf8',
-        padding: { x: 5, y: 2 },
+        padding: { x: 5, y: 1 },
         resolution: 2,
       })
       .setOrigin(0.5, 1)
@@ -195,15 +218,15 @@ export class AgentActor {
 
   private syncPlate() {
     if (this.station.plateText) {
-      const raw = this.agent.name
-      const shortName = raw.length > 7 ? raw.slice(0, 5) + '.' : raw
-      this.station.plateText.setText(shortName).setVisible(true)
+      const formatted = formatStationPlate(this.agent)
+      this.station.plateText.setText(formatted).setVisible(true)
     }
   }
 
   private updateHoverTip() {
     const spec = this.agent.specializationId ?? this.agent.role
-    const stText = BUBBLE_STYLE[this.agent.state].text || 'DISPONÍVEL'
+    const badge = BUBBLE_STYLE[this.agent.state]
+    const stText = badge.text || (this.agent.state === 'done' ? 'CONCLUÍDO' : 'DISPONÍVEL')
     this.hoverTip.setText(`${this.agent.name} · ${spec} · ${stText}`)
   }
 
@@ -213,17 +236,18 @@ export class AgentActor {
     this.stopActivity()
 
     const badge = BUBBLE_STYLE[state]
+    const hasBadge = Boolean(badge.text)
     this.bubble
       .setText(badge.text)
       .setStyle({
         fontFamily: FONT,
-        fontSize: '10px',
-        fontStyle: '700',
+        fontSize: '9.5px',
+        fontStyle: '800',
         color: badge.fg,
         backgroundColor: badge.bg,
         resolution: 2,
       })
-      .setVisible(state !== 'idle')
+      .setVisible(hasBadge)
 
     this.label.setVisible(state === 'idle' || state === 'offline' || state === 'error')
     if (state === 'offline') this.sprite.setTint(0x8a8fa0)
