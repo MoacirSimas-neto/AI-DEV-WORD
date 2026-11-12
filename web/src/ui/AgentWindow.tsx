@@ -18,10 +18,20 @@ interface Props {
   send: Send
   subscribe: Subscribe
   onClose: () => void
+  onOpenObservability?: (agentId: string) => void
 }
 
 /** Janela individual do agente: quem ele é, modelo configurado, estado e terminal. */
-export function AgentWindow({ agent, config, online, hasProject, send, subscribe, onClose }: Props) {
+export function AgentWindow({
+  agent,
+  config,
+  online,
+  hasProject,
+  send,
+  subscribe,
+  onClose,
+  onOpenObservability,
+}: Props) {
   const sessionActive = agent.session
   const cliReady = agent.state !== 'offline'
   const state = stateOf(agent)
@@ -67,6 +77,16 @@ export function AgentWindow({ agent, config, online, hasProject, send, subscribe
         >
           Verificar CLI
         </button>
+        {onOpenObservability && (
+          <button
+            type="button"
+            className="btn-quiet"
+            onClick={() => onOpenObservability(agent.id)}
+            title="Ver atividade e evidências deste agente na Central de Observabilidade"
+          >
+            🔍 Atividade detalhada
+          </button>
+        )}
       </div>
 
       <p className="window-message">

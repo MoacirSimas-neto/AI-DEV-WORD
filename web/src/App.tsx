@@ -11,6 +11,7 @@ import { HistoryPanel } from './ui/HistoryPanel.tsx'
 import { HomeView } from './ui/HomeView.tsx'
 import { MemoryCenter } from './ui/MemoryCenter.tsx'
 import { MissionMonitor } from './ui/MissionMonitor.tsx'
+import { ObservabilityCenter } from './ui/ObservabilityCenter.tsx'
 import { ProjectBar } from './ui/ProjectBar.tsx'
 import { TaskPanel } from './ui/TaskPanel.tsx'
 import { TeamRoster } from './ui/TeamRoster.tsx'
@@ -21,7 +22,7 @@ const STATUS: Record<ConnectionStatus, { label: string; tone: string }> = {
   offline: { label: 'Backend desconectado', tone: 'error' },
 }
 
-export type NavTab = 'home' | 'office' | 'tasks' | 'history' | 'agents' | 'memory'
+export type NavTab = 'home' | 'office' | 'tasks' | 'history' | 'agents' | 'memory' | 'observability'
 
 function App() {
   const {
@@ -41,6 +42,8 @@ function App() {
   } = useServer()
   const [activeTab, setActiveTab] = useState<NavTab>('home')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [observabilityMissionId, setObservabilityMissionId] = useState<number | null>(null)
+  const [observabilityAgentId, setObservabilityAgentId] = useState<string | null>(null)
 
   const [missionOpen, setMissionOpen] = useState<boolean>(() => {
     try {
@@ -179,6 +182,17 @@ function App() {
             >
               Memória
             </button>
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'observability' ? 'nav-tab-active' : ''}`}
+              onClick={() => {
+                setObservabilityMissionId(null)
+                setObservabilityAgentId(null)
+                setActiveTab('observability')
+              }}
+            >
+              Observabilidade
+            </button>
           </nav>
 
           <div className="topbar-status">
@@ -254,6 +268,11 @@ function App() {
                 collapsed={!missionOpen}
                 onToggleCollapse={toggleMission}
                 onOpenTasks={() => setActiveTab('tasks')}
+                onOpenObservability={(mId) => {
+                  setObservabilityMissionId(mId)
+                  setObservabilityAgentId(null)
+                  setActiveTab('observability')
+                }}
               />
             </ErrorBoundary>
           </div>
@@ -319,6 +338,10 @@ function App() {
                     send={send}
                     subscribe={subscribe}
                     onClose={() => setSelectedAgentId(null)}
+                    onOpenObservability={(agId) => {
+                      setObservabilityAgentId(agId)
+                      setActiveTab('observability')
+                    }}
                   />
                 </ErrorBoundary>
               )}
@@ -401,6 +424,29 @@ function App() {
                 send={send}
                 subscribe={subscribe}
                 onClose={() => setActiveTab('office')}
+              />
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {/* ABA 7: CENTRAL DE OBSERVABILIDADE */}
+        {activeTab === 'observability' && (
+          <div className="full-view-container">
+            <ErrorBoundary fallbackTitle="Falha na Central de Observabilidade">
+              <ObservabilityCenter
+                workspace={workspace}
+                missions={missions}
+                agents={agents}
+                configs={allConfigs ?? configs}
+                skills={skills}
+                skillOverrides={skillOverrides}
+                online={online}
+                send={send}
+                subscribe={subscribe}
+                initialMissionId={observabilityMissionId}
+                initialAgentId={observabilityAgentId}
+                onClose={() => setActiveTab('office')}
+                onSelectAgentInOffice={selectAgent}
               />
             </ErrorBoundary>
           </div>

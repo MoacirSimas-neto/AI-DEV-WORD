@@ -17,6 +17,7 @@ interface Props {
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenTasks: () => void
+  onOpenObservability?: (missionId: number) => void
 }
 
 export function MissionMonitor({
@@ -32,6 +33,7 @@ export function MissionMonitor({
   collapsed,
   onToggleCollapse,
   onOpenTasks,
+  onOpenObservability,
 }: Props) {
   const [selectedMissionId, setSelectedMissionId] = useState<number | null>(null)
   const [liveOutput, setLiveOutput] = useState<Record<number, string>>({})
@@ -151,6 +153,16 @@ export function MissionMonitor({
               <span className={`mission-status-pill phase-${currentMission.phase}`}>
                 {progress.statusLabel}
               </span>
+              {onOpenObservability && (
+                <button
+                  type="button"
+                  className="btn-quiet btn-xs obs-link-btn"
+                  onClick={() => onOpenObservability(currentMission.id)}
+                  title="Abrir a Central de Observabilidade para esta missão"
+                >
+                  🔍 Ver atividade detalhada
+                </button>
+              )}
             </div>
             <h3 className="mission-task-title">
               {linkedTask ? linkedTask.title : `Tarefa #${currentMission.taskId}`}
