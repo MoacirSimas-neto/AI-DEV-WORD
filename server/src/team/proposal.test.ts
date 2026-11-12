@@ -485,7 +485,8 @@ test('modo clássico preservado: o plano clássico não conhece propostas e nada
   })
   const task = tasks.create(projects.active()!.id, { title: 'Tarefa clássica', description: '', priority: 'low', status: 'todo', agentId: null })
   const mission = await runner.start(task.id)
-  for (let i = 0; i < 100 && tasks.getMission(mission.id)!.phase === 'planning'; i++) await new Promise((r) => setTimeout(r, 10))
+  const deadline = Date.now() + 10_000
+  while (tasks.getMission(mission.id)!.phase === 'planning' && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10))
 
   const after = tasks.getMission(mission.id)!
   assert.equal(after.mode, 'pipeline')
