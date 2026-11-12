@@ -302,7 +302,8 @@ export class TeamRunner extends EventEmitter {
   /** Etapa 2: o usuário aprovou o plano; o Dev implementa e depois o QA revisa. */
   async approve(missionId: number) {
     const mission = this.requireMission(missionId)
-    if (mission.phase !== 'awaiting_approval' || this.running || this.preparing) {
+    // Uma missão dinâmica é decidida por proposta e revisão, nunca por esta aprovação do fluxo clássico.
+    if (mission.mode === 'dynamic' || mission.phase !== 'awaiting_approval' || this.running || this.preparing) {
       throw new Error('Esta missão não está aguardando aprovação.')
     }
     const { task, cwd } = this.context(mission.taskId)
@@ -337,7 +338,7 @@ export class TeamRunner extends EventEmitter {
   /** O usuário respondeu à pergunta do planejador: o planejamento recomeça com a resposta. */
   async clarify(missionId: number, answer: string) {
     const mission = this.requireMission(missionId)
-    if (mission.phase !== 'awaiting_clarification' || this.running || this.preparing) {
+    if (mission.mode === 'dynamic' || mission.phase !== 'awaiting_clarification' || this.running || this.preparing) {
       throw new Error('Esta missão não está aguardando esclarecimento.')
     }
     const text = redact(answer.trim()).slice(0, 5000)

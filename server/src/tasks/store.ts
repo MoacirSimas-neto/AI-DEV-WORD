@@ -2,6 +2,8 @@ import { EventEmitter } from 'node:events'
 import type { DatabaseSync } from 'node:sqlite'
 import type {
   AgentSnapshotEntry,
+  DynamicLimits,
+  MissionMode,
   MemoryContextRecord,
   MissionAttempt,
   MissionClarification,
@@ -15,6 +17,7 @@ import type {
   TaskStatus,
 } from '../../../shared/protocol.ts'
 import type { HistoryStore } from '../history/store.ts'
+import { resolveLimits } from '../team/coordinator.ts'
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS tasks (
@@ -49,6 +52,8 @@ const SCHEMA = `
     clarifications TEXT NOT NULL DEFAULT '[]',
     memory_context TEXT NOT NULL DEFAULT '{}',
     skill_applications TEXT NOT NULL DEFAULT '[]',
+    mode TEXT NOT NULL DEFAULT 'pipeline',
+    limits TEXT NOT NULL DEFAULT '{}',
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -59,7 +64,7 @@ const SCHEMA = `
 const OPEN_INDEX = `
   DROP INDEX IF EXISTS missions_one_open_per_task;
   CREATE UNIQUE INDEX missions_one_open_per_task ON missions (task_id)
-    WHERE phase IN ('planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing');
+    WHERE phase IN ('planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing', 'executing', 'awaiting_decision');
 `
 
 const EXTRA_MISSION_COLUMNS: [string, string][] = [
@@ -74,9 +79,12 @@ const EXTRA_MISSION_COLUMNS: [string, string][] = [
   ['clarifications', "TEXT NOT NULL DEFAULT '[]'"],
   ['memory_context', "TEXT NOT NULL DEFAULT '{}'"],
   ['skill_applications', "TEXT NOT NULL DEFAULT '[]'"],
+  // Etapa 10: missões que já existem ficam no fluxo clássico.
+  ['mode', "TEXT NOT NULL DEFAULT 'pipeline'"],
+  ['limits', "TEXT NOT NULL DEFAULT '{}'"],
 ]
 
-export const OPEN_PHASES: MissionPhase[] = ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing']
+export const OPEN_PHASES: MissionPhase[] = ['planning', 'awaiting_approval', 'awaiting_clarification', 'developing', 'reviewing', 'executing', 'awaiting_decision']
 /** Fases em que um processo de CLI está rodando (não sobrevivem a um reinício). */
 const RUNNING_PHASES = "('planning', 'developing', 'reviewing')"
 
@@ -93,7 +101,7 @@ const MISSION_COLUMNS = `id, task_id AS taskId, project_id AS projectId, phase,
   planner_id AS plannerId, dev_id AS devId, qa_id AS qaId,
   plan, dev_report AS devReport, review, verdict, verdict_detail AS verdictDetail,
   team_snapshot AS teamSnapshot, specialists, specialist_results AS specialistResults,
-  files, attempts, clarifications, memory_context AS memoryContext, skill_applications AS skillApplications, error, created_at AS createdAt, updated_at AS updatedAt`
+  files, attempts, clarifications, memory_context AS memoryContext, skill_applications AS skillApplications, mode, limits, error, created_at AS createdAt, updated_at AS updatedAt`
 
 type MissionPatch = Partial<
   Pick<
@@ -149,11 +157,22 @@ function parseJsonSafe<T>(raw: unknown, fallback: T): T {
   }
 }
 
+/** Carregar uma missão nunca falha: limites ilegíveis no banco voltam ao padrão. */
+function readLimits(raw: unknown): DynamicLimits {
+  try {
+    return resolveLimits(parseJsonSafe(raw, {}))
+  } catch {
+    return resolveLimits()
+  }
+}
+
 const toMission = (row: Record<string, unknown>): MissionInfo => ({
   id: Number(row.id),
   taskId: Number(row.taskId),
   projectId: Number(row.projectId),
   phase: row.phase as MissionPhase,
+  mode: row.mode === 'dynamic' ? 'dynamic' : 'pipeline',
+  ...(row.mode === 'dynamic' ? { limits: readLimits(row.limits) } : {}),
   plannerId: String(row.plannerId || 'architect'),
   devId: String(row.devId || 'dev'),
   qaId: String(row.qaId || 'qa'),
@@ -176,6 +195,10 @@ const toMission = (row: Record<string, unknown>): MissionInfo => ({
 })
 
 export interface CreateMissionOptions {
+  /** Padrão: 'pipeline'. */
+  mode?: MissionMode
+  /** Só no modo dinâmico: ajustes sobre os padrões, validados por coordinator.resolveLimits. */
+  limits?: Partial<DynamicLimits>
   plannerId?: string
   devId?: string
   qaId?: string
@@ -317,13 +340,15 @@ export class TaskStore extends EventEmitter {
     const qaId = (options?.qaId ?? 'qa').trim() || 'qa'
     const teamSnapshot = JSON.stringify(options?.teamSnapshot ?? {})
     const specialists = JSON.stringify(options?.specialists ?? [])
+    const mode: MissionMode = options?.mode === 'dynamic' ? 'dynamic' : 'pipeline'
+    const limits = JSON.stringify(mode === 'dynamic' ? resolveLimits(options?.limits) : {})
     try {
       const result = this.db
         .prepare(
-          `INSERT INTO missions (task_id, project_id, phase, planner_id, dev_id, qa_id, team_snapshot, specialists, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO missions (task_id, project_id, phase, planner_id, dev_id, qa_id, team_snapshot, specialists, mode, limits, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(taskId, projectId, 'planning', plannerId, devId, qaId, teamSnapshot, specialists, now, now)
+        .run(taskId, projectId, 'planning', plannerId, devId, qaId, teamSnapshot, specialists, mode, limits, now, now)
       this.emit('missions')
       return this.getMission(Number(result.lastInsertRowid))!
     } catch (error) {
@@ -349,10 +374,13 @@ export class TaskStore extends EventEmitter {
     return this.getMission(missionId)!
   }
 
-  /** Na inicialização: missões que tinham um CLI rodando morreram com o app anterior. */
+  /**
+   * Na inicialização: missões clássicas que tinham um CLI rodando morreram com o app anterior.
+   * As dinâmicas não falham aqui: voltam por decisão humana (coordinator.recoveredPhase).
+   */
   failInterrupted(): MissionInfo[] {
     const lost = this.db
-      .prepare(`SELECT ${MISSION_COLUMNS} FROM missions WHERE phase IN ${RUNNING_PHASES}`)
+      .prepare(`SELECT ${MISSION_COLUMNS} FROM missions WHERE phase IN ${RUNNING_PHASES} AND mode = 'pipeline'`)
       .all()
       .map(toMission)
     return lost.map((mission) =>
