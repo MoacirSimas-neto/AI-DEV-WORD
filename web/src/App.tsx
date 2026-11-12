@@ -222,6 +222,10 @@ function App() {
                   onClose={() => setActiveTab('office')}
                   chatLinks={chatLinks}
                   onOpenChat={openChat}
+                  onOpenChatNew={() => {
+                    setChatConversationId(null)
+                    setActiveTab('chat')
+                  }}
                   onOpenObservability={(missionId) => openObservability(missionId)}
                 />
               </Suspense>

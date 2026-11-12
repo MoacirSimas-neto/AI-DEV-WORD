@@ -34,6 +34,7 @@ interface Props {
   /** Etapa 12.2: missões nascidas de conversas (origem + voltar ao chat). */
   chatLinks?: ChatMissionLink[]
   onOpenChat?: (conversationId: number) => void
+  onOpenChatNew?: () => void
   onOpenObservability?: (missionId: number) => void
 }
 
@@ -57,6 +58,7 @@ export function TaskPanel({
   onClose,
   chatLinks = [],
   onOpenChat,
+  onOpenChatNew,
   onOpenObservability,
 }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -67,6 +69,7 @@ export function TaskPanel({
   const [agentId, setAgentId] = useState<string>('')
   const [liveOutput, setLiveOutput] = useState<{ missionId: number; text: string } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [showManualForm, setShowManualForm] = useState(false)
 
   // Modo da missão: clássico (pipeline) ou dinâmico (Tech Lead propõe a equipe e os passos).
   const [missionMode, setMissionMode] = useState<'pipeline' | 'dynamic'>('pipeline')
@@ -366,9 +369,32 @@ export function TaskPanel({
         </section>
       )}
 
-      {/* Modo da missão */}
+      {/* Barra principal de ação (Etapa 12.4.1) */}
+      {activeProjectId && (
+        <div className="task-hero-bar">
+          <div className="task-hero-actions">
+            {onOpenChatNew && (
+              <button type="button" onClick={onOpenChatNew}>
+                💬 Conversar com Tech Lead
+              </button>
+            )}
+            <button type="button" className="btn-quiet" onClick={() => setShowManualForm((v) => !v)}>
+              {showManualForm || editingId ? 'Ocultar formulário manual' : '+ Nova tarefa manual'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modo da missão & equipe (recolhível por padrão) */}
       {activeProjectId && !activeMission && (
-        <section className="mode-selector" aria-label="Modo da missão">
+        <details className="task-advanced-panel">
+          <summary className="task-advanced-summary">
+            <span>⚙ Configurações avançadas da missão</span>
+            <span className="task-advanced-hint">
+              Modo: {dynamic ? 'Dinâmico' : 'Clássico'} · {useDefaultTeam ? 'Equipe padrão' : 'Equipe personalizada'}
+            </span>
+          </summary>
+          <section className="mode-selector" aria-label="Modo da missão">
           <h3>Como a equipe vai trabalhar</h3>
           <div className="mode-options" role="radiogroup">
             <label className={`mode-option ${!dynamic ? 'is-selected' : ''}`}>
@@ -408,10 +434,9 @@ export function TaskPanel({
             </div>
           )}
         </section>
-      )}
 
       {/* Seletor de Equipe Responsável para Modo Equipe */}
-      {activeProjectId && !activeMission && !dynamic && (
+      {!dynamic && (
         <section className="team-selector-box" aria-label="Equipe responsável pela missão">
           <div className="team-selector-head">
             <div>
@@ -615,9 +640,11 @@ export function TaskPanel({
           )}
         </section>
       )}
+        </details>
+      )}
 
-      {/* Formulario de Criar / Editar */}
-      {activeProjectId && (
+      {/* Formulario de Criar / Editar (secundário) */}
+      {activeProjectId && (showManualForm || editingId !== null) && (
         <form className="task-form" onSubmit={save}>
           <h3>{editingId ? 'Editar Tarefa' : 'Nova Tarefa'}</h3>
           <div className="task-form-row">
