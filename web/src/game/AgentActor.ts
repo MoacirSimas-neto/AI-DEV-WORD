@@ -105,25 +105,35 @@ export class AgentActor {
     })
 
     this.label = scene.add
-      .text(0, 3, agent.name, { fontFamily: FONT, fontSize: '13px', color: '#f8fafc' })
+      .text(0, 3, agent.name, {
+        fontFamily: FONT,
+        fontSize: '11px',
+        fontStyle: '700',
+        color: '#f8fafc',
+        resolution: 2,
+      })
       .setOrigin(0.5, 0)
-      .setStroke('#0f172a', 4)
+      .setStroke('#0f172a', 3)
     this.bubble = scene.add
       .text(0, -68, '', {
         fontFamily: FONT,
-        fontSize: '11px',
+        fontSize: '10px',
+        fontStyle: '700',
         color: '#0f172a',
         backgroundColor: '#38bdf8',
         padding: { x: 5, y: 2 },
+        resolution: 2,
       })
       .setOrigin(0.5, 1)
     this.hoverTip = scene.add
       .text(0, -86, '', {
         fontFamily: FONT,
         fontSize: '11px',
+        fontStyle: '600',
         color: '#f8fafc',
         backgroundColor: '#0f172aee',
         padding: { x: 6, y: 3 },
+        resolution: 2,
       })
       .setOrigin(0.5, 1)
       .setVisible(false)
@@ -203,9 +213,11 @@ export class AgentActor {
       .setText(badge.text)
       .setStyle({
         fontFamily: FONT,
-        fontSize: '11px',
+        fontSize: '10px',
+        fontStyle: '700',
         color: badge.fg,
         backgroundColor: badge.bg,
+        resolution: 2,
       })
       .setVisible(state !== 'idle')
 

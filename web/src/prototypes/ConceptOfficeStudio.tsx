@@ -157,6 +157,7 @@ export function ConceptOfficeStudio() {
   // Estado do Seletor Rápido de Projetos / Pastas
   const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [projectSearch, setProjectSearch] = useState('')
+  const [zoom, setZoom] = useState<number>(1.0)
   const [activeProject, setActiveProject] = useState({
     name: 'aidw-e2e-etapa8',
     path: 'C:\\AI DEV WORD\\repos\\aidw-e2e-etapa8',
@@ -426,7 +427,8 @@ export function ConceptOfficeStudio() {
             onClick={() => {
               setSidePanelOpen(prev => {
                 const next = !prev
-                setTimeout(() => window.dispatchEvent(new Event('resize')), 60)
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 50)
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 250)
                 return next
               })
             }}
@@ -440,7 +442,66 @@ export function ConceptOfficeStudio() {
       {/* 2. PALCO PRINCIPAL COM O ESCRITÓRIO 2D PHASER E PAINEL LATERAL */}
       <main className="proto-office-stage-layout">
         {/* Visualização Central do Escritório 2D */}
-        <div className="office-world-viewport">
+        <div
+          className="office-world-viewport"
+          style={{ '--office-zoom': zoom } as React.CSSProperties}
+        >
+          {/* Barra de Controle de Zoom Flutuante */}
+          <div className="office-zoom-toolbar">
+            <button
+              type="button"
+              className="zoom-tool-btn"
+              onClick={() => {
+                setZoom(prev => {
+                  const next = Math.max(0.6, Math.round((prev - 0.15) * 100) / 100)
+                  setTimeout(() => window.dispatchEvent(new Event('resize')), 40)
+                  return next
+                })
+              }}
+              title="Diminuir Zoom (-)"
+            >
+              −
+            </button>
+            <span className="zoom-val-badge">{Math.round(zoom * 100)}%</span>
+            <button
+              type="button"
+              className="zoom-tool-btn"
+              onClick={() => {
+                setZoom(prev => {
+                  const next = Math.min(2.5, Math.round((prev + 0.15) * 100) / 100)
+                  setTimeout(() => window.dispatchEvent(new Event('resize')), 40)
+                  return next
+                })
+              }}
+              title="Aumentar Zoom (+)"
+            >
+              +
+            </button>
+            <div className="zoom-sep" />
+            <button
+              type="button"
+              className={`zoom-preset-pill ${zoom === 1.0 ? 'active' : ''}`}
+              onClick={() => {
+                setZoom(1.0)
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 40)
+              }}
+              title="Ajustar automaticamente ao espaço da tela (Padrão)"
+            >
+              ⛶ Ajustar
+            </button>
+            <button
+              type="button"
+              className={`zoom-preset-pill ${zoom === 1.3 ? 'active' : ''}`}
+              onClick={() => {
+                setZoom(1.3)
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 40)
+              }}
+              title="Zoom Próximo (130%)"
+            >
+              1.3x
+            </button>
+          </div>
+
           <PhaserGame
             agents={AGENTS_LIST}
             selectedId={selectedAgentId}

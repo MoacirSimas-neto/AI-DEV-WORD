@@ -9,7 +9,7 @@ import type { WorldAction } from './WorldBridge.ts'
  */
 export const U = 3
 export const WORLD = { width: 240 * U, height: 132 * U }
-export const FONT = '"Pixelify Sans Variable", monospace'
+export const FONT = '"Nunito Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
 export const MAX_VISIBLE_SPECIALISTS = 6
 
 export interface Station {
@@ -253,10 +253,12 @@ export function drawOffice(scene: Phaser.Scene, callbacks?: OfficeCallbacks): Re
   const tooltipText = scene.add
     .text(120 * U, 6 * U, '', {
       fontFamily: FONT,
-      fontSize: '13px',
+      fontSize: '12px',
+      fontStyle: '600',
       color: '#f8fafc',
       backgroundColor: '#0f172acc',
       padding: { x: 8, y: 3 },
+      resolution: 2,
     })
     .setOrigin(0.5, 0)
     .setDepth(12_000)
@@ -410,7 +412,7 @@ function drawTaskBoard(scene: Phaser.Scene, p: Paint, _callbacks?: OfficeCallbac
   ]
   for (const [x, y, color] of notes) p(x, y, 6, 3, color)
   scene.add
-    .text(150 * U, 28 * U, 'KANBAN', { fontFamily: FONT, fontSize: '9px', color: '#94a3b8' })
+    .text(150 * U, 28 * U, 'KANBAN', { fontFamily: FONT, fontSize: '9px', fontStyle: '700', color: '#94a3b8', resolution: 2 })
     .setOrigin(0.5, 0)
 }
 
@@ -454,7 +456,7 @@ function drawRugAndMeetingZone(scene: Phaser.Scene, p: Paint, _callbacks?: Offic
   table(104, 103, 12, 1, 0xffffff, 0.7)
 
   scene.add
-    .text(120 * U, 116 * U, 'MESA DE MISSÕES', { fontFamily: FONT, fontSize: '10px', color: '#7dd3fc' })
+    .text(120 * U, 116 * U, 'MESA DE MISSÕES', { fontFamily: FONT, fontSize: '10px', fontStyle: '700', color: '#7dd3fc', resolution: 2 })
     .setOrigin(0.5, 0)
     .setDepth(115 * U)
 }
@@ -518,7 +520,7 @@ function drawDesk(
   // Plaquinha com o papel do agente
   p(x + 8, 58, 26, 4, C.parchment)
   scene.add
-    .text((x + 21) * U, 60 * U, plate, { fontFamily: FONT, fontSize: '11px', color: '#1e293b' })
+    .text((x + 21) * U, 60 * U, plate, { fontFamily: FONT, fontSize: '10px', fontStyle: '700', color: '#1e293b', resolution: 2 })
     .setOrigin(0.5)
     .setDepth(66 * U + 1)
 
@@ -554,7 +556,9 @@ function drawSpecialistStation(
       .text((x + 10) * U, (y + 10.5) * U, slot.defaultPlate, {
         fontFamily: FONT,
         fontSize: '9px',
+        fontStyle: '700',
         color: '#f8fafc',
+        resolution: 2,
       })
       .setOrigin(0.5)
       .setDepth((y + 14) * U + 1)
@@ -579,7 +583,9 @@ function drawSpecialistStation(
     .text(gx * U, (gy + 4) * U, slot.defaultPlate, {
       fontFamily: FONT,
       fontSize: '9px',
+      fontStyle: '700',
       color: '#cbd5e1',
+      resolution: 2,
     })
     .setOrigin(0.5)
     .setDepth(116 * U)

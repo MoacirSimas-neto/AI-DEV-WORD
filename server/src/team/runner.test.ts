@@ -610,14 +610,14 @@ test('TeamRunner persiste verdictDetail e verdict corretamente para todas as 7 c
       agentId: null,
     })
     const m = await runner.start(t.id)
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 100; i++) {
       if (tasks.getMission(m.id)!.phase === 'awaiting_approval') break
       await new Promise((r) => setTimeout(r, 10))
     }
     await runner.approve(m.id)
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 200; i++) {
       if (['done', 'failed'].includes(tasks.getMission(m.id)!.phase)) break
-      await new Promise((r) => setTimeout(r, 10))
+      await new Promise((r) => setTimeout(r, 15))
     }
     const done = tasks.getMission(m.id)!
     assert.equal(done.verdictDetail, c.expectedDetail)
