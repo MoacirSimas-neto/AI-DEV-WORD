@@ -20,6 +20,8 @@ import type {
   PlannedStep,
   ProposalDecision,
   ProviderId,
+  RecoveryState,
+  ResumeAction,
   SkillApplication,
   SpecializationId,
   SpecialistResult,
@@ -41,19 +43,25 @@ import { OPEN_PHASES, type TaskStore } from '../tasks/store.ts'
 import {
   assertTransition,
   checkDecision,
+  checkLimits,
   DEFAULT_LIMITS,
+  eligibleSteps,
+  type LimitHit,
   MODE_STEP_ROLE,
   nextAdjustRound,
   nextStep,
   planStatus,
   recoveredPhase,
   rejectedBefore,
+  replanLimit,
   resolveLimits,
+  retryableSteps,
   stepBlocker,
+  usageOf,
   validateProposal,
 } from './coordinator.ts'
 import type { PlanStore } from './planStore.ts'
-import { interpretProposal, MAX_INVALID_PROPOSALS } from './proposal.ts'
+import { interpretProposal, MAX_INVALID_PROPOSALS, PROPOSAL_OPEN } from './proposal.ts'
 import {
   approvedPlanText,
   asUntrusted,
@@ -61,6 +69,7 @@ import {
   devPrompt,
   parseClarificationRequest,
   parseDetailedVerdict,
+  parseStepSignals,
   parseVerdict,
   planPrompt,
   proposalPrompt,
@@ -224,6 +233,8 @@ export class TeamRunner extends EventEmitter {
   private readonly specializations: SpecializationRegistry
   private readonly stepTimeoutMs: number
   private running: Running | null = null
+  /** Última decisão de retomada aplicada por missão: o reenvio do mesmo opId não executa de novo. */
+  private readonly resumeOps = new Map<number, string>()
   /** true enquanto start/approve consultam o Git (é assíncrono). */
   private preparing = false
 
@@ -256,7 +267,17 @@ export class TeamRunner extends EventEmitter {
       })
     }
     // Missões dinâmicas não falham no reinício: param para decisão humana e nenhum CLI é relançado.
-    this.plans?.interruptRunning()
+    for (const step of this.plans?.interruptRunning() ?? []) {
+      const owner = this.tasks.getMission(step.missionId)
+      if (!owner) continue
+      this.track(owner, 'step.interrupted', 'observed', `Passo "${step.key}" (${step.mode}) interrompido pelo fechamento do app; não será relançado sozinho.`, {
+        agentId: step.agentId,
+        trace: step.correlationId ? { id: step.correlationId, stage: 'step' } : undefined,
+        state: 'failed',
+        key: String(step.id),
+        data: { actor: 'backend', stepId: step.id, key: step.key, revision: step.revision, attempt: step.attempt ?? 1, mode: step.mode, mayHaveWrittenFiles: step.mode === 'implement' },
+      })
+    }
     for (const m of this.tasks.openMissions()) {
       if (m.mode !== 'dynamic' || recoveredPhase(m.phase) === m.phase) continue
       const parked = this.tasks.updateMission(m.id, { phase: 'awaiting_decision', error: 'Interrompida: o app foi fechado durante a execução.' })
@@ -273,6 +294,9 @@ export class TeamRunner extends EventEmitter {
       }
       if (m.phase === 'awaiting_clarification') {
         this.registry.setMissionState(m.plannerId || 'architect', 'approval', `Missão #${m.id}: aguardando a sua resposta`)
+      }
+      if (m.phase === 'awaiting_decision') {
+        this.registry.setMissionState(m.plannerId || 'architect', 'approval', `Missão #${m.id}: aguardando a sua decisão`)
       }
     }
   }
@@ -379,7 +403,8 @@ export class TeamRunner extends EventEmitter {
   /** O usuário respondeu à pergunta do planejador: o planejamento recomeça com a resposta. */
   async clarify(missionId: number, answer: string) {
     const mission = this.requireMission(missionId)
-    if (mission.mode === 'dynamic' || mission.phase !== 'awaiting_clarification' || this.running || this.preparing) {
+    if (mission.mode === 'dynamic') return this.clarifyDynamic(mission, answer)
+    if (mission.phase !== 'awaiting_clarification' || this.running || this.preparing) {
       throw new Error('Esta missão não está aguardando esclarecimento.')
     }
     const text = redact(answer.trim()).slice(0, 5000)
@@ -1145,7 +1170,7 @@ export class TeamRunner extends EventEmitter {
     const joiners: AgentSnapshotEntry[] = []
     if (input.decision === 'approve' && checkDecision(proposal, input.revision, 'approve') === 'apply') {
       const ctx = this.planContext(mission)
-      const problems = validateProposal(proposal, { ...ctx, proposals: ctx.proposals.filter((p) => p.id !== proposal.id) })
+      const problems = validateProposal(proposal, { ...ctx, trigger: proposal.trigger, proposals: ctx.proposals.filter((p) => p.id !== proposal.id) })
       if (problems.length) throw new Error(`Esta proposta não pode mais ser aprovada: ${problems.join(' ')}`)
       for (const change of proposal.teamChanges) {
         if (change.action === 'convene') joiners.push(this.snapshotAgent({ agentId: change.agentId, defaultSpec: 'developer', stageLabel: 'equipe da missão' }))
@@ -1218,7 +1243,7 @@ export class TeamRunner extends EventEmitter {
       } else {
         this.running = { missionId: mission.id, cancelled: false }
         this.registry.setMissionState(techLeadId, 'planning', `Refazendo a proposta da missão #${mission.id}`)
-        void this.runTechLeadTurn(mission.id, { kind: 'adjust_requested', detail: feedback || 'O usuário pediu ajustes sem detalhar.' })
+        void this.runTechLeadTurn(mission.id, { kind: 'adjust_requested', detail: feedback || 'O usuário pediu ajustes sem detalhar.' }, 0, decided.trigger || 'adjust_requested')
       }
     } else {
       this.block(mission.id, 'Proposta rejeitada e não há passo aprovado para executar: a missão aguarda a sua decisão.', 'proposal_rejected')
@@ -1257,7 +1282,7 @@ export class TeamRunner extends EventEmitter {
   }
 
   /** Um turno do Tech Lead: ele propõe, o backend confere e a proposta válida fica pendente para o usuário. */
-  private async runTechLeadTurn(missionId: number, trigger: ProposalTrigger, invalid = 0): Promise<void> {
+  private async runTechLeadTurn(missionId: number, trigger: ProposalTrigger, invalid = 0, cause: string = trigger.kind): Promise<void> {
     const run = this.running
     if (!run || run.missionId !== missionId) return
     const plans = this.requirePlans()
@@ -1266,26 +1291,57 @@ export class TeamRunner extends EventEmitter {
       const { task, cwd } = this.context(mission.taskId)
       const ctx = this.planContext(mission)
       const techLeadId = ctx.techLeadId
-      if (ctx.proposals.length >= ctx.limits.maxTechLeadTurns) {
+      // Cada consulta conta, inclusive as respostas recusadas: o Tech Lead não ganha turnos extras errando.
+      const turns = Math.max(mission.leadTurns ?? 0, ctx.proposals.length)
+      if (turns >= ctx.limits.maxTechLeadTurns) {
+        this.limitReached(mission, { limit: 'maxTechLeadTurns', value: turns, max: ctx.limits.maxTechLeadTurns }, 'turno do Tech Lead')
         return this.block(missionId, `Limite de propostas do Tech Lead atingido (${ctx.limits.maxTechLeadTurns}).`, 'limit_reached')
       }
+      this.tasks.updateMission(missionId, { leadTurns: turns + 1 })
+      const canAsk = (mission.clarifications ?? []).length < MAX_CLARIFICATION_ROUNDS
       const cfg = this.resolveMissionAgentConfig(mission, techLeadId, 'tech-lead')
       const cli = getStepCliAndArgs('planning', cfg)
       const trace = this.delegate(mission, trigger.kind === 'invalid_proposal' ? 'system' : 'user', techLeadId, 'planning', `Propor o plano e a equipe (${trigger.kind})`, { trigger: trigger.kind })
       const memory = this.memoryBlock(mission, 'planning', techLeadId, task, trace)
       if (memory === null) return
-      const prompt = proposalPrompt(task, ctx, trigger, {
-        agentName: cfg?.name,
-        specializationId: cfg?.specializationId ?? 'tech-lead',
-        customInstructions: cfg?.customInstructions,
-        registry: this.specializations,
-        memory,
-        skills: this.skillsBlock(missionId, techLeadId, trace),
-      })
+      const prompt = proposalPrompt(
+        task,
+        { ...ctx, leadTurns: turns + 1 },
+        trigger,
+        {
+          agentName: cfg?.name,
+          specializationId: cfg?.specializationId ?? 'tech-lead',
+          customInstructions: cfg?.customInstructions,
+          registry: this.specializations,
+          memory,
+          skills: this.skillsBlock(missionId, techLeadId, trace),
+        },
+        { canAsk },
+      )
       const text = await this.step(missionId, techLeadId, cli.cli, cli.args, cwd, prompt, cli.model, cli.effort, cli.passPromptAsArg, trace)
       if (text === null) return
 
       const answered = this.tasks.updateMission(missionId, { plan: text })
+      // Sem proposta e com pergunta marcada: falta informação essencial, a missão espera o usuário.
+      const question = canAsk && !text.includes(PROPOSAL_OPEN) ? parseClarificationRequest(text) : ''
+      if (question) {
+        const asked = answered.clarifications ?? []
+        assertTransition(answered.phase, 'awaiting_clarification')
+        const waiting = this.tasks.updateMission(missionId, {
+          phase: 'awaiting_clarification',
+          clarifications: [...asked, { agentId: techLeadId, question, answer: null, askedAt: new Date().toISOString(), answeredAt: null }],
+        })
+        this.running = null
+        this.log(waiting, 'mission', `Missão #${missionId} aguardando esclarecimento do usuário: ${question}`, techLeadId)
+        this.track(waiting, 'clarification.requested', 'observed', `Missão #${missionId} pausada: o Tech Lead pediu esclarecimento ao usuário.`, {
+          agentId: techLeadId,
+          trace,
+          key: '',
+          data: { round: asked.length + 1, trigger: cause, ref: `missions.clarifications[${asked.length}].question`, ...fingerprint(question) },
+        })
+        this.registry.setMissionState(techLeadId, 'approval', `Missão #${missionId}: preciso de uma resposta sua`)
+        return
+      }
       // O que o modelo propôs. Ainda não é decisão nem execução.
       this.track(answered, 'proposal.declared', 'declared', `${techLeadId} respondeu com uma proposta (${text.length} caracteres); ainda não conferida nem aprovada.`, {
         agentId: techLeadId,
@@ -1294,7 +1350,7 @@ export class TeamRunner extends EventEmitter {
         state: 'completed',
         data: { actor: 'model', ref: 'missions.plan', ...fingerprint(text) },
       })
-      const reading = interpretProposal(text, this.planContext(answered))
+      const reading = interpretProposal(text, { ...this.planContext(answered), trigger: cause })
       if (!reading.ok) {
         this.log(answered, 'error', `Proposta do Tech Lead recusada pelo backend (${reading.code}): ${reading.problems[0]}`, techLeadId)
         this.track(answered, 'proposal.invalid', 'observed', `Proposta recusada pelo backend (${reading.code}): nada dela foi aproveitado.`, {
@@ -1304,14 +1360,23 @@ export class TeamRunner extends EventEmitter {
           state: 'failed',
           data: { actor: 'backend', code: reading.code, problems: reading.problems, attempt: invalid + 1 },
         })
-        if (invalid < MAX_INVALID_PROPOSALS) return this.runTechLeadTurn(missionId, { kind: 'invalid_proposal', detail: reading.problems.join('\n') }, invalid + 1)
+        if (invalid < MAX_INVALID_PROPOSALS) return this.runTechLeadTurn(missionId, { kind: 'invalid_proposal', detail: reading.problems.join('\n') }, invalid + 1, cause)
         return this.block(missionId, `O Tech Lead não entregou uma proposta válida (${reading.code}): ${reading.problems.join(' ')}`, 'invalid_proposal', techLeadId, trace)
       }
 
       const previous = plans.listProposals({ projectId: mission.projectId, missionId })
-      const proposal = plans.propose(missionId, techLeadId, reading.input)
+      const proposal = plans.propose(missionId, techLeadId, reading.input, cause)
       this.running = null
       const pending = this.requireMission(missionId)
+      if (proposal.kind === 'closure') {
+        // Recomendação do modelo; a missão só termina se o usuário aprovar.
+        this.track(pending, 'closure.recommended', 'declared', `${techLeadId} recomendou encerrar a missão #${missionId} (revisão ${proposal.revision}).`, {
+          agentId: techLeadId,
+          trace,
+          key: `proposal:${proposal.id}`,
+          data: { actor: 'model', proposalId: proposal.id, revision: proposal.revision, trigger: cause, completionCriteria: proposal.completionCriteria },
+        })
+      }
       this.log(pending, 'mission', `Proposta da missão #${missionId} (revisão ${proposal.revision}) pronta. Aguardando a sua decisão.`, techLeadId)
       this.track(pending, 'approval.requested', 'observed', `Missão #${missionId} pausada: proposta da revisão ${proposal.revision} aguarda decisão humana.`, {
         agentId: techLeadId,
@@ -1321,6 +1386,7 @@ export class TeamRunner extends EventEmitter {
           proposalId: proposal.id,
           revision: proposal.revision,
           kind: proposal.kind,
+          trigger: cause,
           teamChanges: proposal.teamChanges.map((c) => ({ action: c.action, agentId: c.agentId })),
           steps: proposal.steps.length,
           // Mudanças de equipe que o usuário já rejeitou antes: a interface precisa mostrar isso.
@@ -1345,22 +1411,40 @@ export class TeamRunner extends EventEmitter {
         const mission = this.requireMission(missionId)
         const ctx = this.planContext(mission)
         const status = planStatus(ctx.steps)
-        if (status === 'empty') {
-          return this.block(missionId, 'Todos os passos aprovados terminaram. Confirme o encerramento da missão ou cancele.', 'queue_empty')
-        }
+        // A fila terminou: o Tech Lead recomenda o encerramento ou o que falta (com aprovação humana).
+        if (status === 'empty') return this.escalate(missionId, { kind: 'queue_empty' }, { evidence: 'observed', source: 'backend' })
         if (status !== 'ready') {
-          return this.block(missionId, 'Um passo não foi concluído e os que dependem dele não podem rodar.', 'dependency_failed')
+          const broken = ctx.steps.findLast((s) => s.status === 'failed' || s.status === 'interrupted')
+          return this.escalate(missionId, { kind: 'dependency_failed', step: broken }, { evidence: 'observed', source: 'backend' })
         }
         const next = nextStep(ctx.steps)!
         const blocker = stepBlocker(next, ctx)
-        if (blocker) return this.block(missionId, `Passo "${next.key}": ${blocker.message}`, blocker.reason, next.agentId)
+        if (blocker) {
+          if (blocker.reason === 'agent_unavailable') {
+            return this.escalate(missionId, { kind: 'cli_unavailable', step: next }, { evidence: 'observed', source: 'backend' }, next.agentId)
+          }
+          if (blocker.reason === 'limit_reached') {
+            const hit = checkLimits(ctx.limits, usageOf([...ctx.steps.filter((s) => s.startedAt !== null), next], ctx.proposals, ctx.techLeadId))[0]
+            if (hit) this.limitReached(mission, hit, `antes do passo "${next.key}"`)
+          }
+          return this.block(missionId, `Passo "${next.key}": ${blocker.message}`, blocker.reason, next.agentId)
+        }
         const { task, cwd } = this.context(mission.taskId)
-        // Antes da primeira escrita o repositório precisa estar limpo: nada do usuário é misturado nem descartado.
-        if (next.mode === 'implement' && !ctx.steps.some((s) => s.mode === 'implement' && s.startedAt !== null)) {
+        // Antes de qualquer escrita, só podem existir alterações que a própria missão registrou.
+        // Nada é desfeito: o usuário decide (commit, desfazer, ou retomar aceitando as alterações).
+        if (next.mode === 'implement') {
           const status = await this.git.status(cwd)
           if (run.cancelled) return
-          if (status.files.length > 0) {
-            return this.block(missionId, 'O projeto tem alterações sem commit feitas fora da missão. Faça o commit ou desfaça-as antes de liberar a implementação.', 'dirty_repo', next.agentId)
+          const known = new Set(this.requireMission(missionId).files)
+          const unknown = status.files.map((f) => f.path).filter((path) => !known.has(path))
+          if (unknown.length > 0) {
+            const list = `${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` e mais ${unknown.length - 10}` : ''}`
+            return this.block(
+              missionId,
+              `O projeto tem alterações que a missão não registrou (${list}). Nada foi descartado: faça o commit, desfaça-as ou retome aceitando essas alterações.`,
+              'dirty_repo',
+              next.agentId,
+            )
           }
         }
         if (!(await this.runStep(run, mission, next, ctx, task, cwd, plans))) return
@@ -1398,7 +1482,7 @@ export class TeamRunner extends EventEmitter {
         if (run.cancelled) return false
         this.forward(mission, trace, 'system', agentId, 'git-diff', 'git-diff', diff)
       } else {
-        const source = ctx.steps.find((s) => s.key === ref.key && s.revision === (ref.revision ?? step.revision))
+        const source = ctx.steps.find((s) => s.key === ref.key && s.revision === (ref.revision ?? step.revision) && s.status === 'completed')
         if (source?.status !== 'completed') {
           this.block(mission.id, `Passo "${step.key}": o resultado de "${ref.key}" não está disponível.`, 'dependency_failed', agentId, trace)
           return false
@@ -1423,7 +1507,15 @@ export class TeamRunner extends EventEmitter {
     )
     this.registry.setMissionState(agentId, reviewing ? 'reviewing' : 'working', `Passo "${step.key}" da missão #${mission.id}`)
     const text = await this.step(mission.id, agentId, cli.cli, cli.args, cwd, prompt, cli.model, cli.effort, cli.passPromptAsArg, trace)
-    if (text === null) return false
+    if (text === null) {
+      if (run.cancelled || !OPEN_PHASES.includes(this.requireMission(mission.id).phase)) return false
+      if (plans.getStep(step.id)?.status === 'running') plans.finishStep(step.id, 'failed', { error: 'O passo terminou sem resposta.' })
+      // A falha foi observada pelo backend; o passo não é repetido sozinho: o Tech Lead propõe e o usuário decide.
+      const failed = plans.getStep(step.id)!
+      const unavailable = LIMIT_PATTERN.test(failed.error ?? '') || /limite de uso|indispon[ií]vel|não encontrado no PATH/i.test(failed.error ?? '')
+      this.escalate(mission.id, { kind: unavailable ? 'cli_unavailable' : 'step_failed', step: failed }, { evidence: 'observed', source: 'backend' }, agentId, trace)
+      return false
+    }
 
     if (step.mode === 'implement') {
       const gitAfter = await this.git.status(cwd)
@@ -1472,9 +1564,18 @@ export class TeamRunner extends EventEmitter {
         data: { stepId: step.id, verdict, verdictDetail, ref: `mission_steps[${step.id}].result` },
       })
       if (verdict !== 'approved') {
-        this.block(mission.id, `A verificação do passo "${step.key}" não aprovou o trabalho (${label}). Leia o parecer e decida como seguir.`, 'verdict_rejected', agentId, trace)
+        // O veredito é declarado pelo agente: o retrabalho é proposto pelo Tech Lead e aprovado pelo usuário.
+        this.escalate(mission.id, { kind: 'verdict_rejected', step: plans.getStep(step.id)! }, { evidence: 'declared', source: 'agent' }, agentId, trace)
         return false
       }
+      return true
+    }
+    // Só a linha marcada (BLOQUEIO:/RISCO:) conta como pedido de replanejamento.
+    const signal = parseStepSignals(text)
+    const kind = signal.blocked ? 'step_blocked' : signal.risk ? 'risk_flagged' : null
+    if (kind) {
+      this.escalate(mission.id, { kind, step: plans.getStep(step.id)! }, { evidence: 'declared', source: 'agent' }, agentId, trace)
+      return false
     }
     return true
   }
@@ -1503,6 +1604,198 @@ export class TeamRunner extends EventEmitter {
     const techLeadId = mission.plannerId || 'architect'
     for (const id of new Set([...TEAM, ...this.missionParticipantIds(mission)])) this.registry.setMissionState(id, null)
     this.registry.setMissionState(techLeadId, 'approval', `Missão #${missionId}: aguardando a sua decisão`)
+  }
+
+  /**
+   * Um gatilho pede um novo turno do Tech Lead. O backend confere os limites antes: sem turno disponível,
+   * a missão para com o limite registrado. O que o Tech Lead propuser ainda precisa de aprovação humana.
+   */
+  private escalate(
+    missionId: number,
+    trigger: ProposalTrigger,
+    origin: { evidence: EvidenceKind; source: 'backend' | 'agent' | 'user' },
+    agentId?: string,
+    trace?: Trace,
+  ) {
+    this.running = null
+    const mission = this.requireMission(missionId)
+    if (!OPEN_PHASES.includes(mission.phase)) return
+    const ctx = this.planContext(mission)
+    const hit = replanLimit({ ...ctx, leadTurns: mission.leadTurns }, trigger.kind)
+    const where = trigger.step ? ` (passo r${trigger.step.revision}/${trigger.step.key})` : ''
+    if (hit) {
+      this.limitReached(mission, hit, `ao pedir um novo turno do Tech Lead por ${trigger.kind}`)
+      return this.block(
+        missionId,
+        `Limite da missão atingido (${hit.limit}: ${hit.value}/${hit.max}) depois de ${trigger.kind}${where}. O Tech Lead não será consultado de novo sem a sua decisão.`,
+        'limit_reached',
+        agentId ?? null,
+        trace,
+      )
+    }
+    if (mission.phase !== 'planning') {
+      assertTransition(mission.phase, 'planning')
+      this.tasks.updateMission(missionId, { phase: 'planning' })
+    }
+    const planning = this.requireMission(missionId)
+    this.track(planning, 'replan.triggered', origin.evidence, `Novo turno do Tech Lead pedido por ${trigger.kind}${where}.`, {
+      agentId,
+      trace,
+      state: 'started',
+      key: trigger.step ? `${trigger.kind}:${trigger.step.id}` : undefined,
+      data: {
+        actor: origin.source,
+        trigger: trigger.kind,
+        stepId: trigger.step?.id ?? null,
+        stepKey: trigger.step?.key ?? null,
+        revision: trigger.step?.revision ?? null,
+        attempt: trigger.step?.attempt ?? null,
+        sourceCorrelationId: trigger.step?.correlationId ?? null,
+        ...(trigger.detail ? { detail: fingerprint(trigger.detail) } : {}),
+      },
+    })
+    this.log(planning, 'mission', `Missão #${missionId}: o Tech Lead será consultado de novo (${trigger.kind}${where}).`)
+    this.running = { missionId, cancelled: false }
+    for (const id of new Set([...TEAM, ...this.missionParticipantIds(planning)])) this.registry.setMissionState(id, null)
+    this.registry.setMissionState(ctx.techLeadId, 'planning', `Replanejando a missão #${missionId}`)
+    void this.runTechLeadTurn(missionId, trigger)
+  }
+
+  private limitReached(mission: MissionInfo, hit: LimitHit, context: string) {
+    this.track(mission, 'limit.reached', 'observed', `Limite ${hit.limit} atingido (${hit.value}/${hit.max}) ${context}.`, {
+      state: 'failed',
+      data: { actor: 'backend', limit: hit.limit, value: hit.value, max: hit.max, context },
+    })
+  }
+
+  /** Missão dinâmica: a resposta do usuário volta ao Tech Lead como um novo turno. */
+  private clarifyDynamic(mission: MissionInfo, answer: string) {
+    const clarifications = [...(mission.clarifications ?? [])]
+    const last = clarifications.at(-1)
+    if (!this.plans || mission.phase !== 'awaiting_clarification' || this.running || this.preparing || !last || last.answer !== null) {
+      throw new Error('Esta missão não está aguardando esclarecimento.')
+    }
+    const text = redact(answer.trim()).slice(0, 5000)
+    if (!text) throw new Error('Escreva a resposta antes de retomar a missão.')
+    clarifications[clarifications.length - 1] = { ...last, answer: text, answeredAt: new Date().toISOString() }
+    const resumed = this.tasks.updateMission(mission.id, { phase: 'planning', clarifications })
+    this.track(resumed, 'clarification.received', 'observed', `Usuário respondeu ao esclarecimento da missão #${mission.id}.`, {
+      state: 'completed',
+      key: String(clarifications.length),
+      data: { actor: 'user', round: clarifications.length, ref: `missions.clarifications[${clarifications.length - 1}].answer`, ...fingerprint(text) },
+    })
+    this.running = { missionId: mission.id, cancelled: false }
+    this.registry.setMissionState(mission.plannerId || 'architect', 'planning', `Planejando a missão #${mission.id} com a sua resposta`)
+    void this.runTechLeadTurn(mission.id, { kind: 'user_request', detail: `Resposta ao seu pedido de esclarecimento.\nPergunta: ${last.question}\nResposta: ${text}` })
+  }
+
+  /** Fotografia para decidir como seguir: passos parados, alterações no Git e ações possíveis. Não executa nada. */
+  async recoveryState(projectId: number, missionId: number): Promise<RecoveryState> {
+    const mission = this.requireMission(missionId)
+    if (mission.projectId !== projectId) throw new Error('Missão não encontrada neste projeto.')
+    if (mission.mode !== 'dynamic') throw new Error('Esta missão usa o fluxo clássico.')
+    const ctx = this.planContext(mission)
+    const status = planStatus(ctx.steps)
+    const files: RecoveryState['files'] = { available: false, known: [], unknown: [] }
+    try {
+      const git = await this.git.status(this.context(mission.taskId).cwd)
+      const known = new Set(mission.files)
+      files.available = true
+      for (const f of git.files) (known.has(f.path) ? files.known : files.unknown).push(f.path)
+    } catch {
+      // Sem Git legível o estado ainda é útil; a retomada volta a conferir antes de escrever.
+    }
+    const retryable = retryableSteps(ctx.steps)
+    const waiting = mission.phase === 'awaiting_decision' && !this.running && !this.preparing
+    const actions: RecoveryState['actions'] = !waiting
+      ? OPEN_PHASES.includes(mission.phase) ? ['cancel'] : []
+      : [
+          ...(status === 'ready' || status === 'blocked' ? (['continue'] as const) : []),
+          ...(retryable.length ? (['retry_step'] as const) : []),
+          ...(replanLimit({ ...ctx, leadTurns: mission.leadTurns }, 'user_request') ? [] : (['replan'] as const)),
+          'close',
+          'cancel',
+        ]
+    const blocked = this.events?.list({ projectId, missionId }).findLast((e) => e.type === 'mission.blocked')
+    return {
+      projectId,
+      missionId,
+      phase: mission.phase,
+      reason: typeof blocked?.data.reason === 'string' ? blocked.data.reason : null,
+      error: mission.error,
+      retryable,
+      eligible: eligibleSteps(ctx.steps).map((s) => s.key),
+      files,
+      actions,
+    }
+  }
+
+  /**
+   * Decisão humana sobre uma missão dinâmica parada. Só a interface chama isto. O reenvio do mesmo opId
+   * não executa de novo; nenhuma ação contorna as validações de passo, equipe, permissão e limites.
+   */
+  async resumeMission(input: { missionId: number; action: ResumeAction; stepId?: number; detail?: string; acceptChanges?: boolean; opId: string }): Promise<{ applied: boolean; message: string }> {
+    const plans = this.requirePlans()
+    const mission = this.requireMission(input.missionId)
+    if (mission.mode !== 'dynamic') throw new Error('Esta missão usa o fluxo clássico.')
+    if (this.resumeOps.get(mission.id) === input.opId) return { applied: false, message: 'Esta decisão já estava registrada: nada foi executado de novo.' }
+    const waiting = () => {
+      const current = this.requireMission(mission.id)
+      if (current.phase !== 'awaiting_decision' || this.running || this.preparing) throw new Error('Esta missão não está aguardando a sua decisão.')
+      return current
+    }
+    waiting()
+    const target = input.stepId ? plans.getStep(input.stepId) : null
+    if (input.action === 'retry_step' && (!target || target.missionId !== mission.id)) throw new Error('Passo não encontrado nesta missão.')
+
+    let accepted: string[] = []
+    if (input.acceptChanges) {
+      this.preparing = true
+      try {
+        const status = await this.git.status(this.context(mission.taskId).cwd)
+        accepted = status.files.map((f) => f.path).filter((path) => !mission.files.includes(path))
+      } finally {
+        this.preparing = false
+      }
+    }
+    // O mundo pode ter mudado durante a consulta ao Git.
+    const current = waiting()
+    const ctx = this.planContext(current)
+    const resumed = (extra: Record<string, unknown> = {}) => {
+      this.resumeOps.set(mission.id, input.opId)
+      if (accepted.length) this.tasks.updateMission(mission.id, { files: [...new Set([...current.files, ...accepted])] })
+      this.track(this.requireMission(mission.id), 'mission.resumed', 'observed', `Usuário decidiu seguir a missão #${mission.id}: ${input.action}.`, {
+        state: 'info',
+        data: { actor: 'user', action: input.action, opId: input.opId, acceptedFiles: accepted.slice(0, MAX_EVENT_FILES), acceptedTotal: accepted.length, ...extra },
+      })
+    }
+
+    if (input.action === 'replan') {
+      const interrupted = retryableSteps(ctx.steps).findLast((s) => s.status === 'interrupted')
+      const overLimit = checkLimits(ctx.limits, usageOf(ctx.steps.filter((s) => s.startedAt !== null), ctx.proposals, ctx.techLeadId)).length > 0
+      const kind = interrupted ? 'interrupted_execution' : overLimit ? 'limit_reached' : 'user_request'
+      const detail = input.detail?.trim() ? redact(input.detail.trim()).slice(0, 2000) : kind === 'user_request' ? 'O usuário pediu um replanejamento.' : undefined
+      resumed({ trigger: kind })
+      this.escalate(mission.id, { kind, step: interrupted, detail }, { evidence: 'observed', source: 'user' })
+      return { applied: true, message: 'O Tech Lead foi consultado: a nova proposta vai aguardar a sua decisão.' }
+    }
+
+    if (input.action === 'retry_step') {
+      const { step, applied } = plans.retryStep(target!.id)
+      if (!applied && step.status === 'completed') return { applied: false, message: 'Este passo já foi concluído em outra tentativa.' }
+    }
+    const steps = plans.listSteps({ projectId: mission.projectId, missionId: mission.id })
+    const status = planStatus(steps)
+    if (status === 'empty') throw new Error('Não há passo aprovado para continuar: peça um replanejamento, encerre ou cancele a missão.')
+    resumed({ stepId: input.stepId ?? null })
+    if (status === 'blocked') {
+      this.escalate(mission.id, { kind: 'dependency_failed', step: steps.findLast((s) => s.status === 'failed' || s.status === 'interrupted') }, { evidence: 'observed', source: 'backend' })
+      return { applied: true, message: 'Os passos restantes dependem de um passo que não terminou: o Tech Lead foi consultado.' }
+    }
+    assertTransition(current.phase, 'executing')
+    this.tasks.updateMission(mission.id, { phase: 'executing', error: null })
+    void this.runSteps(mission.id)
+    return { applied: true, message: 'Execução retomada com os passos aprovados.' }
   }
 
   /** O que o coordenador precisa saber agora: cadastro (só quem pode executar conta como ativo), plano e limites. */

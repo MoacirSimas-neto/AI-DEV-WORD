@@ -68,6 +68,7 @@ const isSize = (n: unknown): n is number => Number.isInteger(n) && (n as number)
 const isId = (n: unknown): n is number => Number.isInteger(n) && (n as number) > 0
 const isOpId = (v: unknown): v is string => typeof v === 'string' && /^[\w-]{1,80}$/.test(v)
 const DECISIONS = new Set(['approve', 'reject', 'adjust'])
+const RESUME_ACTIONS = new Set(['continue', 'retry_step', 'replan'])
 const isPathList = (v: unknown): v is string[] =>
   Array.isArray(v) && v.length > 0 && v.length <= 500 && v.every((p) => typeof p === 'string' && p.length <= 1024)
 
@@ -248,6 +249,23 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       }
     case 'mission-close':
       return isId(msg.missionId) ? { type: 'mission-close', missionId: msg.missionId } : null
+    case 'mission-recovery':
+      return isId(msg.projectId) && isId(msg.missionId) ? { type: 'mission-recovery', projectId: msg.projectId, missionId: msg.missionId } : null
+    case 'mission-resume':
+      if (!isId(msg.missionId) || !isOpId(msg.opId) || !RESUME_ACTIONS.has(msg.action as string)) return null
+      if (msg.stepId !== undefined && !isId(msg.stepId)) return null
+      if (msg.action === 'retry_step' && msg.stepId === undefined) return null
+      if (msg.detail !== undefined && (typeof msg.detail !== 'string' || msg.detail.length > 2000)) return null
+      if (msg.acceptChanges !== undefined && typeof msg.acceptChanges !== 'boolean') return null
+      return {
+        type: 'mission-resume',
+        missionId: msg.missionId,
+        action: msg.action as 'continue' | 'retry_step' | 'replan',
+        opId: msg.opId,
+        ...(msg.stepId !== undefined ? { stepId: msg.stepId } : {}),
+        ...(typeof msg.detail === 'string' ? { detail: msg.detail } : {}),
+        ...(msg.acceptChanges !== undefined ? { acceptChanges: msg.acceptChanges } : {}),
+      }
     case 'plan-list':
       return isId(msg.projectId) && isId(msg.missionId) ? { type: 'plan-list', projectId: msg.projectId, missionId: msg.missionId } : null
     case 'mission-approve':
@@ -699,6 +717,19 @@ export function createAppServer({
         } catch (error) {
           send(socket, { type: 'notice', message: errorText(error) })
         }
+        break
+      case 'mission-recovery':
+        // A consulta confere o projeto: uma missão de outro projeto não é exposta.
+        team
+          .recoveryState(message.projectId, message.missionId)
+          .then((state) => send(socket, { type: 'mission-recovery', state }))
+          .catch((error) => send(socket, { type: 'notice', message: errorText(error) }))
+        break
+      case 'mission-resume':
+        team
+          .resumeMission(message)
+          .then(({ applied, message: text }) => send(socket, { type: 'mission-resume-result', opId: message.opId, missionId: message.missionId, ok: true, applied, message: text }))
+          .catch((error) => send(socket, { type: 'mission-resume-result', opId: message.opId, missionId: message.missionId, ok: false, applied: false, message: errorText(error) }))
         break
       case 'plan-list':
         // Sempre por projeto e missão: nada de outro projeto entra na resposta.
