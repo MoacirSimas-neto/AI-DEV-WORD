@@ -110,6 +110,10 @@ test('securityGauntlet: bloqueia acesso não autenticado, Origin falsificado e c
       body: JSON.stringify({ toolId: 'codex', consentNonce: nonce }),
     })
     assert.equal(wrongTool.status, 403)
+
+    // 5. Workspace path validation rejects relative / non-existent paths
+    assert.throws(() => projects.add('relative/path'))
+    assert.throws(() => projects.add('C:\\definitely-missing-aidw-path-14-5'))
   } finally {
     server.close()
     projects.db.close()
