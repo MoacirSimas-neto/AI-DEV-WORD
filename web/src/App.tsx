@@ -6,7 +6,8 @@ import { useGitStatus } from './net/useGitStatus.ts'
 import { useServer } from './net/useServer.ts'
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
 import { CloseConfirmModal } from './ui/CloseConfirmModal.tsx'
-import { FirstRunWizard, loadFirstRunState, saveFirstRunState } from './ui/FirstRunWizard.tsx'
+import { FirstRunWizard } from './ui/FirstRunWizard.tsx'
+import { loadFirstRunState, saveFirstRunState } from './ui/firstRunState.ts'
 import { loadCloseBehavior, saveCloseBehavior } from './ui/closeBehavior.ts'
 import { StudioTopBar, type StudioTab } from './ui/StudioTopBar.tsx'
 import { StudioOfficeView } from './ui/StudioOfficeView.tsx'
@@ -45,6 +46,7 @@ function App() {
     skillOverrides,
     send,
     subscribe,
+    fetchDiagnostics,
   } = useServer()
 
   // Etapa 12.1: o chat com o Tech Lead é a porta de entrada; o escritório segue a uma aba.
@@ -534,7 +536,7 @@ function App() {
         <FirstRunWizard
           open={online && firstRunOpen}
           initialStep={firstRunStep}
-          authToken={null}
+          onFetchDiagnostics={fetchDiagnostics}
           projects={workspace.projects ?? []}
           activeProjectId={workspace.activeProjectId ?? null}
           onSelectProject={(id) => send({ type: 'project-select', projectId: id })}

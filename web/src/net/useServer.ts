@@ -42,6 +42,7 @@ export function useServer() {
   const [reconnectTick, setReconnectTick] = useState(0)
   const socketRef = useRef<WebSocket | null>(null)
   const desktopTokenRef = useRef<string | null>(null)
+  const apiBaseRef = useRef('')
   const listeners = useRef(new Set<MessageListener>())
 
   useEffect(() => {
@@ -66,6 +67,7 @@ export function useServer() {
             return
           }
           apiBase = `http://127.0.0.1:${st.port}`
+          apiBaseRef.current = apiBase
           wsUrl = `ws://127.0.0.1:${st.port}/ws`
           const authHeaders: Record<string, string> = desktopTokenRef.current
             ? { authorization: `Bearer ${desktopTokenRef.current}` }
@@ -198,5 +200,12 @@ export function useServer() {
     return () => listeners.current.delete(listener)
   }, [])
 
-  return { status, authRequired, pair, agents, workspace, tasks, missions, history, configs, allConfigs, specializations, skills, skillOverrides, send, subscribe }
+  const fetchDiagnostics = useCallback(async () => {
+    const headers: Record<string, string> = desktopTokenRef.current
+      ? { authorization: `Bearer ${desktopTokenRef.current}` }
+      : {}
+    return fetch(`${apiBaseRef.current}/api/diagnostics`, { credentials: 'include', headers })
+  }, [])
+
+  return { status, authRequired, pair, agents, workspace, tasks, missions, history, configs, allConfigs, specializations, skills, skillOverrides, send, subscribe, fetchDiagnostics }
 }

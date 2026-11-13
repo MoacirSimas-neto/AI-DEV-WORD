@@ -16,7 +16,9 @@
   - Não bloqueia o acesso ao escritório quando Git ou CLIs estão ausentes.
   - Persistência não sensível em `localStorage` (`aidw.firstRun.v1`: `{ completed, lastStep }`).
 
-## 2. Limitações e Pendências para 14.4.3
+## 2. Hardening (14.4.2.1) e Pendências para 14.4.3
+- **Autenticação integrada:** `useServer.ts` expõe `fetchDiagnostics()` usando `desktopTokenRef.current` (Bearer em memória) + `credentials: 'include'`, sem expor o token aos componentes ou `localStorage`.
+- **Lint:** `oxlint` com **0 warnings e 0 erros** (69 arquivos).
+- **Testes:** `npm.cmd run check` com **374/374** passando (**295** server + **79** web).
 - **Instalação guiada:** apenas diagnóstico implementado nesta etapa; instalação assistida de Git/CLIs pertence à Etapa 14.4.3.
-- **Autenticação de `/api/diagnostics`:** `App.tsx` atualmente passa `authToken={null}` ao `FirstRunWizard` (em produção desktop, o token em memória do `useSocket` deve ser repassado se o endpoint exigir Bearer).
 - **VM Windows limpa:** validação visual/manual em ambiente sem Node/Rust segue pendente.

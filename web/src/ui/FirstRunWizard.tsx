@@ -1,33 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-
-export type FirstRunState = {
-  completed: boolean
-  lastStep: number
-}
-
-const STORAGE_KEY = 'aidw.firstRun.v1'
-
-export function loadFirstRunState(): FirstRunState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { completed: false, lastStep: 0 }
-    const parsed = JSON.parse(raw) as Partial<FirstRunState>
-    return {
-      completed: Boolean(parsed.completed),
-      lastStep: typeof parsed.lastStep === 'number' ? parsed.lastStep : 0,
-    }
-  } catch {
-    return { completed: false, lastStep: 0 }
-  }
-}
-
-export function saveFirstRunState(state: FirstRunState): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch {
-    // ignore storage errors
-  }
-}
+import { saveFirstRunState } from './firstRunState.ts'
 
 export interface ToolDiagnosticItem {
   id: string
@@ -53,7 +25,7 @@ const STATUS_LABELS: Record<ToolDiagnosticItem['status'], string> = {
 interface FirstRunWizardProps {
   open: boolean
   initialStep?: number
-  authToken: string | null
+  onFetchDiagnostics: () => Promise<Response>
   projects: Array<{ id: number; name: string; path: string }>
   activeProjectId: number | null
   onSelectProject: (id: number) => void
@@ -65,7 +37,7 @@ interface FirstRunWizardProps {
 export function FirstRunWizard({
   open,
   initialStep = 0,
-  authToken,
+  onFetchDiagnostics,
   projects,
   activeProjectId,
   onSelectProject,
@@ -78,17 +50,11 @@ export function FirstRunWizard({
   const [loading, setLoading] = useState(false)
   const [diagError, setDiagError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (open) setStep(initialStep)
-  }, [open, initialStep])
-
   const runCheck = useCallback(async () => {
     setLoading(true)
     setDiagError(null)
     try {
-      const headers: Record<string, string> = {}
-      if (authToken) headers.Authorization = `Bearer ${authToken}`
-      const res = await fetch('/api/diagnostics', { headers })
+      const res = await onFetchDiagnostics()
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as { tools?: ToolDiagnosticItem[] }
       setTools(Array.isArray(data.tools) ? data.tools : [])
@@ -97,13 +63,27 @@ export function FirstRunWizard({
     } finally {
       setLoading(false)
     }
-  }, [authToken])
+  }, [onFetchDiagnostics])
 
   useEffect(() => {
-    if (open && step === 1 && tools.length === 0 && !loading) {
-      void runCheck()
+    if (!open || step !== 1) return
+    let cancelled = false
+    onFetchDiagnostics()
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = (await res.json()) as { tools?: ToolDiagnosticItem[] }
+        if (!cancelled) {
+          setDiagError(null)
+          setTools(Array.isArray(data.tools) ? data.tools : [])
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setDiagError('Não foi possível verificar as ferramentas locais agora.')
+      })
+    return () => {
+      cancelled = true
     }
-  }, [open, step, tools.length, loading, runCheck])
+  }, [open, step, onFetchDiagnostics])
 
   if (!open) return null
 

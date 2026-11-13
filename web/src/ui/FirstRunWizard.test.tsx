@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FirstRunWizard, loadFirstRunState, saveFirstRunState } from './FirstRunWizard.tsx'
+import { FirstRunWizard } from './FirstRunWizard.tsx'
+import { loadFirstRunState, saveFirstRunState } from './firstRunState.ts'
 
 describe('FirstRunWizard (Etapa 14.4.2)', () => {
   beforeEach(() => {
@@ -12,7 +13,7 @@ describe('FirstRunWizard (Etapa 14.4.2)', () => {
   })
 
   it('percorre boas-vindas, diagnóstico de ferramentas e conclui onboarding', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    const onFetchDiagnostics = vi.fn(async () =>
       new Response(
         JSON.stringify({
           tools: [
@@ -46,7 +47,7 @@ describe('FirstRunWizard (Etapa 14.4.2)', () => {
     render(
       <FirstRunWizard
         open={true}
-        authToken="tok-test"
+        onFetchDiagnostics={onFetchDiagnostics}
         projects={[{ id: 1, name: 'meu-app', path: 'C:\\proj\\meu-app' }]}
         activeProjectId={1}
         onSelectProject={vi.fn()}
@@ -73,7 +74,7 @@ describe('FirstRunWizard (Etapa 14.4.2)', () => {
   })
 
   it('mostra erro amigável quando /api/diagnostics falha e persiste lastStep', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 500 }))
+    const onFetchDiagnostics = vi.fn(async () => new Response('', { status: 500 }))
     saveFirstRunState({ completed: false, lastStep: 1 })
     expect(loadFirstRunState().lastStep).toBe(1)
 
@@ -81,7 +82,7 @@ describe('FirstRunWizard (Etapa 14.4.2)', () => {
       <FirstRunWizard
         open={true}
         initialStep={1}
-        authToken={null}
+        onFetchDiagnostics={onFetchDiagnostics}
         projects={[]}
         activeProjectId={null}
         onSelectProject={vi.fn()}
