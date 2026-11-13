@@ -215,6 +215,18 @@ export function useServer() {
   }, [])
 
   const requestSetupConsent = useCallback(async (toolId: string) => {
+    const tauriInvoke = (window as unknown as { __TAURI_INTERNALS__?: { invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> } }).__TAURI_INTERNALS__?.invoke
+    if (tauriInvoke) {
+      const nonce = await tauriInvoke<string | null>('confirm_tool_install', {
+        toolId,
+        title: 'AI Dev World — Confirmar instalação',
+        details: `Deseja autorizar a instalação única de "${toolId}" no seu sistema?`,
+      })
+      if (!nonce) {
+        return new Response(JSON.stringify({ cancelled: true }), { status: 403 })
+      }
+      return new Response(JSON.stringify({ nonce }), { status: 200 })
+    }
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       ...(desktopTokenRef.current ? { authorization: `Bearer ${desktopTokenRef.current}` } : {}),

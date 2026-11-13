@@ -2,7 +2,7 @@
 
 mod sidecar;
 
-use sidecar::{desktop_bootstrap, get_backend_status, restart_backend, SidecarManager};
+use sidecar::{confirm_tool_install, desktop_bootstrap, get_backend_status, restart_backend, SidecarManager};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
@@ -57,6 +57,7 @@ fn main() {
             get_backend_status,
             restart_backend,
             desktop_bootstrap,
+            confirm_tool_install,
             minimize_to_tray,
             quit_app
         ])

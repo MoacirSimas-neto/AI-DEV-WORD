@@ -438,6 +438,71 @@ pub fn desktop_bootstrap(
     Ok(DesktopBootstrapResult { port, code })
 }
 
+#[tauri::command]
+pub fn confirm_tool_install(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SidecarManager>>,
+    tool_id: String,
+    title: String,
+    details: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+    let approved = app
+        .dialog()
+        .message(details)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Confirmar instalação".to_string(),
+            "Cancelar".to_string(),
+        ))
+        .blocking_show();
+
+    if !approved {
+        return Ok(None);
+    }
+
+    let status = state.get_status();
+    if status.status != "ready" {
+        return Err("Backend ainda não está pronto".into());
+    }
+    let secret = state.bootstrap_secret.lock().unwrap().clone();
+    if secret.is_empty() {
+        return Err("Segredo de bootstrap indisponível".into());
+    }
+    let port = status.port;
+    let addr = format!("127.0.0.1:{port}");
+    let payload = format!("{{\"toolId\":\"{}\"}}", tool_id.replace('"', ""));
+    let mut stream = TcpStream::connect_timeout(
+        &addr.parse().map_err(|e| format!("Endereço inválido: {e}"))?,
+        Duration::from_millis(800),
+    )
+    .map_err(|e| format!("Falha ao conectar ao backend: {e}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1200)));
+    let req = format!(
+        "POST /api/setup/consent HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nx-aidw-desktop-secret: {secret}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        payload.len(),
+        payload
+    );
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| format!("Falha ao solicitar consentimento: {e}"))?;
+    let mut resp = String::new();
+    stream
+        .read_to_string(&mut resp)
+        .map_err(|e| format!("Falha ao ler resposta de consentimento: {e}"))?;
+    let (_, body) = resp
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "Resposta HTTP inválida do backend".to_string())?;
+    if !resp.starts_with("HTTP/1.1 200") && !resp.starts_with("HTTP/1.0 200") {
+        return Err("Consentimento rejeitado pelo backend".into());
+    }
+    let nonce = extract_json_string(body, "nonce")
+        .ok_or_else(|| "Nonce ausente na resposta".to_string())?;
+    Ok(Some(nonce))
+}
+
 fn extract_json_string(json: &str, key: &str) -> Option<String> {
     let needle = format!("\"{key}\":\"");
     let start = json.find(&needle)? + needle.len();

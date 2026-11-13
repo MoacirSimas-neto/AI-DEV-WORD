@@ -642,7 +642,13 @@ export function createAppServer({
       return
     }
     if (req.method === 'POST' && req.url === '/api/setup/consent') {
-      if (!hasValidSessionToken(req)) {
+      if (desktopBootstrapSecret) {
+        const provided = req.headers['x-aidw-desktop-secret']
+        if (typeof provided !== 'string' || !safeEqual(provided, desktopBootstrapSecret)) {
+          res.writeHead(403, { 'content-type': 'application/json' }).end('{"error":"Native confirmation required"}')
+          return
+        }
+      } else if (!hasValidSessionToken(req)) {
         res.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"Unauthorized"}')
         return
       }
