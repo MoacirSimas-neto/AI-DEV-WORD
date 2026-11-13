@@ -5101,6 +5101,7 @@ body,
 
 
 /* ===== Etapa 12.4.3 — High-Contrast Badges in Secondary Views ===== */
+.office-side-panel .tag,
 .studio-page-view .tag,
 .studio-page-view .obs-flow-status,
 .studio-page-view .status-pill,
