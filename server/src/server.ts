@@ -533,16 +533,24 @@ export function createAppServer({
     return false
   }
 
+  const isActiveToken = (token: string): boolean => {
+    if (safeEqual(token, sessionToken)) return true
+    for (const valid of activeSessions) {
+      if (safeEqual(token, valid)) return true
+    }
+    return false
+  }
+
   const hasValidSessionToken = (req: IncomingMessage): boolean => {
     if (hasValidSessionCookie(req)) return true
     const auth = req.headers.authorization
     if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
-      if (safeEqual(auth.slice(7).trim(), sessionToken)) return true
+      if (isActiveToken(auth.slice(7).trim())) return true
     }
     const protoHeader = req.headers['sec-websocket-protocol']
     if (typeof protoHeader === 'string') {
       const parts = protoHeader.split(',').map((p) => p.trim())
-      if (parts.includes('aidw-auth') && parts.some((p) => p !== 'aidw-auth' && safeEqual(p, sessionToken))) {
+      if (parts.includes('aidw-auth') && parts.some((p) => p !== 'aidw-auth' && isActiveToken(p))) {
         return true
       }
     }
@@ -570,7 +578,7 @@ export function createAppServer({
     if (origin && effectiveAllowedOrigins.includes(origin)) {
       res.setHeader('access-control-allow-origin', origin)
       res.setHeader('access-control-allow-credentials', 'true')
-      res.setHeader('access-control-allow-headers', 'content-type')
+      res.setHeader('access-control-allow-headers', 'content-type, authorization')
       res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS')
       res.setHeader('vary', 'Origin')
       if (req.method === 'OPTIONS') {
@@ -653,13 +661,14 @@ export function createAppServer({
         pairingUsed = true
         const sessionCookie = randomBytes(32).toString('hex')
         activeSessions.add(sessionCookie)
+        const isDesktopOrigin = !!desktopBootstrapSecret && (origin === 'http://tauri.localhost' || origin === 'https://tauri.localhost' || origin === 'tauri://localhost')
         res
           .writeHead(200, {
             'content-type': 'application/json',
             'cache-control': 'no-store',
             'set-cookie': `aidw_session=${sessionCookie}; HttpOnly; SameSite=Strict; Path=/`,
           })
-          .end('{"ok":true}')
+          .end(isDesktopOrigin ? JSON.stringify({ ok: true, token: sessionCookie }) : '{"ok":true}')
       })
       return
     }

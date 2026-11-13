@@ -41,6 +41,7 @@ export function useServer() {
   const [authRequired, setAuthRequired] = useState(false)
   const [reconnectTick, setReconnectTick] = useState(0)
   const socketRef = useRef<WebSocket | null>(null)
+  const desktopTokenRef = useRef<string | null>(null)
   const listeners = useRef(new Set<MessageListener>())
 
   useEffect(() => {
@@ -66,19 +67,27 @@ export function useServer() {
           }
           apiBase = `http://127.0.0.1:${st.port}`
           wsUrl = `ws://127.0.0.1:${st.port}/ws`
-          const sess = await fetch(`${apiBase}/api/session`, { credentials: 'include' })
+          const authHeaders: Record<string, string> = desktopTokenRef.current
+            ? { authorization: `Bearer ${desktopTokenRef.current}` }
+            : {}
+          const sess = await fetch(`${apiBase}/api/session`, { credentials: 'include', headers: authHeaders })
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null) as { authenticated?: boolean } | null
           if (disposed) return
           if (!sess?.authenticated) {
+            desktopTokenRef.current = null
             const boot = await invokeTauri<{ port: number; code: string }>('desktop_bootstrap')
             if (disposed) return
-            await fetch(`http://127.0.0.1:${boot.port}/api/pair`, {
+            const pairRes = await fetch(`http://127.0.0.1:${boot.port}/api/pair`, {
               method: 'POST',
               credentials: 'include',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ code: boot.code }),
             })
+            if (pairRes.ok) {
+              const pairData = (await pairRes.json().catch(() => null)) as { token?: string } | null
+              if (pairData?.token) desktopTokenRef.current = pairData.token
+            }
           }
         } catch {
           if (!disposed) retry = setTimeout(() => void connect(), RETRY_MS)
@@ -87,7 +96,9 @@ export function useServer() {
       }
       if (disposed) return
 
-      const socket = new WebSocket(wsUrl)
+      const socket = desktopTokenRef.current
+        ? new WebSocket(wsUrl, ['aidw-auth', desktopTokenRef.current])
+        : new WebSocket(wsUrl)
       socketRef.current = socket
       socket.onopen = () => {
         setStatus('online')
@@ -136,14 +147,16 @@ export function useServer() {
       socket.onclose = () => {
         if (disposed) return
         setStatus('offline')
-        void fetch(`${apiBase}/api/session`, { credentials: 'include' })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((data: { authenticated?: boolean } | null) => {
-            if (!disposed && data && data.authenticated === false) {
-              setAuthRequired(true)
-            }
-          })
-          .catch(() => {})
+        if (!isTauri) {
+          void fetch(`${apiBase}/api/session`, { credentials: 'include' })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data: { authenticated?: boolean } | null) => {
+              if (!disposed && data && data.authenticated === false) {
+                setAuthRequired(true)
+              }
+            })
+            .catch(() => {})
+        }
         retry = setTimeout(() => void connect(), RETRY_MS)
       }
     }
