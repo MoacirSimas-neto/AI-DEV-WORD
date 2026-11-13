@@ -5124,6 +5124,11 @@ body,
 
 .studio-page-view .agent-card,
 .studio-page-view .agent-card h3,
-.studio-page-view .agent-card h4 {
-  color: #0f172a;
+.studio-page-view .agent-card h4,
+.studio-page-view .agent-config-card,
+.studio-page-view .agent-config-card .agent-card-header strong,
+.studio-page-view .window-message,
+.studio-page-view .agent-profiles-bar,
+.studio-page-view .agent-filters-bar {
+  color: #1e2530;
 }
