@@ -7,6 +7,7 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { ChatService } from './chat/service.ts'
 import type { ChatStore } from './chat/store.ts'
 import { describeDatabaseError } from './db/database.ts'
+import { runEnvironmentDiagnostics } from './environmentDiagnostics.ts'
 import { redact } from './security/redact.ts'
 import type {
   AgentConfig,
@@ -611,6 +612,22 @@ export function createAppServer({
       res
         .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
         .end(JSON.stringify({ authenticated: hasValidSessionToken(req) }))
+      return
+    }
+    if (req.method === 'GET' && req.url === '/api/diagnostics') {
+      if (!hasValidSessionToken(req)) {
+        res.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"Unauthorized"}')
+        return
+      }
+      runEnvironmentDiagnostics()
+        .then((result) => {
+          res
+            .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+            .end(JSON.stringify(result))
+        })
+        .catch(() => {
+          res.writeHead(500, { 'content-type': 'application/json' }).end('{"error":"Diagnostics failed"}')
+        })
       return
     }
     if (req.method === 'POST' && req.url === '/api/pair') {

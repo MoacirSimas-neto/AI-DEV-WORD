@@ -6,6 +6,7 @@ import { useGitStatus } from './net/useGitStatus.ts'
 import { useServer } from './net/useServer.ts'
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
 import { CloseConfirmModal } from './ui/CloseConfirmModal.tsx'
+import { FirstRunWizard, loadFirstRunState, saveFirstRunState } from './ui/FirstRunWizard.tsx'
 import { loadCloseBehavior, saveCloseBehavior } from './ui/closeBehavior.ts'
 import { StudioTopBar, type StudioTab } from './ui/StudioTopBar.tsx'
 import { StudioOfficeView } from './ui/StudioOfficeView.tsx'
@@ -58,6 +59,8 @@ function App() {
   const [sidePanelOpen, setSidePanelOpen] = useState(false)
   const [sideTab, setSideTab] = useState<'agent' | 'git' | 'mission'>('agent')
   const [closeModalOpen, setCloseModalOpen] = useState(false)
+  const [firstRunOpen, setFirstRunOpen] = useState(() => !loadFirstRunState().completed)
+  const [firstRunStep, setFirstRunStep] = useState(() => loadFirstRunState().lastStep)
 
   useEffect(() => {
     const tauri = (window as unknown as {
@@ -528,6 +531,24 @@ function App() {
           </div>
         )}
 
+        <FirstRunWizard
+          open={online && firstRunOpen}
+          initialStep={firstRunStep}
+          authToken={null}
+          projects={workspace.projects ?? []}
+          activeProjectId={workspace.activeProjectId ?? null}
+          onSelectProject={(id) => send({ type: 'project-select', projectId: id })}
+          onOpenFolderDialog={() => send({ type: 'dialog-open-folder' })}
+          onComplete={() => {
+            saveFirstRunState({ completed: true, lastStep: 2 })
+            setFirstRunOpen(false)
+          }}
+          onDismiss={(step) => {
+            saveFirstRunState({ completed: false, lastStep: step })
+            setFirstRunStep(step)
+            setFirstRunOpen(false)
+          }}
+        />
         <CloseConfirmModal
           open={closeModalOpen}
           activeMissionsCount={missions.filter((m) => isOpenMission(m)).length}
