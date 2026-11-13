@@ -5167,3 +5167,28 @@ body,
   --ink: #f8fafc;
   --ink-soft: #cbd5e1;
 }
+
+/* Polish: clean sans-serif headings in secondary windows & compact agent config cards */
+.studio-page-view .window > .window-header h1,
+.studio-page-view .window > .window-header h2,
+.studio-page-view .window > .window-header h3,
+.studio-page-view .window > header h2 {
+  font-family: var(--font-sans, 'Nunito', system-ui, -apple-system, sans-serif);
+  letter-spacing: -0.01em;
+}
+
+.studio-page-view .agent-config-card {
+  padding: 12px 14px;
+  gap: 8px;
+}
+
+.studio-page-view .agent-config-card select {
+  padding: 5px 8px;
+  font-size: 12px;
+  min-height: 30px;
+}
+
+.studio-page-view .agent-config-card .agent-card-actions {
+  gap: 6px;
+  margin-top: 2px;
+}
