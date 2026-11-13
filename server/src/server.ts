@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { realpathSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import path from 'node:path'
@@ -476,7 +477,8 @@ export function createAppServer({
   plans,
   chat,
   allowedOrigins,
-}: AppServerOptions): Server {
+  authToken,
+}: AppServerOptions & { authToken?: string }): Server & { authToken: string } {
   for (const cfg of agentConfigs.list()) {
     if (!cfg.isBuiltin) {
       registry.registerAgent({
@@ -504,7 +506,32 @@ export function createAppServer({
     res.writeHead(404).end()
   })
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
+  const sessionToken = authToken || process.env.AIDW_AUTH_TOKEN || randomBytes(32).toString('hex')
+  const safeEqualToken = (candidate: string): boolean => {
+    const a = Buffer.from(candidate, 'utf8')
+    const b = Buffer.from(sessionToken, 'utf8')
+    return a.length === b.length && timingSafeEqual(a, b)
+  }
+  const hasValidSessionToken = (req: IncomingMessage): boolean => {
+    const auth = req.headers.authorization
+    if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+      if (safeEqualToken(auth.slice(7).trim())) return true
+    }
+    const protoHeader = req.headers['sec-websocket-protocol']
+    if (typeof protoHeader === 'string') {
+      const parts = protoHeader.split(',').map((p) => p.trim())
+      if (parts.includes('aidw-auth') && parts.some((p) => p !== 'aidw-auth' && safeEqualToken(p))) {
+        return true
+      }
+    }
+    return false
+  }
+
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: 1024 * 1024,
+    handleProtocols: (protocols) => (protocols.has('aidw-auth') ? 'aidw-auth' : false),
+  })
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
   }
@@ -513,7 +540,7 @@ export function createAppServer({
   }
 
   // Sites externos conseguem abrir WebSocket para localhost; por isso a origem
-  // é obrigatória e precisa estar na lista.
+  // é obrigatória, precisa estar na lista e o token de sessão é exigido.
   server.on('upgrade', (req, socket, head) => {
     const origin = req.headers.origin
     const allowed =
@@ -522,8 +549,13 @@ export function createAppServer({
       socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
       return
     }
+    if (!hasValidSessionToken(req)) {
+      socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      return
+    }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws))
   })
+  Object.defineProperty(server, 'authToken', { value: sessionToken, enumerable: false })
 
   /** Ações de projeto: aplica, avisa todos; se falhar, avisa só quem pediu. */
   const changeWorkspace = (socket: WebSocket, action: () => void) => {

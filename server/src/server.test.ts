@@ -88,7 +88,10 @@ after(() => server.close())
 
 /** Cliente de teste: guarda tudo que chega e permite esperar por uma mensagem. */
 async function connect() {
-  const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: ORIGIN })
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+    origin: ORIGIN,
+    headers: { Authorization: `Bearer ${server.authToken}` },
+  })
   const received: ServerMessage[] = []
   let notify = () => {}
   socket.on('message', (raw) => {
@@ -581,4 +584,46 @@ test('eventos: events-list responde só com a trilha do projeto pedido e eventos
   assert.equal(parseClientMessage(JSON.stringify({ type: 'events-list', projectId: 1, afterId: 'x' })), null)
   assert.deepEqual(parseClientMessage(JSON.stringify({ type: 'events-list', projectId: 1, missionId: 2, extra: 'x' })), { type: 'events-list', projectId: 1, missionId: 2 })
   client.socket.close()
+})
+
+test('WebSocket recusa conexão sem token ou com token inválido (401) e aceita Sec-WebSocket-Protocol', async () => {
+  await new Promise<void>((resolve, reject) => {
+    const wsNoToken = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: ORIGIN })
+    wsNoToken.on('error', () => {})
+    wsNoToken.once('unexpected-response', (_req, res) => {
+      assert.equal(res.statusCode, 401)
+      resolve()
+    })
+    wsNoToken.once('open', () => {
+      wsNoToken.close()
+      reject(new Error('Deveria recusar conexão sem token'))
+    })
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    const wsBadToken = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      origin: ORIGIN,
+      headers: { Authorization: 'Bearer token-invalido' },
+    })
+    wsBadToken.on('error', () => {})
+    wsBadToken.once('unexpected-response', (_req, res) => {
+      assert.equal(res.statusCode, 401)
+      resolve()
+    })
+    wsBadToken.once('open', () => {
+      wsBadToken.close()
+      reject(new Error('Deveria recusar token inválido'))
+    })
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    const wsProto = new WebSocket(`ws://127.0.0.1:${port}/ws`, ['aidw-auth', server.authToken], {
+      origin: ORIGIN,
+    })
+    wsProto.once('open', () => {
+      wsProto.close()
+      resolve()
+    })
+    wsProto.once('error', reject)
+  })
 })

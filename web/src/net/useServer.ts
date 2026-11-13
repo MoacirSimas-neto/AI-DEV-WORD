@@ -46,7 +46,10 @@ export function useServer() {
     let retry: ReturnType<typeof setTimeout> | undefined
 
     const connect = () => {
-      const socket = new WebSocket(`ws://${location.host}/ws`)
+      const token = import.meta.env.VITE_AIDW_AUTH_TOKEN
+      const socket = token
+        ? new WebSocket(`ws://${location.host}/ws`, ['aidw-auth', token])
+        : new WebSocket(`ws://${location.host}/ws`)
       socketRef.current = socket
       socket.onopen = () => setStatus('online')
       socket.onmessage = (event) => {
