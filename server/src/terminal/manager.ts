@@ -70,19 +70,28 @@ export class TerminalManager extends EventEmitter {
       return existing.buffer
     }
 
-    const agent = this.registry.get(agentId)
-    if (!agent) throw new Error('Agente desconhecido.')
-    const custom = this.getArgs?.(agentId)
-    const cli = custom?.cli ?? agent.cli
-    const extraArgs = custom?.args ?? []
-    if (agent.state === 'offline') throw new Error(`CLI "${cli}" não está disponível.`)
-    // O CLI só nasce dentro de uma pasta que o usuário autorizou.
+    const isUserShell = agentId.startsWith('user:')
+    let cli: CliId
+    let extraArgs: string[] = []
+    if (isUserShell) {
+      cli = (process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/bash') as CliId
+    } else {
+      const agent = this.registry.get(agentId)
+      if (!agent) throw new Error('Agente desconhecido.')
+      const custom = this.getArgs?.(agentId)
+      cli = custom?.cli ?? agent.cli
+      extraArgs = custom?.args ?? []
+      if (agent.state === 'offline') throw new Error(`CLI "${cli}" não está disponível.`)
+    }
+    // O processo só nasce dentro de uma pasta que o usuário autorizou.
     const cwd = this.activeProjectPath()
     if (!cwd) throw new Error('Escolha um projeto antes de iniciar a sessão.')
 
     const session: Session = { pty: this.spawn(cli, cwd, cols, rows, extraArgs), cwd, buffer: '', lastInput: 0 }
     this.sessions.set(agentId, session)
-    this.registry.setRuntimeState(agentId, 'waiting', `Sessão aberta em ${cwd}`)
+    if (!isUserShell) {
+      this.registry.setRuntimeState(agentId, 'waiting', `Sessão aberta em ${cwd}`)
+    }
 
     // A saída do terminal só sai do backend (tela e histórico de rolagem) depois da redação.
     // O que o usuário digita vai ao processo sem alteração.

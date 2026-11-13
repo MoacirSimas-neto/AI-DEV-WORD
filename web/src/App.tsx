@@ -11,6 +11,7 @@ import { loadFirstRunState, saveFirstRunState } from './ui/firstRunState.ts'
 import { loadCloseBehavior, saveCloseBehavior } from './ui/closeBehavior.ts'
 import { StudioTopBar, type StudioTab } from './ui/StudioTopBar.tsx'
 import { StudioOfficeView } from './ui/StudioOfficeView.tsx'
+import { TerminalDock } from './ui/TerminalDock.tsx'
 import {
   LazyAgentCenter,
   LazyChatView,
@@ -358,7 +359,8 @@ function App() {
 
         {/* 2. Visualização Principal: Escritório 2D Studio */}
         {activeTab === 'office' && (
-          <StudioOfficeView
+          <>
+            <StudioOfficeView
             agents={agents}
             configs={allConfigs.length > 0 ? allConfigs : configs}
             selectedAgentId={selectedAgentId}
@@ -384,6 +386,14 @@ function App() {
             onOpenTasks={() => setActiveTab('tasks')}
             onOpenObservability={openObservability}
           />
+            <TerminalDock
+              activeProjectPath={activeProject?.path ?? null}
+              online={online}
+              send={send}
+              subscribe={subscribe}
+              onOpenFolderDialog={() => send({ type: 'dialog-open-folder' })}
+            />
+          </>
         )}
 
         {activeTab !== 'office' && (
