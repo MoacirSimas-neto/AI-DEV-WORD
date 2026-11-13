@@ -5159,3 +5159,11 @@ body,
 .studio-page-view .agent-config-card button:not(.btn-primary):hover {
   background: rgba(71, 85, 105, 0.95);
 }
+
+/* Override legacy parchment/ink tokens inside .studio-page-view so all tabs match dark-glass */
+.studio-page-view {
+  --parchment: rgba(15, 23, 42, 0.72);
+  --parchment-2: rgba(30, 41, 59, 0.78);
+  --ink: #f8fafc;
+  --ink-soft: #cbd5e1;
+}
