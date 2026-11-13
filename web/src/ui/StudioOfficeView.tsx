@@ -121,6 +121,37 @@ export function StudioOfficeView({
     [onSelectAgent, onSetSideTab],
   )
 
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('aidw.officeSidePanelWidth'))
+      return Number.isFinite(saved) && saved >= 280 && saved <= 680 ? saved : 380
+    } catch {
+      return 380
+    }
+  })
+
+  const startResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = panelWidth
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.max(280, Math.min(680, startWidth + (startX - ev.clientX)))
+      setPanelWidth(next)
+    }
+    const onUp = (ev: PointerEvent) => {
+      const finalWidth = Math.max(280, Math.min(680, startWidth + (startX - ev.clientX)))
+      try {
+        localStorage.setItem('aidw.officeSidePanelWidth', String(finalWidth))
+      } catch {
+        // ignore storage errors
+      }
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [panelWidth])
+
   return (
     <main className="proto-office-stage-layout">
       {/* 1. VISUALIZAÇÃO DO ESCRITÓRIO 2D PHASER */}
@@ -245,7 +276,15 @@ export function StudioOfficeView({
 
       {/* 2. PAINEL LATERAL INTEGRADO: AGENTE, MISSÃO OU GIT CONTROL */}
       {sidePanelOpen && (
-        <aside className="office-side-panel">
+        <aside className="office-side-panel" style={{ width: `${panelWidth}px` }}>
+          <div
+            className="panel-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Redimensionar painel lateral"
+            title="Arraste para redimensionar"
+            onPointerDown={startResize}
+          />
           {/* Cabeçalho com Abas Limpas */}
           <div className="panel-tab-bar">
             <button
