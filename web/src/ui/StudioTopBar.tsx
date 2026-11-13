@@ -60,7 +60,24 @@ export function StudioTopBar({
     })
   }, [send, subscribe])
 
-  const handleBrowseNativeFolder = () => {
+  const handleBrowseNativeFolder = async () => {
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      try {
+        const tauri = (window as unknown as {
+          __TAURI_INTERNALS__: { invoke: <R>(c: string, args?: unknown) => Promise<R> }
+        }).__TAURI_INTERNALS__
+        const selected = await tauri.invoke<string | null>('plugin:dialog|open', {
+          options: { directory: true, multiple: false, title: 'Selecionar Pasta do Projeto' },
+        })
+        if (typeof selected === 'string' && selected.trim()) {
+          send({ type: 'project-add', path: selected })
+          setProjectModalOpen(false)
+        }
+      } catch {
+        // Cancelado ou falha ao abrir diálogo nativo
+      }
+      return
+    }
     send({ type: 'dialog-open-folder' })
   }
 

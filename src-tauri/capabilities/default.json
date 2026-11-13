@@ -4,6 +4,7 @@
   "description": "Minimal permissions for AI Dev World desktop shell",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "dialog:allow-open"
   ]
 }
