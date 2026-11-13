@@ -43,7 +43,7 @@ function App() {
   } = useServer()
 
   // Etapa 12.1: o chat com o Tech Lead é a porta de entrada; o escritório segue a uma aba.
-  const [activeTab, setActiveTab] = useState<NavTab>('chat')
+  const [activeTab, setActiveTab] = useState<NavTab>('office')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [observabilityMissionId, setObservabilityMissionId] = useState<number | null>(null)
   const [observabilityAgentId, setObservabilityAgentId] = useState<string | null>(null)
