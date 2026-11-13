@@ -4158,6 +4158,10 @@ input:focus-visible {
   padding: 16px;
   color: #cbd5e1;
 }
+/* No escritório a tela é exatamente a janela: sem isto o chat lateral estica a página e empurra o dock para fora da tela. */
+.proto-office-studio-shell:has(> .proto-office-stage-layout) {
+  height: 100vh;
+}
 /* O TerminalView é o mesmo do painel do agente; aqui ele ocupa a altura do dock. */
 .terminal-dock .term-panel {
   margin: 0;

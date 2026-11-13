@@ -11,6 +11,9 @@ export interface PtyLike {
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(): void
+  /** Controle de fluxo (o node-pty tem os dois). Sem eles, a sessão nunca é pausada. */
+  pause?(): void
+  resume?(): void
 }
 
 export type PtySpawner = (cli: CliId, cwd: string, cols: number, rows: number, args?: string[]) => PtyLike
@@ -36,9 +39,14 @@ interface Session {
   buffer: string
   lastInput: number
   quietTimer?: NodeJS.Timeout
+  /** Existe enquanto o PTY está pausado esperando a fila dos clientes esvaziar. */
+  drainTimer?: NodeJS.Timeout
 }
 
 const MAX_BUFFER = 200_000
+// Fila do cliente mais atrasado (bytes): acima de HIGH o PTY para de ser lido, abaixo de LOW volta.
+const HIGH_WATER = 1_000_000
+const LOW_WATER = 200_000
 
 /**
  * Uma sessão de terminal por agente. A sessão pertence ao backend, não à aba:
@@ -54,6 +62,8 @@ export class TerminalManager extends EventEmitter {
   private readonly echoMs: number
   private readonly getArgs?: (agentId: string) => { cli: CliId; args: string[] }
   private readonly spawnShell?: (cwd: string, cols: number, rows: number) => PtyLike
+  /** Bytes ainda não entregues ao cliente mais atrasado. O servidor WebSocket preenche; sem cliente é 0. */
+  backlog: () => number = () => 0
 
   constructor(
     registry: AgentRegistry,
@@ -117,11 +127,13 @@ export class TerminalManager extends EventEmitter {
     })
     session.pty.onData((data) => {
       live.write(data)
+      this.throttle(session)
       if (!userShell && Date.now() - session.lastInput > this.echoMs) this.markWorking(agentId, session)
     })
     session.pty.onExit(({ exitCode }) => {
       live.end()
       clearTimeout(session.quietTimer)
+      clearInterval(session.drainTimer)
       this.sessions.delete(agentId)
       // 'sessions' sai antes de 'exit': a tela nunca vê "sessão viva" depois do fim (reabriria sozinha).
       if (userShell) this.emit('sessions', this.userShells())
@@ -143,11 +155,33 @@ export class TerminalManager extends EventEmitter {
   }
 
   close(agentId: string) {
-    this.sessions.get(agentId)?.pty.kill()
+    const session = this.sessions.get(agentId)
+    if (session) this.kill(session)
   }
 
   closeAll() {
-    for (const session of [...this.sessions.values()]) session.pty.kill()
+    for (const session of [...this.sessions.values()]) this.kill(session)
+  }
+
+  private kill(session: Session) {
+    this.unpause(session) // PTY pausado pode não avisar o fim
+    session.pty.kill()
+  }
+
+  /** Saída mais rápida que o cliente consome: para de ler o PTY (o processo bloqueia) até a fila baixar. */
+  private throttle(session: Session) {
+    if (session.drainTimer || !session.pty.pause || !session.pty.resume || this.backlog() < HIGH_WATER) return
+    session.pty.pause()
+    session.drainTimer = setInterval(() => {
+      if (this.backlog() <= LOW_WATER) this.unpause(session)
+    }, 50)
+  }
+
+  private unpause(session: Session) {
+    if (!session.drainTimer) return
+    clearInterval(session.drainTimer)
+    session.drainTimer = undefined
+    session.pty.resume?.()
   }
 
   private markWorking(agentId: string, session: Session) {

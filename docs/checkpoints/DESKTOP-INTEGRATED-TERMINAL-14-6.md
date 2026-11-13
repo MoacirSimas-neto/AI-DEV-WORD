@@ -62,7 +62,7 @@ Shell escolhido (nada é instalado): no Windows `pwsh`, depois `powershell`, dep
 
 - Agente com sessão real no backend (`agent.session`) ganha uma aba no dock, com o mesmo `TerminalView` do painel lateral. Nada é criado só para exibir a aba, e o dock não consegue iniciar sessão de agente.
 - As regras de supervisão e aprovação não mudaram: a aba só mostra a sessão que já existe.
-- Limitação: se a mesma sessão de agente estiver aberta no painel lateral e no dock ao mesmo tempo, os dois tamanhos de tela disputam o redimensionamento do PTY.
+- A mesma sessão de agente pode estar no painel lateral e no dock ao mesmo tempo. Desde a 14.6.1 só um painel manda o tamanho do PTY (ver seção 13).
 
 ## 7. System Tray e encerramento
 
@@ -92,7 +92,7 @@ Só `--version` foi executado; nenhum login ou chamada de IA.
 - Um WebSocket só (o que já existia). Nenhum polling novo.
 - Arrastar a divisória re-renderiza apenas o dock.
 - **Não medido:** uso de RAM/CPU com o dock aberto no app desktop.
-- **Não implementado:** controle de fluxo entre PTY e WebSocket. Um comando que despeja saída sem parar enfileira mensagens no socket local.
+- Controle de fluxo PTY → WebSocket: implementado na 14.6.1 (ver seção 13).
 
 ## 10. Testes
 
@@ -108,11 +108,72 @@ Validação ponta a ponta feita contra um backend real isolado (porta e pasta de
 
 - `npm.cmd run check`: passou. 310 testes do backend e 87 da interface (397 no total, eram 379), typecheck e lint sem erro.
 - `cargo test --manifest-path src-tauri/Cargo.toml`: compila e passa; o crate não tem testes (0 executados).
-- `npx.cmd tauri build --bundles nsis`: **falhou, instalador não gerado.** Motivo: o aplicativo desktop estava aberto (`ai-dev-world.exe` e `node.exe` de `src-tauri\target\release`) e travava o `node.exe` que o build precisa sobrescrever ("Acesso negado"). Não é erro de código. Refazer com o aplicativo fechado.
+- `npx.cmd tauri build --bundles nsis` (na 14.6): **falhou, instalador não gerado.** Refeito com sucesso na 14.6.1 (seção 13). Motivo: o aplicativo desktop estava aberto (`ai-dev-world.exe` e `node.exe` de `src-tauri\target\release`) e travava o `node.exe` que o build precisa sobrescrever ("Acesso negado"). Não é erro de código. Refazer com o aplicativo fechado.
 
-## 12. Pendências
+## 12. Pendências (estado da 14.6; ver seção 13 para o que foi resolvido)
 
 - **Validação visual no aplicativo desktop não foi feita** (sem navegador de automação disponível nesta máquina). Faltam, à mão: aparência do dock, arrastar a divisória, `Ctrl+J`, copiar/colar, comportamento do Phaser ao redimensionar, minimizar para a bandeja e restaurar, e a confirmação ao fechar com terminal ativo.
 - Medir RAM/CPU com o dock aberto.
 - Controle de fluxo PTY → WebSocket.
 - Validação em VM limpa e pendências da auditoria de segurança continuam obrigatórias antes da beta.
+
+---
+
+## 13. Etapa 14.6.1 — build, validação visual e estabilização
+
+**Data:** 2026-11-13. Partiu de `21be073`. Nenhuma funcionalidade nova.
+
+### Build NSIS
+
+- Antes do build: nenhum processo do AI Dev World em execução (verificado por caminho do executável e linha de comando). Nenhum processo foi encerrado.
+- `npx.cmd tauri build --bundles nsis`: **passou** (a falha da 14.6 era só o app aberto travando o `node.exe`).
+- Instalador: `src-tauri	argeteleaseundle
+sis\AI Dev World_0.1.0_x64-setup.exe` (33.064.029 bytes, SHA-256 `4AA1A64A4897666EDDF42F33804A062140A5111D92FDB973D25034BA1EA1CC0B`), gerado depois das correções abaixo.
+- Conferido no diretório de release: `node.exe` (sidecar), `_up_/server/src` com o código novo do terminal, `_up_/node_modules/node-pty` e `ws`, e o dock (`terminal-dock`) no JavaScript do frontend.
+- **O instalador não foi executado nem instalado.** Não foi distribuído.
+
+### Validação visual
+
+Feita no **navegador** (Chrome), contra uma instância isolada do backend real (portas 4617/5273, pasta de dados e workspace temporários). **Não foi feita na janela do aplicativo desktop (WebView2)**: o app instalado usa os dados reais do proprietário.
+
+| Item | Resultado |
+|---|---|
+| Terminal inferior abre | OK |
+| PowerShell real responde | OK (Windows PowerShell 5.1) |
+| Diretório inicial = workspace | OK |
+| `git status` | OK |
+| `git init` manual reconhecido pelo Git Control | OK (selo passou de "local" para "main"; painel Git mostra o repositório limpo) |
+| Segunda aba independente | OK (PIDs de shell diferentes) |
+| `Ctrl+J` abre e recolhe | OK, inclusive com o foco dentro do terminal |
+| Redimensionar não reinicia o Phaser | OK (mesmo `<canvas>` antes e depois de arrastar a divisória e de recolher/abrir) |
+| Alternar telas preserva sessões | OK. O escritório (Phaser) é remontado ao voltar de outra tela, como já era antes; os terminais não |
+| Colar | OK pelo evento de colar do navegador (o texto chegou ao shell). Área de transferência real do sistema não testada |
+| Copiar | **Não testado** |
+| Minimizar para a bandeja preserva processos | **Não testado** (só existe no desktop) |
+| Fechar com terminal ativo pede confirmação | **Não testado** no desktop (coberto só por teste automatizado do modal) |
+| Enxurrada de saída (150 mil linhas) | Terminou, a tela continuou respondendo a cliques durante a saída |
+
+Checklist que falta, para o proprietário, no app desktop: (1) instalar e abrir; (2) `Ctrl+J`, digitar um comando; (3) selecionar texto e copiar, colar com `Ctrl+V`; (4) minimizar para a bandeja, restaurar e conferir que o shell continua; (5) fechar a janela com terminal aberto e ver a confirmação; (6) repetir a (5) pela opção "sair" da bandeja.
+
+### Problemas encontrados e correções
+
+1. **Dock fora da tela (encontrado na validação visual).** Com um projeto ativo, o chat lateral esticava a página (1373 px numa janela de 861 px) e a barra do dock ficava abaixo da dobra. Correção: no escritório a tela passa a ter exatamente a altura da janela (`web/src/index.css`, uma regra). Conferido no navegador depois da correção.
+2. **Controle de fluxo.** `TerminalManager` pausa a leitura do PTY quando a fila de envio do cliente mais atrasado passa de 1 MB (`bufferedAmount` do WebSocket) e retoma abaixo de 200 KB. Com o PTY pausado o próprio processo bloqueia ao escrever, então nada cresce sem limite no backend. Sem cliente conectado nada é pausado. Encerrar uma sessão pausada libera o PTY antes de matar. Arquivos: `server/src/terminal/manager.ts`, `server/src/server.ts`.
+3. **Sessão compartilhada.** Em `TerminalView`, cada sessão tem um único painel "dono do tamanho": o último que abriu a sessão ou recebeu foco. Só ele envia `term-resize`; ao receber foco, o outro assume e envia o próprio tamanho. Se o dono sai da tela, o painel restante assume no próximo redimensionamento. Só frontend, sem mudança de protocolo.
+
+### Testes
+
+- `npm.cmd run check`: passou. 313 testes do backend e 89 da interface (402; eram 397), typecheck e lint sem erro.
+- Novos: 3 em `server/src/terminal/userShell.test.ts` (pausa e retomada, encerrar pausado, **shell real** pausado para de emitir e ainda encerra) e 2 em `web/src/ui/TerminalView.test.tsx` (dono do tamanho; sessões diferentes não interferem).
+- `cargo test --manifest-path src-tauri/Cargo.toml`: compila e passa; **a suíte Rust continua executando 0 testes** (o crate não tem testes).
+- A saída dos testes do backend mostra `Error: AttachConsole failed` (processo auxiliar do node-pty ao matar um shell real). Já acontecia antes desta etapa com o teste de shell real da 14.6; nenhum teste falha por isso.
+
+### Riscos residuais
+
+- Validação no WebView2 real, bandeja, confirmação de saída, copiar e o próprio instalador: pendentes (checklist acima).
+- O controle de fluxo protege o backend. Do lado da tela, o xterm tem fila própria e descarta saída acima de ~50 MB pendentes; controle ponta a ponta exigiria uma mensagem nova de confirmação no protocolo (mudança maior, não feita, precisa de aprovação).
+- A pausa só foi exercitada por teste (fila simulada). Em uso local a fila do WebSocket dificilmente enche, então o caminho real de pausa não foi observado no app.
+- Com dois painéis na mesma sessão, o que não é dono mostra o texto quebrado para o tamanho do outro (um PTY tem um tamanho só).
+- Ao abrir o dock, o escritório não encolhe para caber: fica com rolagem própria. Cosmético, não alterado.
+- Medição de RAM/CPU com o dock aberto, VM limpa e pendências da auditoria de segurança continuam em aberto.
+

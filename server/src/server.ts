@@ -1415,6 +1415,12 @@ export function createAppServer({
   registry.on('change', onAgent)
   registry.on('list', onAgentList)
   terminals.on('data', onData)
+  // Controle de fluxo: o terminal pausa o PTY enquanto algum cliente estiver com a fila cheia.
+  terminals.backlog = () => {
+    let max = 0
+    for (const client of wss.clients) max = Math.max(max, client.bufferedAmount)
+    return max
+  }
   const onShells = (ids: string[]) => broadcast({ type: 'term-sessions', ids })
   terminals.on('exit', onExit)
   terminals.on('sessions', onShells)
@@ -1441,6 +1447,7 @@ export function createAppServer({
     registry.off('change', onAgent)
     registry.off('list', onAgentList)
     terminals.off('data', onData)
+    terminals.backlog = () => 0
     terminals.off('exit', onExit)
     terminals.off('sessions', onShells)
     tasks.off('tasks', onTasks)

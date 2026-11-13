@@ -1,7 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Send, Subscribe } from '../net/useServer.ts'
 
 interface Props {
@@ -17,6 +17,10 @@ interface Props {
   subscribe: Subscribe
 }
 
+// Um PTY tem um tamanho só. Com a mesma sessão em dois painéis (janela do agente e dock), só o
+// último que abriu ou recebeu foco manda o tamanho; o outro não disputa.
+const sizeOwner = new Map<string, object>()
+
 /**
  * Terminal real do agente. O xterm só desenha: cada tecla vai para o backend
  * (term-input) e tudo que aparece na tela veio do processo (term-data).
@@ -26,6 +30,7 @@ export function TerminalView({ agentId, cliName, sessionActive, canStart, autoSt
   const termRef = useRef<Terminal | null>(null)
   const attached = useRef(false)
   const autoStarted = useRef(false)
+  const [me] = useState(() => ({}))
 
   useEffect(() => {
     const term = new Terminal({
@@ -41,7 +46,17 @@ export function TerminalView({ agentId, cliName, sessionActive, canStart, autoSt
     termRef.current = term
 
     term.onData((data) => send({ type: 'term-input', agentId, data }))
-    term.onResize(({ cols, rows }) => send({ type: 'term-resize', agentId, cols, rows }))
+    term.onResize(({ cols, rows }) => {
+      if (!sizeOwner.has(agentId)) sizeOwner.set(agentId, me) // o dono saiu da tela
+      if (sizeOwner.get(agentId) === me) send({ type: 'term-resize', agentId, cols, rows })
+    })
+    const el = host.current!
+    const claimSize = () => {
+      if (sizeOwner.get(agentId) === me) return
+      sizeOwner.set(agentId, me)
+      send({ type: 'term-resize', agentId, cols: term.cols, rows: term.rows })
+    }
+    el.addEventListener('focusin', claimSize)
 
     const unsubscribe = subscribe((message) => {
       if (!('agentId' in message) || message.agentId !== agentId) return
@@ -65,17 +80,20 @@ export function TerminalView({ agentId, cliName, sessionActive, canStart, autoSt
 
     return () => {
       observer.disconnect()
+      el.removeEventListener('focusin', claimSize)
+      if (sizeOwner.get(agentId) === me) sizeOwner.delete(agentId)
       unsubscribe()
       term.dispose()
       termRef.current = null
       attached.current = false
     }
-  }, [agentId, send, subscribe])
+  }, [agentId, send, subscribe, me])
 
   const open = () => {
     const term = termRef.current
     if (!term) return
     attached.current = true // já pedido: evita reenviar a cada renderização
+    sizeOwner.set(agentId, me) // term-open leva o tamanho desta tela
     send({ type: 'term-open', agentId, cols: term.cols, rows: term.rows })
   }
 

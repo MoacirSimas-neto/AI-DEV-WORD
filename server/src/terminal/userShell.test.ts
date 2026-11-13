@@ -190,3 +190,86 @@ test('shell real: nasce na pasta, executa o git init digitado e o Git Control en
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 })
   }
 })
+
+// Etapa 14.6.1: controle de fluxo PTY -> clientes.
+
+class PausablePty extends FakePty {
+  paused = false
+  pauses = 0
+  pause() {
+    this.paused = true
+    this.pauses++
+  }
+  resume() {
+    this.paused = false
+  }
+}
+
+test('controle de fluxo: fila do cliente cheia pausa o PTY uma vez e ele volta quando a fila baixa', async () => {
+  const { registry } = setup()
+  const pty = new PausablePty()
+  const terminals = new TerminalManager(registry, () => new FakePty(), () => tmpdir(), { spawnShell: () => pty })
+  let queued = 0
+  terminals.backlog = () => queued
+  terminals.open('user:1', 80, 24)
+
+  pty.output('normal\n')
+  assert.equal(pty.paused, false, 'fila vazia: nada é pausado')
+
+  queued = 5_000_000
+  pty.output('enxurrada\n')
+  pty.output('mais\n')
+  assert.equal(pty.paused, true)
+  assert.equal(pty.pauses, 1)
+  await sleep(120)
+  assert.equal(pty.paused, true, 'fila ainda cheia: continua pausado')
+
+  queued = 0
+  await sleep(120)
+  assert.equal(pty.paused, false)
+  terminals.closeAll()
+})
+
+test('controle de fluxo: encerrar uma sessão pausada libera o PTY e não deixa temporizador', () => {
+  const { registry } = setup()
+  const pty = new PausablePty()
+  const terminals = new TerminalManager(registry, () => new FakePty(), () => tmpdir(), { spawnShell: () => pty })
+  terminals.backlog = () => 5_000_000
+  terminals.open('user:1', 80, 24)
+  pty.output('x')
+  assert.equal(pty.paused, true)
+  terminals.close('user:1')
+  assert.equal(pty.paused, false)
+  assert.deepEqual(terminals.userShells(), [])
+  // Se sobrasse um setInterval, o processo de teste não terminaria.
+})
+
+test('controle de fluxo com shell real: pausado não perde o fim da sessão', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'adw-flow-'))
+  const registry = new AgentRegistry(DEFAULT_AGENTS, async () => ({ found: true, version: 'v1', auth: 'ok' }))
+  const terminals = new TerminalManager(registry, () => new FakePty(), () => dir, { spawnShell: spawnShellPty })
+  let exited = false
+  let chars = 0
+  terminals.on('exit', () => (exited = true))
+  terminals.on('data', (_id: string, data: string) => (chars += data.length))
+  try {
+    terminals.open('user:1', 80, 24)
+    for (let i = 0; i < 100 && chars === 0; i++) await sleep(100)
+    assert.ok(chars > 0, 'o shell real respondeu')
+
+    terminals.backlog = () => 5_000_000 // cliente travado
+    terminals.write('user:1', 'echo pausa\r')
+    await sleep(1500)
+    const frozen = chars
+    await sleep(500)
+    assert.equal(chars, frozen, 'PTY real pausado: nenhuma saída nova chega')
+
+    terminals.close('user:1')
+    for (let i = 0; i < 100 && !exited; i++) await sleep(100)
+    assert.equal(exited, true)
+  } finally {
+    terminals.closeAll()
+    await sleep(300)
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5 })
+  }
+})
