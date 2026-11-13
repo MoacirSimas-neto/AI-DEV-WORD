@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { chmodSync, rmSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync } from 'node:fs'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -48,10 +48,23 @@ export class ProcessSupervisor {
 
   static async start(): Promise<ProcessSupervisor> {
     const id = `aidw-${process.pid}-${randomBytes(6).toString('hex')}`
-    const address = process.platform === 'win32' ? `\\\\.\\pipe\\${id}` : path.join(tmpdir(), `${id}.sock`)
+    let address: string
+    let socketDir: string | null = null
+    if (process.platform === 'win32') {
+      address = `\\\\.\\pipe\\${id}`
+    } else {
+      socketDir = mkdtempSync(path.join(tmpdir(), 'aidw-sup-'))
+      chmodSync(socketDir, 0o700)
+      address = path.join(socketDir, 'sup.sock')
+    }
     const server = net.createServer()
     const supervisor = new ProcessSupervisor(address, server)
     server.on('connection', (socket) => supervisor.accept(socket))
+    server.once('close', () => {
+      if (socketDir) {
+        try { rmSync(socketDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+    })
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject)
       server.listen(address, () => {
