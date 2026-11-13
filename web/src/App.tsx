@@ -245,7 +245,11 @@ function App() {
 
         {status === 'offline' && (
           <div className="banner" style={{ margin: '8px 16px', background: '#ef444422', borderColor: '#ef4444' }}>
-            Sem conexão com o backend local. Inicie com <code>npm run dev</code>.
+            {'__TAURI_INTERNALS__' in window ? (
+              <>Recuperando conexão com o backend integrado...</>
+            ) : (
+              <>Sem conexão com o backend local. Inicie com <code>npm run dev</code>.</>
+            )}
           </div>
         )}
 

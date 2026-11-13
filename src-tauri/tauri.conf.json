@@ -23,5 +23,17 @@
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*;"
     }
+  },
+  "bundle": {
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": [
+      "../server/src/**/*",
+      "../server/package.json",
+      "../shared/**/*",
+      "../node_modules/node-pty/**/*",
+      "../node_modules/ws/**/*"
+    ]
   }
 }
