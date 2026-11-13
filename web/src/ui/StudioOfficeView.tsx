@@ -3,7 +3,7 @@ import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type { AgentConfig, AgentInfo, GitStatus, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
 import type { WorldAction } from '../game/WorldBridge.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
-import { LazyPhaserGame } from '../lazyScreens.ts'
+import { LazyChatView, LazyPhaserGame } from '../lazyScreens.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
 import { AgentWindow } from './AgentWindow.tsx'
 import { GitPanel } from './GitPanel.tsx'
@@ -152,8 +152,91 @@ export function StudioOfficeView({
     window.addEventListener('pointerup', onUp)
   }, [panelWidth])
 
+  const [leftChatOpen, setLeftChatOpen] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1100 : true,
+  )
+  const [leftChatWidth, setLeftChatWidth] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('aidw.leftChatWidth'))
+      return Number.isFinite(saved) && saved >= 280 && saved <= 560 ? saved : 340
+    } catch {
+      return 340
+    }
+  })
+
+  const startLeftChatResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = leftChatWidth
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.max(280, Math.min(560, startWidth + (ev.clientX - startX)))
+      setLeftChatWidth(next)
+    }
+    const onUp = (ev: PointerEvent) => {
+      const finalWidth = Math.max(280, Math.min(560, startWidth + (ev.clientX - startX)))
+      try {
+        localStorage.setItem('aidw.leftChatWidth', String(finalWidth))
+      } catch {
+        // ignore storage errors
+      }
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [leftChatWidth])
+
   return (
     <main className="proto-office-stage-layout">
+      {leftChatOpen && (
+        <aside className="office-left-chat" style={{ width: `${leftChatWidth}px` }} aria-label="Chat lateral">
+          <div className="office-left-chat-header">
+            <span>💬 Tech Lead</span>
+            <button
+              type="button"
+              className="btn-panel-close"
+              onClick={() => setLeftChatOpen(false)}
+              title="Recolher chat lateral"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="office-left-chat-body">
+            <ErrorBoundary label="Chat">
+              <Suspense fallback={<p className="muted" style={{ padding: 12 }}>Carregando chat...</p>}>
+                <LazyChatView
+                  projectId={activeProjectId}
+                  agents={agents}
+                  missions={missions}
+                  tasks={tasks}
+                  online={online}
+                  send={send}
+                  subscribe={subscribe}
+                  onOpenMission={() => onSetSideTab('mission')}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+          <div
+            className="left-chat-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Redimensionar chat lateral"
+            title="Arraste para redimensionar"
+            onPointerDown={startLeftChatResize}
+          />
+        </aside>
+      )}
+      {!leftChatOpen && (
+        <button
+          type="button"
+          className="office-chat-fab"
+          onClick={() => setLeftChatOpen(true)}
+          title="Abrir Chat na lateral"
+        >
+          💬 Chat
+        </button>
+      )}
       {/* 1. VISUALIZAÇÃO DO ESCRITÓRIO 2D PHASER */}
       <div
         className="office-world-viewport"
@@ -238,7 +321,41 @@ export function StudioOfficeView({
               const inTeam = team.active.includes(ag.id)
               const released = team.released.includes(ag.id)
 
-              return (
+              const [leftChatOpen, setLeftChatOpen] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1100 : true,
+  )
+  const [leftChatWidth, setLeftChatWidth] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('aidw.leftChatWidth'))
+      return Number.isFinite(saved) && saved >= 280 && saved <= 560 ? saved : 340
+    } catch {
+      return 340
+    }
+  })
+
+  const startLeftChatResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = leftChatWidth
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.max(280, Math.min(560, startWidth + (ev.clientX - startX)))
+      setLeftChatWidth(next)
+    }
+    const onUp = (ev: PointerEvent) => {
+      const finalWidth = Math.max(280, Math.min(560, startWidth + (ev.clientX - startX)))
+      try {
+        localStorage.setItem('aidw.leftChatWidth', String(finalWidth))
+      } catch {
+        // ignore storage errors
+      }
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [leftChatWidth])
+
+  return (
                 <button
                   key={ag.id}
                   type="button"
