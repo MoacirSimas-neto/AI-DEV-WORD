@@ -5112,3 +5112,20 @@ body,
   background: rgba(30, 41, 59, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.35);
 }
+
+/* Contrast fix for dark-glassy .studio-page-view .window headers */
+.studio-page-view .window {
+  color: #e2e8f0;
+}
+
+.studio-page-view .window > .window-header h1,
+.studio-page-view .window > .window-header h2,
+.studio-page-view .window > .window-header h3,
+.studio-page-view .window > header h2,
+.studio-page-view .window > header p {
+  color: #f8fafc;
+}
+
+.studio-page-view .agent-card {
+  color: #0f172a;
+}
