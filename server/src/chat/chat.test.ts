@@ -324,7 +324,10 @@ test('WebSocket: criar, enviar, receber em lotes, reconectar com histórico, err
   await once(server, 'listening')
   const port = (server.address() as AddressInfo).port
   const connect = async () => {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: ORIGIN })
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      origin: ORIGIN,
+      headers: { Authorization: `Bearer ${server.authToken}` },
+    })
     const got: ServerMessage[] = []
     socket.on('message', (raw) => got.push(JSON.parse(String(raw))))
     await once(socket, 'open')

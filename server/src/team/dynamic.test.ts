@@ -183,7 +183,10 @@ test('demonstração: Tech Lead propõe → backend valida → pendente → apro
   const port = (server.address() as AddressInfo).port
   const sockets: WebSocket[] = []
   const connect = async () => {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: ORIGIN })
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      origin: ORIGIN,
+      headers: { Authorization: `Bearer ${server.authToken}` },
+    })
     sockets.push(socket)
     const received: ServerMessage[] = []
     socket.on('message', (raw) => received.push(JSON.parse(String(raw)) as ServerMessage))
@@ -1223,7 +1226,10 @@ async function serve(w: World) {
   const port = (server.address() as AddressInfo).port
   const sockets: WebSocket[] = []
   const connect = async () => {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: ORIGIN })
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      origin: ORIGIN,
+      headers: { Authorization: `Bearer ${server.authToken}` },
+    })
     sockets.push(socket)
     const received: ServerMessage[] = []
     socket.on('message', (raw) => received.push(JSON.parse(String(raw)) as ServerMessage))

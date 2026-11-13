@@ -1194,5 +1194,5 @@ export function createAppServer({
     for (const client of wss.clients) client.terminate()
   })
 
-  return server
+  return server as Server & { authToken: string }
 }
