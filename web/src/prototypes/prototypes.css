@@ -5114,10 +5114,6 @@ body,
 }
 
 /* Contrast fix for dark-glassy .studio-page-view .window headers */
-.studio-page-view .window {
-  color: #e2e8f0;
-}
-
 .studio-page-view .window > .window-header h1,
 .studio-page-view .window > .window-header h2,
 .studio-page-view .window > .window-header h3,
@@ -5126,6 +5122,8 @@ body,
   color: #f8fafc;
 }
 
-.studio-page-view .agent-card {
+.studio-page-view .agent-card,
+.studio-page-view .agent-card h3,
+.studio-page-view .agent-card h4 {
   color: #0f172a;
 }
