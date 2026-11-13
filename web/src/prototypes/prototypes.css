@@ -4775,3 +4775,102 @@ td.diff-meta {
     display: none;
   }
 }
+
+
+/* ===== Etapa 12.4.3 — Glassy Design System & Apple Design Skill ===== */
+:root {
+  --glass-bg: rgba(15, 21, 35, 0.74);
+  --glass-bg-elevated: rgba(20, 28, 46, 0.86);
+  --glass-border: rgba(255, 255, 255, 0.11);
+  --glass-border-strong: rgba(255, 255, 255, 0.2);
+  --glass-blur: blur(14px) saturate(140%);
+  --glass-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 140ms;
+  --dur-med: 220ms;
+}
+
+/* Immediate press feedback & accessible focus (Apple Design Skill) */
+.studio-topbar button,
+.git-workbench button,
+.task-hero-bar button,
+.chat-shell button {
+  transition:
+    transform var(--dur-fast) var(--ease-spring),
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    opacity var(--dur-fast) ease;
+}
+
+.studio-topbar button:active:not(:disabled),
+.git-workbench button:active:not(:disabled),
+.task-hero-bar button:active:not(:disabled),
+.chat-shell button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.studio-topbar button:focus-visible,
+.git-workbench button:focus-visible,
+.task-hero-bar button:focus-visible,
+.chat-shell button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* Glassy surfaces (never applied over the Phaser canvas itself) */
+.studio-topbar {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.22);
+}
+
+.topbar-overflow-menu,
+.git-overflow-menu {
+  background: var(--glass-bg-elevated);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border-strong);
+  box-shadow: var(--glass-shadow);
+  animation: glass-pop var(--dur-fast) var(--ease-spring);
+}
+
+.studio-page-view .window,
+.git-workbench {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+@keyframes glass-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-topbar button,
+  .git-workbench button,
+  .task-hero-bar button,
+  .chat-shell button,
+  .topbar-overflow-menu,
+  .git-overflow-menu {
+    transition: none;
+    animation: none;
+  }
+
+  .studio-topbar button:active:not(:disabled),
+  .git-workbench button:active:not(:disabled),
+  .task-hero-bar button:active:not(:disabled),
+  .chat-shell button:active:not(:disabled) {
+    transform: none;
+  }
+}
