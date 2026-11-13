@@ -15,6 +15,12 @@
 - Separa instalação de autenticação: nunca coleta tokens, cookies ou API keys, e nunca ativa cobrança automática.
 - Para CLIs instaladas, informa `needs_auth` com instrução oficial de login no terminal.
 
-## 3. Limitações e Pendências
-- **UI de instalação guiada no `FirstRunWizard`:** o catálogo e o endpoint backend estão prontos e testados; a integração do botão "Instalar" + modal de consentimento no `FirstRunWizard.tsx` e o `tauri build` pós-hardening ficam como próximo passo imediato antes da Etapa 14.5.
-- **VM Windows limpa:** validação real de `winget` / `npm` em máquina limpa segue pendente de autorização humana.
+## 3. Interface, Testes e Build (14.4.3.2)
+- **UI (`web/src/ui/FirstRunWizard.tsx` + `web/src/net/useServer.ts` + `web/src/App.tsx`):**
+  - Carrega `/api/diagnostics` e `/api/setup/catalog` com Bearer em memória.
+  - Exibe botão `Instalar...` para ferramentas ausentes, painel de consentimento explícito (fornecedor, método, alterações, pré-requisitos, Cancelar / Confirmar instalação) e revalida diagnóstico após concluir.
+- **Testes e Build:**
+  - `npm.cmd run check`: **378/378** passando (**299** server + **79** web), `oxlint` **0 warnings / 0 erros**.
+  - `npx.cmd tauri build --bundles nsis`: **exit code 0** (`AI Dev World_0.1.0_x64-setup.exe`, `31.52 MiB`).
+- **Limitação / Pendência:**
+  - Confirmação nativa via diálogo Tauri/OS antes de instalações reais e teste em VM Windows limpa seguem pendentes antes da Etapa 14.5.

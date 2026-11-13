@@ -47,6 +47,9 @@ function App() {
     send,
     subscribe,
     fetchDiagnostics,
+    fetchSetupCatalog,
+    requestSetupConsent,
+    installSetupTool,
   } = useServer()
 
   // Etapa 12.1: o chat com o Tech Lead é a porta de entrada; o escritório segue a uma aba.
@@ -537,6 +540,9 @@ function App() {
           open={online && firstRunOpen}
           initialStep={firstRunStep}
           onFetchDiagnostics={fetchDiagnostics}
+          onFetchSetupCatalog={fetchSetupCatalog}
+          onRequestConsent={requestSetupConsent}
+          onInstallTool={installSetupTool}
           projects={workspace.projects ?? []}
           activeProjectId={workspace.activeProjectId ?? null}
           onSelectProject={(id) => send({ type: 'project-select', projectId: id })}

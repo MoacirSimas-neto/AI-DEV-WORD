@@ -12,6 +12,21 @@ export interface ToolDiagnosticItem {
   authNote: string
 }
 
+export interface ToolCatalogItem {
+  id: string
+  name: string
+  vendor: string
+  originUrl: string
+  installMethod: 'winget' | 'npm' | 'manual'
+  packageRef: string
+  requiresInternet: boolean
+  requiresAdmin: boolean
+  requiresGlobalNode: boolean
+  systemChanges: string
+  accountNote: string
+  authHint: string
+}
+
 const STATUS_LABELS: Record<ToolDiagnosticItem['status'], string> = {
   ready: 'Pronto',
   not_installed: 'Não instalado',
@@ -26,6 +41,9 @@ interface FirstRunWizardProps {
   open: boolean
   initialStep?: number
   onFetchDiagnostics: () => Promise<Response>
+  onFetchSetupCatalog: () => Promise<Response>
+  onRequestConsent: (toolId: string) => Promise<Response>
+  onInstallTool: (toolId: string, consentNonce: string) => Promise<Response>
   projects: Array<{ id: number; name: string; path: string }>
   activeProjectId: number | null
   onSelectProject: (id: number) => void
@@ -38,6 +56,9 @@ export function FirstRunWizard({
   open,
   initialStep = 0,
   onFetchDiagnostics,
+  onFetchSetupCatalog,
+  onRequestConsent,
+  onInstallTool,
   projects,
   activeProjectId,
   onSelectProject,
@@ -47,34 +68,52 @@ export function FirstRunWizard({
 }: FirstRunWizardProps) {
   const [step, setStep] = useState(initialStep)
   const [tools, setTools] = useState<ToolDiagnosticItem[]>([])
+  const [catalog, setCatalog] = useState<Record<string, ToolCatalogItem>>({})
   const [loading, setLoading] = useState(false)
   const [diagError, setDiagError] = useState<string | null>(null)
+  const [confirmToolId, setConfirmToolId] = useState<string | null>(null)
+  const [installingId, setInstallingId] = useState<string | null>(null)
+  const [installFeedback, setInstallFeedback] = useState<string | null>(null)
 
   const runCheck = useCallback(async () => {
     setLoading(true)
     setDiagError(null)
     try {
-      const res = await onFetchDiagnostics()
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { tools?: ToolDiagnosticItem[] }
+      const [diagRes, catRes] = await Promise.all([onFetchDiagnostics(), onFetchSetupCatalog()])
+      if (!diagRes.ok) throw new Error(`HTTP ${diagRes.status}`)
+      const data = (await diagRes.json()) as { tools?: ToolDiagnosticItem[] }
       setTools(Array.isArray(data.tools) ? data.tools : [])
+      if (catRes.ok) {
+        const catData = (await catRes.json()) as { tools?: ToolCatalogItem[] }
+        const map: Record<string, ToolCatalogItem> = {}
+        for (const item of catData.tools ?? []) map[item.id] = item
+        setCatalog(map)
+      }
     } catch {
       setDiagError('Não foi possível verificar as ferramentas locais agora.')
     } finally {
       setLoading(false)
     }
-  }, [onFetchDiagnostics])
+  }, [onFetchDiagnostics, onFetchSetupCatalog])
 
   useEffect(() => {
     if (!open || step !== 1) return
     let cancelled = false
-    onFetchDiagnostics()
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const data = (await res.json()) as { tools?: ToolDiagnosticItem[] }
+    Promise.all([onFetchDiagnostics(), onFetchSetupCatalog()])
+      .then(async ([diagRes, catRes]) => {
+        if (!diagRes.ok) throw new Error(`HTTP ${diagRes.status}`)
+        const data = (await diagRes.json()) as { tools?: ToolDiagnosticItem[] }
         if (!cancelled) {
           setDiagError(null)
           setTools(Array.isArray(data.tools) ? data.tools : [])
+        }
+        if (catRes.ok) {
+          const catData = (await catRes.json()) as { tools?: ToolCatalogItem[] }
+          if (!cancelled) {
+            const map: Record<string, ToolCatalogItem> = {}
+            for (const item of catData.tools ?? []) map[item.id] = item
+            setCatalog(map)
+          }
         }
       })
       .catch(() => {
@@ -83,18 +122,47 @@ export function FirstRunWizard({
     return () => {
       cancelled = true
     }
-  }, [open, step, onFetchDiagnostics])
+  }, [open, step, onFetchDiagnostics, onFetchSetupCatalog])
 
   if (!open) return null
 
   const goTo = (next: number) => {
     setStep(next)
+    setConfirmToolId(null)
     saveFirstRunState({ completed: false, lastStep: next })
   }
 
+  const handleConfirmInstall = async (toolId: string) => {
+    setInstallingId(toolId)
+    setInstallFeedback(`Instalando ${catalog[toolId]?.name ?? toolId}...`)
+    try {
+      const consentRes = await onRequestConsent(toolId)
+      if (!consentRes.ok) {
+        setInstallFeedback('Não foi possível obter autorização para instalar.')
+        return
+      }
+      const consent = (await consentRes.json()) as { nonce?: string }
+      if (!consent.nonce) {
+        setInstallFeedback('Autorização inválida.')
+        return
+      }
+      const installRes = await onInstallTool(toolId, consent.nonce)
+      const outcome = (await installRes.json()) as { status?: string; message?: string }
+      setInstallFeedback(outcome.message ?? (installRes.ok ? 'Operação concluída.' : 'Falha na instalação.'))
+      setConfirmToolId(null)
+      await runCheck()
+    } catch {
+      setInstallFeedback('Erro de comunicação durante a instalação.')
+    } finally {
+      setInstallingId(null)
+    }
+  }
+
+  const confirmSpec = confirmToolId ? catalog[confirmToolId] : undefined
+
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Assistente de Primeira Execução">
-      <div className="modal-card" style={{ maxWidth: 560, width: '92vw' }}>
+      <div className="modal-card" style={{ maxWidth: 600, width: '92vw' }}>
         {step === 0 && (
           <div>
             <h2>Bem-vindo ao AI Dev World</h2>
@@ -121,41 +189,93 @@ export function FirstRunWizard({
             </p>
             {loading && <p>Verificando ferramentas...</p>}
             {diagError && <p role="alert">{diagError}</p>}
+            {installFeedback && <p role="status">{installFeedback}</p>}
+
+            {confirmSpec && (
+              <div
+                role="region"
+                aria-label={`Confirmar instalação de ${confirmSpec.name}`}
+                style={{
+                  padding: '10px 12px',
+                  margin: '10px 0',
+                  borderRadius: 8,
+                  background: 'rgba(2, 132, 199, 0.14)',
+                  border: '1px solid rgba(56, 189, 248, 0.4)',
+                }}
+              >
+                <strong>Confirmar instalação: {confirmSpec.name}</strong>
+                <div style={{ fontSize: '0.82rem', marginTop: 4 }}>
+                  <div>Fornecedor: {confirmSpec.vendor} · Método: {confirmSpec.installMethod} ({confirmSpec.packageRef})</div>
+                  <div>Alterações: {confirmSpec.systemChanges}</div>
+                  {confirmSpec.requiresGlobalNode && <div>Pré-requisito: Node.js/npm global instalado.</div>}
+                  <div>{confirmSpec.accountNote}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+                  <button type="button" onClick={() => setConfirmToolId(null)} disabled={installingId !== null}>
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={installingId !== null}
+                    onClick={() => void handleConfirmInstall(confirmSpec.id)}
+                  >
+                    {installingId === confirmSpec.id ? 'Instalando...' : 'Confirmar instalação'}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <ul style={{ listStyle: 'none', padding: 0, margin: '12px 0', display: 'grid', gap: 8 }}>
-              {tools.map((tool) => (
-                <li
-                  key={tool.id}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    background: 'rgba(15, 23, 42, 0.55)',
-                    border: '1px solid rgba(148, 163, 184, 0.2)',
-                  }}
-                >
-                  <div>
-                    <strong>{tool.name}</strong>
-                    <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>{tool.purpose}</div>
-                    <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>
-                      {tool.version ? `${tool.version} · ` : ''}
-                      {tool.authNote}
+              {tools.map((tool) => {
+                const spec = catalog[tool.id]
+                return (
+                  <li
+                    key={tool.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      background: 'rgba(15, 23, 42, 0.55)',
+                      border: '1px solid rgba(148, 163, 184, 0.2)',
+                    }}
+                  >
+                    <div>
+                      <strong>{tool.name}</strong>
+                      <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>{tool.purpose}</div>
+                      <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                        {tool.version ? `${tool.version} · ` : ''}
+                        {tool.authNote}
+                      </div>
                     </div>
-                  </div>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{STATUS_LABELS[tool.status]}</span>
-                </li>
-              ))}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{STATUS_LABELS[tool.status]}</span>
+                      {tool.status === 'not_installed' && spec && (
+                        <button
+                          type="button"
+                          disabled={installingId !== null}
+                          onClick={() => setConfirmToolId(tool.id)}
+                        >
+                          Instalar...
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
             <div className="modal-actions" style={{ display: 'flex', gap: 8, justifyContent: 'space-between', marginTop: 16 }}>
-              <button type="button" onClick={() => void runCheck()} disabled={loading}>
+              <button type="button" onClick={() => void runCheck()} disabled={loading || installingId !== null}>
                 Reverificar
               </button>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" onClick={() => goTo(0)}>
+                <button type="button" onClick={() => goTo(0)} disabled={installingId !== null}>
                   Voltar
                 </button>
-                <button type="button" className="primary" onClick={() => goTo(2)}>
+                <button type="button" className="primary" onClick={() => goTo(2)} disabled={installingId !== null}>
                   Continuar
                 </button>
               </div>

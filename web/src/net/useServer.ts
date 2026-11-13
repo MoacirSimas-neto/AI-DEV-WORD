@@ -207,5 +207,58 @@ export function useServer() {
     return fetch(`${apiBaseRef.current}/api/diagnostics`, { credentials: 'include', headers })
   }, [])
 
-  return { status, authRequired, pair, agents, workspace, tasks, missions, history, configs, allConfigs, specializations, skills, skillOverrides, send, subscribe, fetchDiagnostics }
+  const fetchSetupCatalog = useCallback(async () => {
+    const headers: Record<string, string> = desktopTokenRef.current
+      ? { authorization: `Bearer ${desktopTokenRef.current}` }
+      : {}
+    return fetch(`${apiBaseRef.current}/api/setup/catalog`, { credentials: 'include', headers })
+  }, [])
+
+  const requestSetupConsent = useCallback(async (toolId: string) => {
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      ...(desktopTokenRef.current ? { authorization: `Bearer ${desktopTokenRef.current}` } : {}),
+    }
+    return fetch(`${apiBaseRef.current}/api/setup/consent`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ toolId }),
+    })
+  }, [])
+
+  const installSetupTool = useCallback(async (toolId: string, consentNonce: string) => {
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      ...(desktopTokenRef.current ? { authorization: `Bearer ${desktopTokenRef.current}` } : {}),
+    }
+    return fetch(`${apiBaseRef.current}/api/setup/install`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ toolId, consentNonce }),
+    })
+  }, [])
+
+  return {
+    status,
+    authRequired,
+    pair,
+    agents,
+    workspace,
+    tasks,
+    missions,
+    history,
+    configs,
+    allConfigs,
+    specializations,
+    skills,
+    skillOverrides,
+    send,
+    subscribe,
+    fetchDiagnostics,
+    fetchSetupCatalog,
+    requestSetupConsent,
+    installSetupTool,
+  }
 }
