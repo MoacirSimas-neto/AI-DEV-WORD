@@ -14,9 +14,12 @@
     "test": "npm test -w server && npm test -w web",
     "typecheck": "npm run typecheck -w server && npm run build -w web",
     "lint": "npm run lint -w web",
-    "check": "npm run typecheck && npm test && npm run lint"
+    "check": "npm run typecheck && npm test && npm run lint",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
     "concurrently": "^9.0.0"
   }
 }
