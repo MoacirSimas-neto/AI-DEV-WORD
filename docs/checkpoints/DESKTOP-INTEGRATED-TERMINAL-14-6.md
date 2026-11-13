@@ -127,8 +127,7 @@ Validação ponta a ponta feita contra um backend real isolado (porta e pasta de
 
 - Antes do build: nenhum processo do AI Dev World em execução (verificado por caminho do executável e linha de comando). Nenhum processo foi encerrado.
 - `npx.cmd tauri build --bundles nsis`: **passou** (a falha da 14.6 era só o app aberto travando o `node.exe`).
-- Instalador: `src-tauri	argeteleaseundle
-sis\AI Dev World_0.1.0_x64-setup.exe` (33.064.029 bytes, SHA-256 `4AA1A64A4897666EDDF42F33804A062140A5111D92FDB973D25034BA1EA1CC0B`), gerado depois das correções abaixo.
+- Instalador: `src-tauri/target/release/bundle/nsis/AI Dev World_0.1.0_x64-setup.exe` (33.064.029 bytes, SHA-256 `4AA1A64A4897666EDDF42F33804A062140A5111D92FDB973D25034BA1EA1CC0B`), gerado depois das correções abaixo.
 - Conferido no diretório de release: `node.exe` (sidecar), `_up_/server/src` com o código novo do terminal, `_up_/node_modules/node-pty` e `ws`, e o dock (`terminal-dock`) no JavaScript do frontend.
 - **O instalador não foi executado nem instalado.** Não foi distribuído.
 
