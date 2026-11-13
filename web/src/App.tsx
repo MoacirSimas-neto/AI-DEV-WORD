@@ -91,7 +91,15 @@ function App() {
   }, [])
 
   const handleToggleSidePanel = (tab?: 'agent' | 'git' | 'mission') => {
-    if (tab) {
+    if (activeTab !== 'office') {
+      setActiveTab('office')
+      if (tab) {
+        setSideTab(tab)
+        setSidePanelOpen(true)
+      } else {
+        setSidePanelOpen(false)
+      }
+    } else if (tab) {
       if (sidePanelOpen && sideTab === tab) {
         setSidePanelOpen(false)
       } else {
