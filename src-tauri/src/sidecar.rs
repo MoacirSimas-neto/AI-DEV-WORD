@@ -8,10 +8,107 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(target_os = "windows")]
+use std::os::windows::io::AsRawHandle;
+#[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(target_os = "windows")]
+mod win_job {
+    use std::ffi::c_void;
+    use std::ptr::null_mut;
+
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x00002000;
+
+    #[repr(C)]
+    struct BasicLimitInformation {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    struct IoCounters {
+        read_operation_count: u64,
+        write_operation_count: u64,
+        other_operation_count: u64,
+        read_transfer_count: u64,
+        write_transfer_count: u64,
+        other_transfer_count: u64,
+    }
+
+    #[repr(C)]
+    struct ExtendedLimitInformation {
+        basic_limit_information: BasicLimitInformation,
+        io_info: IoCounters,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateJobObjectW(lp_job_attributes: *mut c_void, lp_name: *const u16) -> *mut c_void;
+        fn SetInformationJobObject(
+            h_job: *mut c_void,
+            job_object_info_class: u32,
+            lp_job_object_info: *const c_void,
+            cb_job_object_info_length: u32,
+        ) -> i32;
+        fn AssignProcessToJobObject(h_job: *mut c_void, h_process: *mut c_void) -> i32;
+        fn CloseHandle(h_object: *mut c_void) -> i32;
+    }
+
+    pub struct JobObject(*mut c_void);
+    unsafe impl Send for JobObject {}
+    unsafe impl Sync for JobObject {}
+
+    impl JobObject {
+        pub fn create_kill_on_close() -> Option<Self> {
+            unsafe {
+                let handle = CreateJobObjectW(null_mut(), null_mut());
+                if handle.is_null() {
+                    return None;
+                }
+                let mut info: ExtendedLimitInformation = std::mem::zeroed();
+                info.basic_limit_information.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                let ok = SetInformationJobObject(
+                    handle,
+                    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                    (&info as *const ExtendedLimitInformation).cast(),
+                    std::mem::size_of::<ExtendedLimitInformation>() as u32,
+                );
+                if ok == 0 {
+                    CloseHandle(handle);
+                    return None;
+                }
+                Some(Self(handle))
+            }
+        }
+
+        pub fn assign(&self, process_handle: *mut c_void) -> bool {
+            unsafe { AssignProcessToJobObject(self.0, process_handle) != 0 }
+        }
+    }
+
+    impl Drop for JobObject {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+}
 
 #[derive(Clone, Serialize)]
 pub struct BackendStatus {
@@ -23,6 +120,9 @@ pub struct BackendStatus {
 
 pub struct SidecarManager {
     child: Mutex<Option<Child>>,
+    #[cfg(target_os = "windows")]
+    job: Mutex<Option<win_job::JobObject>>,
+    starting: std::sync::atomic::AtomicBool,
     status: Mutex<BackendStatus>,
 }
 
@@ -30,6 +130,9 @@ impl SidecarManager {
     pub fn new() -> Self {
         Self {
             child: Mutex::new(None),
+            #[cfg(target_os = "windows")]
+            job: Mutex::new(win_job::JobObject::create_kill_on_close()),
+            starting: std::sync::atomic::AtomicBool::new(false),
             status: Mutex::new(BackendStatus {
                 status: "starting".into(),
                 port: 4517,
@@ -64,30 +167,24 @@ impl SidecarManager {
     }
 
     pub fn start_async(self: &Arc<Self>, app: AppHandle) {
+        if self
+            .starting
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
         let mgr = Arc::clone(self);
         std::thread::spawn(move || {
             mgr.start_blocking(&app);
+            mgr.starting
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         });
     }
 
     fn start_blocking(&self, app: &AppHandle) {
         self.stop();
 
-        let default_port: u16 = 4517;
-        if is_backend_healthy(default_port) {
-            self.set_status(
-                app,
-                BackendStatus {
-                    status: "ready".into(),
-                    port: default_port,
-                    pid: None,
-                    error: None,
-                },
-            );
-            return;
-        }
-
-        let port = pick_available_port(default_port);
+        let port = pick_available_port(4517);
         self.set_status(
             app,
             BackendStatus {
@@ -149,6 +246,10 @@ impl SidecarManager {
         };
 
         let pid = child.id();
+        #[cfg(target_os = "windows")]
+        if let Some(ref job) = *self.job.lock().unwrap() {
+            let _ = job.assign(child.as_raw_handle());
+        }
         *self.child.lock().unwrap() = Some(child);
 
         let deadline = Instant::now() + Duration::from_secs(12);

@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev -w web",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeBuildCommand": "npm run build -w web",
+    "beforeBuildCommand": "node scripts/prepare-sidecar.mjs && npm run build -w web",
     "frontendDist": "../web/dist"
   },
   "app": {
