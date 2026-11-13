@@ -549,10 +549,50 @@ export function createAppServer({
     return false
   }
 
+  const desktopBootstrapSecret = process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET?.trim() ?? ''
+  const effectiveAllowedOrigins = desktopBootstrapSecret
+    ? Array.from(
+        new Set([
+          ...allowedOrigins,
+          'http://tauri.localhost',
+          'https://tauri.localhost',
+          'tauri://localhost',
+        ]),
+      )
+    : allowedOrigins
+
   const server = createServer((req, res) => {
     const origin = req.headers.origin
-    if (!hasLocalHost(req) || (origin && !allowedOrigins.includes(origin))) {
+    if (!hasLocalHost(req) || (origin && !effectiveAllowedOrigins.includes(origin))) {
       res.writeHead(403).end()
+      return
+    }
+    if (origin && effectiveAllowedOrigins.includes(origin)) {
+      res.setHeader('access-control-allow-origin', origin)
+      res.setHeader('access-control-allow-credentials', 'true')
+      res.setHeader('access-control-allow-headers', 'content-type')
+      res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS')
+      res.setHeader('vary', 'Origin')
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204).end()
+        return
+      }
+    }
+    if (req.method === 'POST' && req.url === '/api/desktop-bootstrap') {
+      const provided = typeof req.headers['x-aidw-desktop-secret'] === 'string'
+        ? req.headers['x-aidw-desktop-secret']
+        : ''
+      if (!desktopBootstrapSecret || !provided || !safeEqual(provided, desktopBootstrapSecret)) {
+        res.writeHead(403).end()
+        return
+      }
+      if (pairingUsed) {
+        res.writeHead(409, { 'content-type': 'application/json' }).end('{"error":"Código já utilizado"}')
+        return
+      }
+      res
+        .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        .end(JSON.stringify({ code: currentPairingCode }))
       return
     }
     if (req.method === 'GET' && req.url === '/api/health') {
@@ -566,7 +606,7 @@ export function createAppServer({
       return
     }
     if (req.method === 'POST' && req.url === '/api/pair') {
-      if (!origin || !allowedOrigins.includes(origin)) {
+      if (!origin || !effectiveAllowedOrigins.includes(origin)) {
         res.writeHead(403).end()
         return
       }
@@ -658,7 +698,7 @@ export function createAppServer({
   server.on('upgrade', (req, socket, head) => {
     const origin = req.headers.origin
     const allowed =
-      req.url === '/ws' && hasLocalHost(req) && !!origin && allowedOrigins.includes(origin)
+      req.url === '/ws' && hasLocalHost(req) && !!origin && effectiveAllowedOrigins.includes(origin)
     if (!allowed) {
       socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
       return

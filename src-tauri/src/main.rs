@@ -2,7 +2,7 @@
 
 mod sidecar;
 
-use sidecar::{get_backend_status, restart_backend, SidecarManager};
+use sidecar::{desktop_bootstrap, get_backend_status, restart_backend, SidecarManager};
 use std::sync::Arc;
 use tauri::RunEvent;
 
@@ -11,7 +11,11 @@ fn main() {
 
     let app = tauri::Builder::default()
         .manage(Arc::clone(&manager))
-        .invoke_handler(tauri::generate_handler![get_backend_status, restart_backend])
+        .invoke_handler(tauri::generate_handler![
+            get_backend_status,
+            restart_backend,
+            desktop_bootstrap
+        ])
         .setup({
             let mgr = Arc::clone(&manager);
             move |app| {

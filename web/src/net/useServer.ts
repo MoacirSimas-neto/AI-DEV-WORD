@@ -46,9 +46,48 @@ export function useServer() {
   useEffect(() => {
     let disposed = false
     let retry: ReturnType<typeof setTimeout> | undefined
+    const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+    const invokeTauri = async <T,>(cmd: string): Promise<T> => {
+      const tauri = (window as unknown as { __TAURI_INTERNALS__: { invoke: <R>(c: string) => Promise<R> } })
+        .__TAURI_INTERNALS__
+      return tauri.invoke<T>(cmd)
+    }
 
-    const connect = () => {
-      const socket = new WebSocket(`ws://${location.host}/ws`)
+    const connect = async () => {
+      let wsUrl = `ws://${location.host}/ws`
+      let apiBase = ''
+      if (isTauri) {
+        try {
+          const st = await invokeTauri<{ status: string; port: number }>('get_backend_status')
+          if (disposed) return
+          if (st.status !== 'ready') {
+            retry = setTimeout(() => void connect(), 300)
+            return
+          }
+          apiBase = `http://127.0.0.1:${st.port}`
+          wsUrl = `ws://127.0.0.1:${st.port}/ws`
+          const sess = await fetch(`${apiBase}/api/session`, { credentials: 'include' })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null) as { authenticated?: boolean } | null
+          if (disposed) return
+          if (!sess?.authenticated) {
+            const boot = await invokeTauri<{ port: number; code: string }>('desktop_bootstrap')
+            if (disposed) return
+            await fetch(`http://127.0.0.1:${boot.port}/api/pair`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ code: boot.code }),
+            })
+          }
+        } catch {
+          if (!disposed) retry = setTimeout(() => void connect(), RETRY_MS)
+          return
+        }
+      }
+      if (disposed) return
+
+      const socket = new WebSocket(wsUrl)
       socketRef.current = socket
       socket.onopen = () => {
         setStatus('online')
@@ -97,7 +136,7 @@ export function useServer() {
       socket.onclose = () => {
         if (disposed) return
         setStatus('offline')
-        void fetch('/api/session')
+        void fetch(`${apiBase}/api/session`, { credentials: 'include' })
           .then((r) => (r.ok ? r.json() : null))
           .then((data: { authenticated?: boolean } | null) => {
             if (!disposed && data && data.authenticated === false) {
@@ -105,10 +144,10 @@ export function useServer() {
             }
           })
           .catch(() => {})
-        retry = setTimeout(connect, RETRY_MS)
+        retry = setTimeout(() => void connect(), RETRY_MS)
       }
     }
-    connect()
+    void connect()
 
     return () => {
       disposed = true

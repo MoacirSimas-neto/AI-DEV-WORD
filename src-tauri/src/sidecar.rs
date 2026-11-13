@@ -118,11 +118,18 @@ pub struct BackendStatus {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Serialize)]
+pub struct DesktopBootstrapResult {
+    pub port: u16,
+    pub code: String,
+}
+
 pub struct SidecarManager {
     child: Mutex<Option<Child>>,
     #[cfg(target_os = "windows")]
     job: Mutex<Option<win_job::JobObject>>,
     starting: std::sync::atomic::AtomicBool,
+    bootstrap_secret: Mutex<String>,
     status: Mutex<BackendStatus>,
 }
 
@@ -133,6 +140,7 @@ impl SidecarManager {
             #[cfg(target_os = "windows")]
             job: Mutex::new(win_job::JobObject::create_kill_on_close()),
             starting: std::sync::atomic::AtomicBool::new(false),
+            bootstrap_secret: Mutex::new(String::new()),
             status: Mutex::new(BackendStatus {
                 status: "starting".into(),
                 port: 4517,
@@ -217,11 +225,15 @@ impl SidecarManager {
             .unwrap_or_else(|_| std::env::temp_dir().join("ai-dev-world"));
         let _ = std::fs::create_dir_all(&data_dir);
 
+        let secret = generate_random_hex_32();
+        *self.bootstrap_secret.lock().unwrap() = secret.clone();
+
         let mut cmd = Command::new(&node_bin);
         cmd.arg(&entry_script)
             .current_dir(&server_dir)
             .env("AIDW_PORT", port.to_string())
             .env("AIDW_DATA_DIR", data_dir.to_string_lossy().to_string())
+            .env("AIDW_DESKTOP_BOOTSTRAP_SECRET", &secret)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
@@ -383,4 +395,80 @@ pub fn get_backend_status(state: tauri::State<'_, Arc<SidecarManager>>) -> Backe
 #[tauri::command]
 pub fn restart_backend(app: AppHandle, state: tauri::State<'_, Arc<SidecarManager>>) {
     state.start_async(app);
+}
+
+#[tauri::command]
+pub fn desktop_bootstrap(
+    state: tauri::State<'_, Arc<SidecarManager>>,
+) -> Result<DesktopBootstrapResult, String> {
+    let status = state.get_status();
+    if status.status != "ready" {
+        return Err("Backend ainda não está pronto".into());
+    }
+    let secret = state.bootstrap_secret.lock().unwrap().clone();
+    if secret.is_empty() {
+        return Err("Segredo de bootstrap indisponível".into());
+    }
+    let port = status.port;
+    let addr = format!("127.0.0.1:{port}");
+    let mut stream = TcpStream::connect_timeout(
+        &addr.parse().map_err(|e| format!("Endereço inválido: {e}"))?,
+        Duration::from_millis(800),
+    )
+    .map_err(|e| format!("Falha ao conectar ao backend: {e}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1200)));
+    let req = format!(
+        "POST /api/desktop-bootstrap HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nx-aidw-desktop-secret: {secret}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| format!("Falha ao enviar bootstrap: {e}"))?;
+    let mut resp = String::new();
+    stream
+        .read_to_string(&mut resp)
+        .map_err(|e| format!("Falha ao ler resposta de bootstrap: {e}"))?;
+    let (_, body) = resp
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "Resposta HTTP inválida do backend".to_string())?;
+    if !resp.starts_with("HTTP/1.1 200") && !resp.starts_with("HTTP/1.0 200") {
+        return Err("Bootstrap rejeitado pelo backend".into());
+    }
+    let code = extract_json_string(body, "code")
+        .ok_or_else(|| "Código de pareamento ausente na resposta".to_string())?;
+    Ok(DesktopBootstrapResult { port, code })
+}
+
+fn extract_json_string(json: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\":\"");
+    let start = json.find(&needle)? + needle.len();
+    let rest = &json[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn generate_random_hex_32() -> String {
+    let mut buf = [0u8; 32];
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "bcrypt")]
+        unsafe extern "system" {
+            fn BCryptGenRandom(
+                h_algorithm: *mut std::ffi::c_void,
+                pb_buffer: *mut u8,
+                cb_buffer: u32,
+                dw_flags: u32,
+            ) -> i32;
+        }
+        unsafe {
+            // BCRYPT_USE_SYSTEM_PREFERRED_RNG = 0x00000002
+            let _ = BCryptGenRandom(std::ptr::null_mut(), buf.as_mut_ptr(), 32, 2);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+            let _ = f.read_exact(&mut buf);
+        }
+    }
+    buf.iter().map(|b| format!("{b:02x}")).collect()
 }
