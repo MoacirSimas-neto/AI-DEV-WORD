@@ -38,6 +38,8 @@ export function useServer() {
   const [specializations, setSpecializations] = useState<SpecializationInfo[]>([])
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [skillOverrides, setSkillOverrides] = useState<SkillAgentOverride[]>([])
+  const [authRequired, setAuthRequired] = useState(false)
+  const [reconnectTick, setReconnectTick] = useState(0)
   const socketRef = useRef<WebSocket | null>(null)
   const listeners = useRef(new Set<MessageListener>())
 
@@ -48,7 +50,10 @@ export function useServer() {
     const connect = () => {
       const socket = new WebSocket(`ws://${location.host}/ws`)
       socketRef.current = socket
-      socket.onopen = () => setStatus('online')
+      socket.onopen = () => {
+        setStatus('online')
+        setAuthRequired(false)
+      }
       socket.onmessage = (event) => {
         const message = JSON.parse(String(event.data)) as ServerMessage
         if (message.type === 'snapshot') {
@@ -92,6 +97,14 @@ export function useServer() {
       socket.onclose = () => {
         if (disposed) return
         setStatus('offline')
+        void fetch('/api/session')
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data: { authenticated?: boolean } | null) => {
+            if (!disposed && data && data.authenticated === false) {
+              setAuthRequired(true)
+            }
+          })
+          .catch(() => {})
         retry = setTimeout(connect, RETRY_MS)
       }
     }
@@ -101,6 +114,25 @@ export function useServer() {
       disposed = true
       clearTimeout(retry)
       socketRef.current?.close()
+    }
+  }, [reconnectTick])
+
+  const pair = useCallback(async (code: string): Promise<string | null> => {
+    try {
+      const res = await fetch('/api/pair', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: code.trim() }),
+      })
+      if (res.ok) {
+        setAuthRequired(false)
+        setReconnectTick((n) => n + 1)
+        return null
+      }
+      const data = (await res.json().catch(() => null)) as { error?: string } | null
+      return data?.error ?? `Falha no pareamento (${res.status})`
+    } catch {
+      return 'Não foi possível contactar o backend local'
     }
   }, [])
 
@@ -114,5 +146,5 @@ export function useServer() {
     return () => listeners.current.delete(listener)
   }, [])
 
-  return { status, agents, workspace, tasks, missions, history, configs, allConfigs, specializations, skills, skillOverrides, send, subscribe }
+  return { status, authRequired, pair, agents, workspace, tasks, missions, history, configs, allConfigs, specializations, skills, skillOverrides, send, subscribe }
 }

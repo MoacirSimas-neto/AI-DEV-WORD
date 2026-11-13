@@ -478,7 +478,13 @@ export function createAppServer({
   chat,
   allowedOrigins,
   authToken,
-}: AppServerOptions & { authToken?: string }): Server & { authToken: string } {
+  pairingCode,
+  pairingTtlMs,
+}: AppServerOptions & {
+  authToken?: string
+  pairingCode?: string
+  pairingTtlMs?: number
+}): Server & { authToken: string; pairingCode: string } {
   for (const cfg of agentConfigs.list()) {
     if (!cfg.isBuiltin) {
       registry.registerAgent({
@@ -493,6 +499,56 @@ export function createAppServer({
       })
     }
   }
+  const sessionToken = authToken || process.env.AIDW_AUTH_TOKEN || randomBytes(32).toString('hex')
+  const currentPairingCode = (pairingCode || randomBytes(4).toString('hex')).toUpperCase()
+  const pairingExpiresAt = Date.now() + (pairingTtlMs ?? 10 * 60 * 1000)
+  let pairingUsed = false
+  let pairingAttempts = 0
+  const MAX_PAIRING_ATTEMPTS = 5
+  const activeSessions = new Set<string>()
+
+  const safeEqual = (aStr: string, bStr: string): boolean => {
+    const a = Buffer.from(aStr, 'utf8')
+    const b = Buffer.from(bStr, 'utf8')
+    return a.length === b.length && timingSafeEqual(a, b)
+  }
+
+  const readCookie = (req: IncomingMessage, name: string): string | null => {
+    const header = req.headers.cookie
+    if (typeof header !== 'string') return null
+    for (const part of header.split(';')) {
+      const idx = part.indexOf('=')
+      if (idx <= 0) continue
+      if (part.slice(0, idx).trim() === name) return part.slice(idx + 1).trim()
+    }
+    return null
+  }
+
+  const hasValidSessionCookie = (req: IncomingMessage): boolean => {
+    const cookie = readCookie(req, 'aidw_session')
+    if (!cookie) return false
+    for (const valid of activeSessions) {
+      if (safeEqual(cookie, valid)) return true
+    }
+    return false
+  }
+
+  const hasValidSessionToken = (req: IncomingMessage): boolean => {
+    if (hasValidSessionCookie(req)) return true
+    const auth = req.headers.authorization
+    if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+      if (safeEqual(auth.slice(7).trim(), sessionToken)) return true
+    }
+    const protoHeader = req.headers['sec-websocket-protocol']
+    if (typeof protoHeader === 'string') {
+      const parts = protoHeader.split(',').map((p) => p.trim())
+      if (parts.includes('aidw-auth') && parts.some((p) => p !== 'aidw-auth' && safeEqual(p, sessionToken))) {
+        return true
+      }
+    }
+    return false
+  }
+
   const server = createServer((req, res) => {
     const origin = req.headers.origin
     if (!hasLocalHost(req) || (origin && !allowedOrigins.includes(origin))) {
@@ -503,29 +559,87 @@ export function createAppServer({
       res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}')
       return
     }
+    if (req.method === 'GET' && req.url === '/api/session') {
+      res
+        .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        .end(JSON.stringify({ authenticated: hasValidSessionToken(req) }))
+      return
+    }
+    if (req.method === 'POST' && req.url === '/api/pair') {
+      if (!origin || !allowedOrigins.includes(origin)) {
+        res.writeHead(403).end()
+        return
+      }
+      if (pairingUsed) {
+        res.writeHead(409, { 'content-type': 'application/json' }).end('{"error":"Código já utilizado"}')
+        return
+      }
+      if (Date.now() > pairingExpiresAt) {
+        res.writeHead(410, { 'content-type': 'application/json' }).end('{"error":"Código expirado"}')
+        return
+      }
+      if (pairingAttempts >= MAX_PAIRING_ATTEMPTS) {
+        res.writeHead(429, { 'content-type': 'application/json' }).end('{"error":"Muitas tentativas"}')
+        return
+      }
+      let body = ''
+      let tooLarge = false
+      req.on('data', (chunk) => {
+        body += String(chunk)
+        if (body.length > 1024) {
+          tooLarge = true
+          req.destroy()
+        }
+      })
+      req.on('end', () => {
+        if (tooLarge) {
+          res.writeHead(413).end()
+          return
+        }
+        let code = ''
+        try {
+          const parsed = JSON.parse(body) as { code?: unknown }
+          if (typeof parsed.code === 'string') code = parsed.code.trim().toUpperCase()
+        } catch {
+          res.writeHead(400).end()
+          return
+        }
+        if (!code || !safeEqual(code, currentPairingCode)) {
+          pairingAttempts += 1
+          const status = pairingAttempts >= MAX_PAIRING_ATTEMPTS ? 429 : 401
+          res.writeHead(status, { 'content-type': 'application/json' }).end('{"error":"Código inválido"}')
+          return
+        }
+        pairingUsed = true
+        const sessionCookie = randomBytes(32).toString('hex')
+        activeSessions.add(sessionCookie)
+        res
+          .writeHead(200, {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+            'set-cookie': `aidw_session=${sessionCookie}; HttpOnly; SameSite=Strict; Path=/`,
+          })
+          .end('{"ok":true}')
+      })
+      return
+    }
+    if (req.method === 'POST' && req.url === '/api/logout') {
+      if (!origin || !allowedOrigins.includes(origin)) {
+        res.writeHead(403).end()
+        return
+      }
+      const cookie = readCookie(req, 'aidw_session')
+      if (cookie) activeSessions.delete(cookie)
+      res
+        .writeHead(200, {
+          'content-type': 'application/json',
+          'set-cookie': 'aidw_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0',
+        })
+        .end('{"ok":true}')
+      return
+    }
     res.writeHead(404).end()
   })
-
-  const sessionToken = authToken || process.env.AIDW_AUTH_TOKEN || randomBytes(32).toString('hex')
-  const safeEqualToken = (candidate: string): boolean => {
-    const a = Buffer.from(candidate, 'utf8')
-    const b = Buffer.from(sessionToken, 'utf8')
-    return a.length === b.length && timingSafeEqual(a, b)
-  }
-  const hasValidSessionToken = (req: IncomingMessage): boolean => {
-    const auth = req.headers.authorization
-    if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
-      if (safeEqualToken(auth.slice(7).trim())) return true
-    }
-    const protoHeader = req.headers['sec-websocket-protocol']
-    if (typeof protoHeader === 'string') {
-      const parts = protoHeader.split(',').map((p) => p.trim())
-      if (parts.includes('aidw-auth') && parts.some((p) => p !== 'aidw-auth' && safeEqualToken(p))) {
-        return true
-      }
-    }
-    return false
-  }
 
   const wss = new WebSocketServer({
     noServer: true,
@@ -556,6 +670,7 @@ export function createAppServer({
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws))
   })
   Object.defineProperty(server, 'authToken', { value: sessionToken, enumerable: false })
+  Object.defineProperty(server, 'pairingCode', { value: currentPairingCode, enumerable: false })
 
   /** Ações de projeto: aplica, avisa todos; se falhar, avisa só quem pediu. */
   const changeWorkspace = (socket: WebSocket, action: () => void) => {
@@ -1194,5 +1309,5 @@ export function createAppServer({
     for (const client of wss.clients) client.terminate()
   })
 
-  return server as Server & { authToken: string }
+  return server as Server & { authToken: string; pairingCode: string }
 }

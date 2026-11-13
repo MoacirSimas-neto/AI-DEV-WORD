@@ -627,3 +627,71 @@ test('WebSocket recusa conexão sem token ou com token inválido (401) e aceita 
     wsProto.once('error', reject)
   })
 })
+
+test('pareamento local emite cookie HttpOnly, bloqueia reuso/força bruta/expiração e logout invalida sessão', async () => {
+  // 1. Sem Origin -> 403 (CSRF)
+  const noOriginRes = await fetch(`http://127.0.0.1:${port}/api/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: server.pairingCode }),
+  })
+  assert.equal(noOriginRes.status, 403)
+
+  // 2. Código válido -> 200 + Set-Cookie HttpOnly; SameSite=Strict; Path=/
+  const pairRes = await fetch(`http://127.0.0.1:${port}/api/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: ORIGIN },
+    body: JSON.stringify({ code: server.pairingCode }),
+  })
+  assert.equal(pairRes.status, 200)
+  const setCookie = pairRes.headers.get('set-cookie') ?? ''
+  assert.match(setCookie, /aidw_session=[a-f0-9]+/)
+  assert.match(setCookie, /HttpOnly/i)
+  assert.match(setCookie, /SameSite=Strict/i)
+  assert.match(setCookie, /Path=\//i)
+  const cookiePair = setCookie.split(';')[0]
+
+  // 3. Reuso do mesmo código -> 409
+  const reuseRes = await fetch(`http://127.0.0.1:${port}/api/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: ORIGIN },
+    body: JSON.stringify({ code: server.pairingCode }),
+  })
+  assert.equal(reuseRes.status, 409)
+
+  // 4. WebSocket com cookie de sessão -> aceito
+  await new Promise<void>((resolve, reject) => {
+    const wsCookie = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      origin: ORIGIN,
+      headers: { Cookie: cookiePair },
+    })
+    wsCookie.once('open', () => {
+      wsCookie.close()
+      resolve()
+    })
+    wsCookie.once('error', reject)
+  })
+
+  // 5. Logout invalida sessão -> WebSocket com cookie antigo recebe 401
+  const logoutRes = await fetch(`http://127.0.0.1:${port}/api/logout`, {
+    method: 'POST',
+    headers: { origin: ORIGIN, cookie: cookiePair },
+  })
+  assert.equal(logoutRes.status, 200)
+
+  await new Promise<void>((resolve, reject) => {
+    const wsAfterLogout = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      origin: ORIGIN,
+      headers: { Cookie: cookiePair },
+    })
+    wsAfterLogout.on('error', () => {})
+    wsAfterLogout.once('unexpected-response', (_req, res) => {
+      assert.equal(res.statusCode, 401)
+      resolve()
+    })
+    wsAfterLogout.once('open', () => {
+      wsAfterLogout.close()
+      reject(new Error('Deveria recusar cookie após logout'))
+    })
+  })
+})

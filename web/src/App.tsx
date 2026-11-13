@@ -28,6 +28,8 @@ export type NavTab = StudioTab | 'home' | 'prototypes'
 function App() {
   const {
     status,
+    authRequired,
+    pair,
     agents,
     workspace,
     tasks,
@@ -124,9 +126,99 @@ function App() {
       ).length
     : 0
 
+  const [pairingInput, setPairingInput] = useState('')
+  const [pairingError, setPairingError] = useState<string | null>(null)
+  const [pairingBusy, setPairingBusy] = useState(false)
+
   return (
     <ErrorBoundary fallbackTitle="Falha geral na interface do AI Dev World">
       <div className="proto-office-studio-shell">
+        {authRequired && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Pareamento local"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9999,
+              background: 'rgba(2, 6, 23, 0.84)',
+              backdropFilter: 'blur(12px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 16,
+            }}
+          >
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (!pairingInput.trim() || pairingBusy) return
+                setPairingBusy(true)
+                setPairingError(null)
+                const err = await pair(pairingInput)
+                setPairingBusy(false)
+                if (err) setPairingError(err)
+                else setPairingInput('')
+              }}
+              style={{
+                width: '100%',
+                maxWidth: 400,
+                background: 'rgba(15, 23, 42, 0.94)',
+                border: '1px solid rgba(148, 163, 184, 0.25)',
+                borderRadius: 12,
+                padding: 20,
+                color: '#f8fafc',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              <h2 style={{ margin: 0, fontSize: 18 }}>Pareamento Local</h2>
+              <p style={{ margin: 0, fontSize: 13, color: '#cbd5e1' }}>
+                Digite o código exibido no terminal do backend para autenticar esta sessão.
+              </p>
+              <input
+                type="text"
+                autoFocus
+                value={pairingInput}
+                onChange={(e) => setPairingInput(e.target.value)}
+                placeholder="Ex.: A3F9C102"
+                aria-label="Código de pareamento"
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(148, 163, 184, 0.35)',
+                  background: '#0f172a',
+                  color: '#f8fafc',
+                  fontSize: 15,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                }}
+              />
+              {pairingError && (
+                <p role="alert" style={{ margin: 0, fontSize: 12, color: '#fca5a5' }}>
+                  {pairingError}
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={pairingBusy || !pairingInput.trim()}
+                style={{
+                  padding: '9px 14px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#38bdf8',
+                  color: '#0f172a',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {pairingBusy ? 'Validando…' : 'Conectar'}
+              </button>
+            </form>
+          </div>
+        )}
         {/* 1. Barra Superior Moderna Unificada do Studio */}
         <StudioTopBar
           workspace={workspace}

@@ -1,5 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import path from 'node:path'
+import { mkdirSync } from 'node:fs'
 import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { cliMode, requireSimulatedClis } from './cli/mode.ts'
@@ -146,12 +145,6 @@ const server = createAppServer({
   allowedOrigins: ALLOWED_ORIGINS,
 })
 
-const TOKEN_FILE = path.join(DATA_DIR, 'session-token')
-writeFileSync(TOKEN_FILE, server.authToken, { encoding: 'utf8', mode: 0o600 })
-process.on('exit', () => {
-  try { rmSync(TOKEN_FILE, { force: true }) } catch { /* ignore */ }
-})
-
 server.on('error', (error: NodeJS.ErrnoException) => {
   const reason =
     error.code === 'EADDRINUSE' ? `a porta ${PORT} já está em uso (outra cópia do app aberta?)` : error.message
@@ -161,6 +154,7 @@ server.on('error', (error: NodeJS.ErrnoException) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`AI Dev World: backend em http://${HOST}:${PORT}`)
+  console.log(`Código de pareamento local: ${server.pairingCode}`)
   console.log(`Dados locais: ${DATABASE_FILE}`)
   for (const agent of registry.list()) void registry.check(agent.id)
 })
