@@ -205,6 +205,14 @@ function App() {
           />
         )}
 
+        {activeTab !== 'office' && (
+          <div className="studio-page-breadcrumb">
+            <button type="button" className="btn btn-sm" onClick={() => setActiveTab('office')}>
+              ← Voltar ao Escritório
+            </button>
+          </div>
+        )}
+
         {/* 3. Painel de Tarefas & Projetos */}
         {activeTab === 'tasks' && (
           <div className="studio-page-view">

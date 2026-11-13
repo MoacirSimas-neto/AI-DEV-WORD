@@ -5072,3 +5072,29 @@ body,
   -webkit-backdrop-filter: var(--glass-blur, blur(14px));
   border-left: 1px solid var(--glass-border, rgba(255, 255, 255, 0.11));
 }
+
+
+/* ===== Etapa 12.4.3 — Secondary Pages Breadcrumb & Glassy Polish ===== */
+.studio-page-breadcrumb {
+  width: 100%;
+  max-width: 1320px;
+  margin: 10px auto 0;
+  padding: 0 16px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
+
+.studio-page-view .window {
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+
+.studio-page-view input,
+.studio-page-view select,
+.studio-page-view textarea {
+  background: rgba(10, 15, 28, 0.78);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.14));
+  border-radius: 8px;
+  color: #f1f5f9;
+}
