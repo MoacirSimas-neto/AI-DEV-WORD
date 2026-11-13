@@ -5113,7 +5113,7 @@ body,
   border: 1px solid rgba(148, 163, 184, 0.35);
 }
 
-/* Contrast fix for dark-glassy .studio-page-view .window headers */
+/* Dark-glassy theme for all cards, bars, and banners inside .studio-page-view */
 .studio-page-view .window > .window-header h1,
 .studio-page-view .window > .window-header h2,
 .studio-page-view .window > .window-header h3,
@@ -5122,13 +5122,40 @@ body,
   color: #f8fafc;
 }
 
-.studio-page-view .agent-card,
-.studio-page-view .agent-card h3,
-.studio-page-view .agent-card h4,
 .studio-page-view .agent-config-card,
-.studio-page-view .agent-config-card .agent-card-header strong,
-.studio-page-view .window-message,
 .studio-page-view .agent-profiles-bar,
-.studio-page-view .agent-filters-bar {
-  color: #1e2530;
+.studio-page-view .agent-filters-bar,
+.studio-page-view .window-message {
+  background: rgba(30, 41, 59, 0.72);
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 4px 16px rgba(2, 6, 23, 0.35);
+  border-radius: 10px;
+}
+
+.studio-page-view .agent-config-card .agent-card-header strong,
+.studio-page-view .agent-profiles-bar .agent-profiles-title,
+.studio-page-view .agent-filters-bar label,
+.studio-page-view .agent-config-card label {
+  color: #f8fafc;
+}
+
+.studio-page-view .agent-config-card p,
+.studio-page-view .agent-config-card small,
+.studio-page-view .agent-profiles-bar small {
+  color: #cbd5e1;
+}
+
+.studio-page-view .agent-profiles-bar button,
+.studio-page-view .agent-config-card button:not(.btn-primary) {
+  background: rgba(51, 65, 85, 0.85);
+  color: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  box-shadow: none;
+  border-radius: 6px;
+}
+
+.studio-page-view .agent-profiles-bar button:hover,
+.studio-page-view .agent-config-card button:not(.btn-primary):hover {
+  background: rgba(71, 85, 105, 0.95);
 }
