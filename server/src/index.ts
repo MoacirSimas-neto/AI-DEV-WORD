@@ -1,4 +1,5 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { AgentConfigStore } from './agents/configStore.ts'
 import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
 import { cliMode, requireSimulatedClis } from './cli/mode.ts'
@@ -21,7 +22,7 @@ import { agyEffortArgs, TeamRunner } from './team/runner.ts'
 import { TerminalManager } from './terminal/manager.ts'
 import { spawnCliPty } from './terminal/spawnPty.ts'
 
-mkdirSync(DATA_DIR, { recursive: true })
+mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 })
 // A trava vem antes de abrir o banco: uma segunda instância não pode migrar o
 // esquema nem rodar a recuperação de missões sobre os dados da primeira.
 let instanceLock: InstanceLock
@@ -143,6 +144,12 @@ const server = createAppServer({
   plans,
   chat: { store: chatStore, service: chat },
   allowedOrigins: ALLOWED_ORIGINS,
+})
+
+const TOKEN_FILE = path.join(DATA_DIR, 'session-token')
+writeFileSync(TOKEN_FILE, server.authToken, { encoding: 'utf8', mode: 0o600 })
+process.on('exit', () => {
+  try { rmSync(TOKEN_FILE, { force: true }) } catch { /* ignore */ }
 })
 
 server.on('error', (error: NodeJS.ErrnoException) => {
