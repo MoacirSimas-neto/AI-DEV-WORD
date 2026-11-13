@@ -202,17 +202,18 @@ export function StudioOfficeView({
             </button>
           </div>
           <div className="office-left-chat-body">
-            <ErrorBoundary label="Chat">
+            <ErrorBoundary>
               <Suspense fallback={<p className="muted" style={{ padding: 12 }}>Carregando chat...</p>}>
                 <LazyChatView
                   projectId={activeProjectId}
                   agents={agents}
+                  configs={configs}
                   missions={missions}
                   tasks={tasks}
                   online={online}
                   send={send}
                   subscribe={subscribe}
-                  onOpenMission={() => onSetSideTab('mission')}
+                  onOpenTasks={() => onSetSideTab('mission')}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -321,41 +322,7 @@ export function StudioOfficeView({
               const inTeam = team.active.includes(ag.id)
               const released = team.released.includes(ag.id)
 
-              const [leftChatOpen, setLeftChatOpen] = useState<boolean>(() =>
-    typeof window !== 'undefined' ? window.innerWidth >= 1100 : true,
-  )
-  const [leftChatWidth, setLeftChatWidth] = useState<number>(() => {
-    try {
-      const saved = Number(localStorage.getItem('aidw.leftChatWidth'))
-      return Number.isFinite(saved) && saved >= 280 && saved <= 560 ? saved : 340
-    } catch {
-      return 340
-    }
-  })
-
-  const startLeftChatResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const startWidth = leftChatWidth
-    const onMove = (ev: PointerEvent) => {
-      const next = Math.max(280, Math.min(560, startWidth + (ev.clientX - startX)))
-      setLeftChatWidth(next)
-    }
-    const onUp = (ev: PointerEvent) => {
-      const finalWidth = Math.max(280, Math.min(560, startWidth + (ev.clientX - startX)))
-      try {
-        localStorage.setItem('aidw.leftChatWidth', String(finalWidth))
-      } catch {
-        // ignore storage errors
-      }
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }, [leftChatWidth])
-
-  return (
+              return (
                 <button
                   key={ag.id}
                   type="button"
