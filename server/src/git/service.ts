@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import type { GitFile, GitRemoteState, GitStatus, PushPreview } from '../../../shared/protocol.ts'
 import { resolveCommand } from '../cli/resolve.ts'
@@ -284,10 +285,24 @@ export class GitService {
   }
 }
 
-/** Os caminhos vêm do navegador: precisam ser relativos e ficar dentro do projeto. */
+/** Os caminhos vêm do navegador: precisam ser relativos e ficar dentro do projeto (incluindo symlinks/junctions). */
 function assertInside(cwd: string, file: string) {
-  const resolved = path.resolve(cwd, file)
-  if (path.isAbsolute(file) || !resolved.startsWith(path.resolve(cwd) + path.sep)) {
+  if (!file || file.includes('\0') || path.isAbsolute(file)) {
+    throw new Error(`Caminho fora do projeto: ${file}`)
+  }
+  const realCwd = realpathSync(cwd)
+  const resolved = path.resolve(realCwd, file)
+  if (!resolved.startsWith(realCwd + path.sep)) {
+    throw new Error(`Caminho fora do projeto: ${file}`)
+  }
+  let probe = resolved
+  while (!existsSync(probe)) {
+    const parent = path.dirname(probe)
+    if (parent === probe) break
+    probe = parent
+  }
+  const realTarget = realpathSync(probe)
+  if (realTarget !== realCwd && !realTarget.startsWith(realCwd + path.sep)) {
     throw new Error(`Caminho fora do projeto: ${file}`)
   }
 }
