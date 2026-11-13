@@ -1595,7 +1595,7 @@ export class TeamRunner extends EventEmitter {
     const prompt = delegatedStepPrompt(
       task,
       step,
-      { plan, results: asUntrusted(results.join('\n\n')), diff },
+      { plan, results: asUntrusted(results.join('\n\n')), diff: asUntrusted(diff) },
       {
         agentName: cfg?.name,
         specializationId: cfg?.specializationId,
