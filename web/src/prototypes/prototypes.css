@@ -4874,3 +4874,49 @@ td.diff-meta {
     transform: none;
   }
 }
+
+
+/* ===== Etapa 12.4.3 (Fase B/C/D) — Full-Viewport Shell & Z-Index Hierarchy ===== */
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+.proto-office-studio-shell {
+  width: 100%;
+  min-height: 100vh;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.studio-topbar,
+.proto-office-topbar {
+  position: relative;
+  z-index: 120;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.topbar-overflow-menu {
+  z-index: 200;
+}
+
+.studio-page-view {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.studio-page-view .window {
+  max-width: 1320px;
+  width: 100%;
+  min-width: 0;
+}
