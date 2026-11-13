@@ -30,12 +30,14 @@ export function TerminalDock({ activeProjectPath, online, shellIds, agents, hidd
   const [activeId, setActiveId] = useState(MAIN)
   // Só monta (e portanto só inicia) o terminal de uma aba que o usuário realmente abriu.
   const [seen, setSeen] = useState<string[]>([])
+  /** Aba com sessão viva que o usuário pediu para fechar e ainda não confirmou. */
+  const [confirmId, setConfirmId] = useState<string | null>(null)
 
   // As abas pessoais são as criadas aqui mais as que já vivem no backend (página recarregada).
   const shells = [...new Set([...created, ...shellIds])].sort((a, b) => shellNumber(a) - shellNumber(b))
   // Abas de agente só existem enquanto houver sessão real no backend: nada é criado para exibir.
   const agentTabs = agents.filter((a) => a.session)
-  const current = shells.includes(activeId) || agentTabs.some((a) => a.id === activeId) ? activeId : MAIN
+  const current = shells.includes(activeId) || agentTabs.some((a) => a.id === activeId) ? activeId : (shells[0] ?? agentTabs[0]?.id ?? MAIN)
 
   const show = (id: string) => {
     setActiveId(id)
@@ -61,16 +63,21 @@ export function TerminalDock({ activeProjectPath, online, shellIds, agents, hidd
   })
 
   const addShell = () => {
-    const id = `user:${Math.max(...shells.map(shellNumber)) + 1}`
+    const id = `user:${Math.max(0, ...shells.map(shellNumber)) + 1}`
     setCreated((prev) => [...prev, id])
     show(id)
   }
 
   const closeShell = (id: string) => {
+    setConfirmId(null)
     send({ type: 'term-close', agentId: id })
     setCreated((prev) => prev.filter((t) => t !== id))
     setSeen((prev) => prev.filter((t) => t !== id))
   }
+  // shortcut: o backend não sabe se há comando rodando no shell, então toda sessão viva pede
+  // confirmação; trocar por detecção de processo filho se a pergunta incomodar.
+  const requestClose = (id: string) => (shellIds.includes(id) ? setConfirmId(id) : closeShell(id))
+  const confirming = confirmId && shellIds.includes(confirmId) ? confirmId : null
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -123,11 +130,9 @@ export function TerminalDock({ activeProjectPath, online, shellIds, agents, hidd
           {shells.map((id) => (
             <span key={id} className="terminal-dock-tabwrap">
               {tab(id, shellLabel(id))}
-              {id !== MAIN && (
-                <button type="button" className="terminal-dock-x" aria-label={`Fechar ${shellLabel(id)}`} onClick={() => closeShell(id)}>
-                  ×
-                </button>
-              )}
+              <button type="button" className="terminal-dock-x" aria-label={`Fechar ${shellLabel(id)}`} onClick={() => requestClose(id)}>
+                ×
+              </button>
             </span>
           ))}
           <button type="button" className="terminal-dock-x" onClick={addShell} aria-label="Nova aba de terminal">
@@ -140,12 +145,31 @@ export function TerminalDock({ activeProjectPath, online, shellIds, agents, hidd
         </button>
       </div>
 
+      {confirming && (
+        <div className="terminal-dock-empty" role="alertdialog" aria-label="Confirmar encerramento do terminal">
+          <span>Encerrar {shellLabel(confirming)}? Um comando em execução nele será interrompido.</span>
+          <button type="button" className="primary" onClick={() => closeShell(confirming)}>
+            Encerrar terminal
+          </button>
+          <button type="button" onClick={() => setConfirmId(null)}>
+            Cancelar
+          </button>
+        </div>
+      )}
+
       <div className="terminal-dock-body" style={{ display: open ? 'block' : 'none', height: heightPx }}>
         {!activeProjectPath && shellIds.length === 0 && agentTabs.length === 0 ? (
           <div className="terminal-dock-empty">
             <span>Selecione um projeto para abrir o terminal na pasta do workspace.</span>
             <button type="button" className="primary" onClick={onOpenFolderDialog}>
               Selecionar pasta...
+            </button>
+          </div>
+        ) : shells.length === 0 && agentTabs.length === 0 ? (
+          <div className="terminal-dock-empty">
+            <span>Nenhum terminal aberto.</span>
+            <button type="button" className="primary" onClick={addShell}>
+              + Novo terminal
             </button>
           </div>
         ) : (

@@ -176,3 +176,26 @@ Checklist que falta, para o proprietário, no app desktop: (1) instalar e abrir;
 - Ao abrir o dock, o escritório não encolhe para caber: fica com rolagem própria. Cosmético, não alterado.
 - Medição de RAM/CPU com o dock aberto, VM limpa e pendências da auditoria de segurança continuam em aberto.
 
+
+---
+
+## 14. Ajuste pontual — fechar abas pessoais
+
+**Data:** 2026-11-13. O proprietário testou o terminal no app desktop e aprovou funcionamento e visual. Problema relatado: a primeira aba ("Meu Terminal") não podia ser fechada.
+
+Mudança (só `web/src/ui/TerminalDock.tsx`; backend e protocolo intactos):
+
+- Toda aba pessoal tem o X, inclusive a primeira e a última.
+- Fechar envia o mesmo `term-close` de antes: o backend mata a árvore do shell e reenvia a lista de sessões.
+- Sessão viva pede confirmação ("Encerrar terminal" / "Cancelar") numa faixa do próprio dock. Aba sem sessão viva fecha direto.
+- Sem abas pessoais nem de agente: estado vazio com "+ Novo terminal". Nenhuma sessão é criada sozinha, nem por `Ctrl+J`.
+- Abas de agente continuam sem X e sem alteração.
+
+Limitações:
+
+- O backend não sabe se há um comando rodando dentro do shell. Por isso a confirmação aparece para **toda** sessão viva, não só quando há comando ativo.
+- Ao reiniciar o aplicativo (ou recarregar a página) sem nenhuma sessão viva, a aba "Meu Terminal" volta a aparecer como ponto de partida; o shell só nasce se o usuário abrir o dock. Reconexão sem recarga não traz abas fechadas de volta.
+
+Testes: `npm.cmd run check` passou — 314 do backend e 94 da interface (408). Novos: 5 em `web/src/ui/TerminalDock.test.tsx` (primeira/única aba, confirmar e cancelar, primeira e última entre várias, reconexão, aba de agente) e 1 em `server/src/terminal/userShellClose.test.ts` (shell real com comando rodando: shell e processo filho morrem, a outra aba fica, a lista esvazia, nada renasce).
+
+Validação visual: feita no navegador contra a instância isolada (confirmação, cancelar, encerrar, estado vazio, `Ctrl+J` sem criar sessão, "+ Novo terminal", fechar uma entre duas, recarga mostrando só a sessão viva). **Não validado no app desktop.**
