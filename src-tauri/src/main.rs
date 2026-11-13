@@ -74,18 +74,13 @@ fn main() {
                     .menu(&menu)
                     .tooltip("AI Dev World")
                     .show_menu_on_left_click(false)
-                    .on_menu_event({
-                        let mgr_q = Arc::clone(&mgr);
-                        let lc_q = Arc::clone(&lc);
-                        move |app, event| match event.id.as_ref() {
-                            "open" => restore_main_window(app),
-                            "quit" => {
-                                lc_q.quitting.store(true, Ordering::SeqCst);
-                                mgr_q.stop();
-                                app.exit(0);
-                            }
-                            _ => {}
+                    .on_menu_event(move |app, event| match event.id.as_ref() {
+                        "open" => restore_main_window(app),
+                        "quit" => {
+                            restore_main_window(app);
+                            let _ = app.emit("tray-quit-requested", ());
                         }
+                        _ => {}
                     })
                     .on_tray_icon_event(|tray, event| {
                         if let TrayIconEvent::Click {

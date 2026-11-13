@@ -5,7 +5,8 @@ import { useChatLinks } from './net/useChatLinks.ts'
 import { useGitStatus } from './net/useGitStatus.ts'
 import { useServer } from './net/useServer.ts'
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
-import { CloseConfirmModal, loadCloseBehavior, saveCloseBehavior } from './ui/CloseConfirmModal.tsx'
+import { CloseConfirmModal } from './ui/CloseConfirmModal.tsx'
+import { loadCloseBehavior, saveCloseBehavior } from './ui/closeBehavior.ts'
 import { StudioTopBar, type StudioTab } from './ui/StudioTopBar.tsx'
 import { StudioOfficeView } from './ui/StudioOfficeView.tsx'
 import {
@@ -68,6 +69,7 @@ function App() {
     if (!tauri) return
 
     let unlistenId: number | null = null
+    let unlistenTrayQuitId: number | null = null
     const cbId = tauri.transformCallback(() => {
       const pref = loadCloseBehavior()
       const hasActive = missions.some((m) => isOpenMission(m))
@@ -76,6 +78,15 @@ function App() {
         return
       }
       if (pref === 'quit' && !hasActive) {
+        void tauri.invoke('quit_app')
+        return
+      }
+      setCloseModalOpen(true)
+    })
+
+    const trayQuitCbId = tauri.transformCallback(() => {
+      const hasActive = missions.some((m) => isOpenMission(m))
+      if (!hasActive) {
         void tauri.invoke('quit_app')
         return
       }
@@ -93,9 +104,23 @@ function App() {
       })
       .catch(() => {})
 
+    void tauri
+      .invoke<number>('plugin:event|listen', {
+        event: 'tray-quit-requested',
+        target: { kind: 'Any' },
+        handler: trayQuitCbId,
+      })
+      .then((id) => {
+        unlistenTrayQuitId = id
+      })
+      .catch(() => {})
+
     return () => {
       if (unlistenId !== null) {
         void tauri.invoke('plugin:event|unlisten', { event: 'close-requested', eventId: unlistenId }).catch(() => {})
+      }
+      if (unlistenTrayQuitId !== null) {
+        void tauri.invoke('plugin:event|unlisten', { event: 'tray-quit-requested', eventId: unlistenTrayQuitId }).catch(() => {})
       }
     }
   }, [missions])

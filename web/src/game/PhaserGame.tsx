@@ -69,8 +69,36 @@ export function PhaserGame({ agents, selectedId, onSelect, onAction, team, forwa
         })
       })
 
+    let unlistenVisId: number | null = null
+    const tauri = (window as unknown as {
+      __TAURI_INTERNALS__?: {
+        invoke: <R>(c: string, args?: unknown) => Promise<R>
+        transformCallback: (cb: (e: { payload: boolean }) => void) => number
+      }
+    }).__TAURI_INTERNALS__
+    if (tauri) {
+      const cbId = tauri.transformCallback((ev) => {
+        if (!game) return
+        if (ev.payload) game.loop.wake()
+        else game.loop.sleep()
+      })
+      void tauri
+        .invoke<number>('plugin:event|listen', {
+          event: 'window-visibility',
+          target: { kind: 'Any' },
+          handler: cbId,
+        })
+        .then((id) => {
+          unlistenVisId = id
+        })
+        .catch(() => {})
+    }
+
     return () => {
       disposed = true
+      if (tauri && unlistenVisId !== null) {
+        void tauri.invoke('plugin:event|unlisten', { event: 'window-visibility', eventId: unlistenVisId }).catch(() => {})
+      }
       bridgeRef.current = null
       bridge.removeAllListeners()
       game?.destroy(true)
