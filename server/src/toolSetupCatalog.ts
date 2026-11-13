@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { promisify } from 'node:util'
 import { probeTool, type ToolDiagnostic } from './environmentDiagnostics.ts'
 
@@ -69,15 +70,27 @@ export const TOOL_SETUP_CATALOG: Record<SupportedToolId, ToolSetupSpec> = {
     name: 'Claude Code CLI',
     vendor: 'Anthropic',
     originUrl: 'https://docs.anthropic.com/en/docs/claude-code/overview',
-    installMethod: 'npm',
-    packageRef: '@anthropic-ai/claude-code',
+    installMethod: 'winget',
+    packageRef: 'Anthropic.ClaudeCode',
     requiresInternet: true,
     requiresAdmin: false,
-    requiresGlobalNode: true,
-    systemChanges: 'Instala @anthropic-ai/claude-code globalmente via npm do usuário.',
+    requiresGlobalNode: false,
+    systemChanges: 'Instala Claude Code CLI via winget (Anthropic.ClaudeCode).',
     accountNote: 'Requer conta Anthropic compatível configurada pelo usuário.',
     authHint: 'Execute `claude` no terminal para concluir o login oficial.',
   },
+}
+
+const CONSENT_TTL_MS = 60_000
+const pendingConsents = new Map<string, { toolId: SupportedToolId; expiresAt: number }>()
+
+export function issueSetupConsent(toolId: string): { nonce: string; toolId: SupportedToolId; expiresAt: number } | null {
+  if (!Object.prototype.hasOwnProperty.call(TOOL_SETUP_CATALOG, toolId)) return null
+  const id = toolId as SupportedToolId
+  const nonce = randomBytes(16).toString('hex')
+  const expiresAt = Date.now() + CONSENT_TTL_MS
+  pendingConsents.set(nonce, { toolId: id, expiresAt })
+  return { nonce, toolId: id, expiresAt }
 }
 
 const activeInstalls = new Set<SupportedToolId>()
@@ -109,7 +122,7 @@ const defaultRunner: CommandRunner = async (cmd, args, timeoutMs) => {
 export async function executeGuidedInstall(
   toolId: string,
   options: {
-    confirmed: boolean
+    consentNonce?: string
     runner?: CommandRunner
     simulatedDir?: string
     timeoutMs?: number
@@ -129,16 +142,19 @@ export async function executeGuidedInstall(
   const id = toolId as SupportedToolId
   const spec = TOOL_SETUP_CATALOG[id]
 
-  if (!options.confirmed) {
+  const consent = options.consentNonce ? pendingConsents.get(options.consentNonce) : undefined
+  if (!consent || consent.toolId !== id || Date.now() > consent.expiresAt) {
+    if (options.consentNonce) pendingConsents.delete(options.consentNonce)
     return {
-      httpStatus: 400,
+      httpStatus: 403,
       result: {
         toolId: id,
         status: 'cancelled',
-        message: 'Consentimento explícito obrigatório antes de instalar.',
+        message: 'Autorização de uso único ausente, expirada ou inválida para esta ferramenta.',
       },
     }
   }
+  pendingConsents.delete(options.consentNonce!)
 
   if (activeInstalls.has(id)) {
     return {

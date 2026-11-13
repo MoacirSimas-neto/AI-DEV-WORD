@@ -8,7 +8,7 @@ import type { ChatService } from './chat/service.ts'
 import type { ChatStore } from './chat/store.ts'
 import { describeDatabaseError } from './db/database.ts'
 import { runEnvironmentDiagnostics } from './environmentDiagnostics.ts'
-import { executeGuidedInstall, TOOL_SETUP_CATALOG } from './toolSetupCatalog.ts'
+import { executeGuidedInstall, issueSetupConsent, TOOL_SETUP_CATALOG } from './toolSetupCatalog.ts'
 import { redact } from './security/redact.ts'
 import type {
   AgentConfig,
@@ -641,6 +641,38 @@ export function createAppServer({
         .end(JSON.stringify({ tools: Object.values(TOOL_SETUP_CATALOG) }))
       return
     }
+    if (req.method === 'POST' && req.url === '/api/setup/consent') {
+      if (!hasValidSessionToken(req)) {
+        res.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"Unauthorized"}')
+        return
+      }
+      if (origin && !effectiveAllowedOrigins.includes(origin)) {
+        res.writeHead(403).end()
+        return
+      }
+      let raw = ''
+      req.on('data', (chunk) => {
+        raw += chunk
+        if (raw.length > 1024) req.destroy()
+      })
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(raw || '{}') as { toolId?: unknown }
+          const toolId = typeof parsed.toolId === 'string' ? parsed.toolId : ''
+          const consent = issueSetupConsent(toolId)
+          if (!consent) {
+            res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid toolId"}')
+            return
+          }
+          res
+            .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+            .end(JSON.stringify(consent))
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid JSON"}')
+        }
+      })
+      return
+    }
     if (req.method === 'POST' && req.url === '/api/setup/install') {
       if (!hasValidSessionToken(req)) {
         res.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"Unauthorized"}')
@@ -656,16 +688,16 @@ export function createAppServer({
         if (raw.length > 4096) req.destroy()
       })
       req.on('end', () => {
-        let parsed: { toolId?: unknown; confirmed?: unknown } = {}
+        let parsed: { toolId?: unknown; consentNonce?: unknown } = {}
         try {
-          parsed = JSON.parse(raw || '{}') as { toolId?: unknown; confirmed?: unknown }
+          parsed = JSON.parse(raw || '{}') as { toolId?: unknown; consentNonce?: unknown }
         } catch {
           res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid JSON"}')
           return
         }
         const toolId = typeof parsed.toolId === 'string' ? parsed.toolId : ''
-        const confirmed = parsed.confirmed === true
-        void executeGuidedInstall(toolId, { confirmed }).then(({ httpStatus, result }) => {
+        const consentNonce = typeof parsed.consentNonce === 'string' ? parsed.consentNonce : undefined
+        void executeGuidedInstall(toolId, { consentNonce }).then(({ httpStatus, result }) => {
           res
             .writeHead(httpStatus, { 'content-type': 'application/json', 'cache-control': 'no-store' })
             .end(JSON.stringify(result))

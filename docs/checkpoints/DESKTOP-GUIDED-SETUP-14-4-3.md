@@ -6,12 +6,10 @@
 ---
 
 ## 1. Arquitetura e Catálogo Fixo
-- **Backend (`server/src/toolSetupCatalog.ts`):**
-  - Catálogo fixo (`TOOL_SETUP_CATALOG`) para `git` (`winget` `Git.Git`), `codex` (`npm` `@openai/codex`), `gemini` (`npm` `@google/gemini-cli`) e `claude` (`npm` `@anthropic-ai/claude-code`).
-  - Nenhuma entrada arbitrária do frontend é aceita; argumentos são fixos e executados via `execFile` sem `shell: true` genérico.
-  - Exige `confirmed === true`, bloqueia instalações concorrentes (`409`), recusa sobrescrever ferramentas já instaladas (`already_installed`) e re-executa `probeTool` após instalar.
-- **Endpoints (`server/src/server.ts`):**
-  - `GET /api/setup/catalog` e `POST /api/setup/install` protegidos por `hasValidSessionToken(req)` + validação de `Origin`.
+- **Catálogo (`server/src/toolSetupCatalog.ts`):**
+  - `git` (`winget` `Git.Git`), `codex` (`npm` `@openai/codex`), `gemini` (`npm` `@google/gemini-cli`), `claude` (`winget` `Anthropic.ClaudeCode`).
+  - Consentimento de uso único (`issueSetupConsent` → `consentNonce` com TTL 60s, escopo por `toolId`, proteção contra replay).
+  - Endpoints: `GET /api/setup/catalog`, `POST /api/setup/consent`, `POST /api/setup/install`.
 
 ## 2. Segurança e Autenticação dos Provedores
 - Separa instalação de autenticação: nunca coleta tokens, cookies ou API keys, e nunca ativa cobrança automática.

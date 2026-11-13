@@ -3,16 +3,25 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { executeGuidedInstall } from './toolSetupCatalog.ts'
+import { executeGuidedInstall, issueSetupConsent, TOOL_SETUP_CATALOG } from './toolSetupCatalog.ts'
 
-test('toolSetupCatalog: recusa ferramenta desconhecida e instalação sem consentimento', async () => {
-  const unknown = await executeGuidedInstall('rm -rf /', { confirmed: true })
+test('toolSetupCatalog: catálogo usa winget Anthropic.ClaudeCode para Claude Code', () => {
+  assert.equal(TOOL_SETUP_CATALOG.claude.installMethod, 'winget')
+  assert.equal(TOOL_SETUP_CATALOG.claude.packageRef, 'Anthropic.ClaudeCode')
+  assert.equal(TOOL_SETUP_CATALOG.git.packageRef, 'Git.Git')
+})
+
+test('toolSetupCatalog: recusa ferramenta desconhecida, consentimento ausente e replay de nonce', async () => {
+  const unknown = await executeGuidedInstall('rm -rf /', { consentNonce: 'abc' })
   assert.equal(unknown.httpStatus, 400)
-  assert.equal(unknown.result.status, 'failed')
 
-  const unconfirmed = await executeGuidedInstall('codex', { confirmed: false })
-  assert.equal(unconfirmed.httpStatus, 400)
-  assert.equal(unconfirmed.result.status, 'cancelled')
+  const missing = await executeGuidedInstall('codex', {})
+  assert.equal(missing.httpStatus, 403)
+  assert.equal(missing.result.status, 'cancelled')
+
+  const wrongToolConsent = issueSetupConsent('git')!
+  const wrongTool = await executeGuidedInstall('codex', { consentNonce: wrongToolConsent.nonce })
+  assert.equal(wrongTool.httpStatus, 403)
 })
 
 test('toolSetupCatalog: recusa sobrescrever ferramenta já instalada', async () => {
@@ -24,20 +33,25 @@ test('toolSetupCatalog: recusa sobrescrever ferramenta já instalada', async () 
       process.platform === 'win32' ? '@echo off\r\necho git version 2.47.0\r\n' : '#!/bin/sh\necho "git version 2.47.0"\n',
       { mode: 0o755 }
     )
-    const res = await executeGuidedInstall('git', { confirmed: true, simulatedDir: dir })
+    const consent = issueSetupConsent('git')!
+    const res = await executeGuidedInstall('git', { consentNonce: consent.nonce, simulatedDir: dir })
     assert.equal(res.httpStatus, 200)
     assert.equal(res.result.status, 'already_installed')
+
+    const replay = await executeGuidedInstall('git', { consentNonce: consent.nonce, simulatedDir: dir })
+    assert.equal(replay.httpStatus, 403)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('toolSetupCatalog: instala ferramenta simulada com argumentos fixos e reverifica', async () => {
+test('toolSetupCatalog: instala ferramenta simulada com nonce de uso único e reverifica', async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'aidw-setup-ok-'))
   try {
     const ext = process.platform === 'win32' ? '.cmd' : ''
+    const consent = issueSetupConsent('codex')!
     const res = await executeGuidedInstall('codex', {
-      confirmed: true,
+      consentNonce: consent.nonce,
       simulatedDir: dir,
       runner: async (_cmd, args) => {
         assert.ok(args.includes('@openai/codex'))
