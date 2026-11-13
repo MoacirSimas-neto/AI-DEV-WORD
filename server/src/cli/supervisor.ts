@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { rmSync } from 'node:fs'
+import { chmodSync, rmSync } from 'node:fs'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -54,7 +54,10 @@ export class ProcessSupervisor {
     server.on('connection', (socket) => supervisor.accept(socket))
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject)
-      server.listen(address, () => resolve())
+      server.listen(address, () => {
+        if (process.platform !== 'win32') chmodSync(address, 0o600)
+        resolve()
+      })
     })
     return supervisor
   }
