@@ -8,6 +8,7 @@ import type { ChatService } from './chat/service.ts'
 import type { ChatStore } from './chat/store.ts'
 import { describeDatabaseError } from './db/database.ts'
 import { runEnvironmentDiagnostics } from './environmentDiagnostics.ts'
+import { executeGuidedInstall, TOOL_SETUP_CATALOG } from './toolSetupCatalog.ts'
 import { redact } from './security/redact.ts'
 import type {
   AgentConfig,
@@ -628,6 +629,48 @@ export function createAppServer({
         .catch(() => {
           res.writeHead(500, { 'content-type': 'application/json' }).end('{"error":"Diagnostics failed"}')
         })
+      return
+    }
+    if (req.method === 'GET' && req.url === '/api/setup/catalog') {
+      if (!hasValidSessionToken(req)) {
+        res.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"Unauthorized"}')
+        return
+      }
+      res
+        .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        .end(JSON.stringify({ tools: Object.values(TOOL_SETUP_CATALOG) }))
+      return
+    }
+    if (req.method === 'POST' && req.url === '/api/setup/install') {
+      if (!hasValidSessionToken(req)) {
+        res.writeHead(401, { 'content-type': 'application/json' }).end('{"error":"Unauthorized"}')
+        return
+      }
+      if (origin && !effectiveAllowedOrigins.includes(origin)) {
+        res.writeHead(403).end()
+        return
+      }
+      let raw = ''
+      req.on('data', (chunk) => {
+        raw += chunk
+        if (raw.length > 4096) req.destroy()
+      })
+      req.on('end', () => {
+        let parsed: { toolId?: unknown; confirmed?: unknown } = {}
+        try {
+          parsed = JSON.parse(raw || '{}') as { toolId?: unknown; confirmed?: unknown }
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid JSON"}')
+          return
+        }
+        const toolId = typeof parsed.toolId === 'string' ? parsed.toolId : ''
+        const confirmed = parsed.confirmed === true
+        void executeGuidedInstall(toolId, { confirmed }).then(({ httpStatus, result }) => {
+          res
+            .writeHead(httpStatus, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+            .end(JSON.stringify(result))
+        })
+      })
       return
     }
     if (req.method === 'POST' && req.url === '/api/pair') {
