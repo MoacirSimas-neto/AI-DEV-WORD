@@ -5,6 +5,7 @@ import { useChatLinks } from './net/useChatLinks.ts'
 import { useGitStatus } from './net/useGitStatus.ts'
 import { useServer } from './net/useServer.ts'
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
+import { CloseConfirmModal, loadCloseBehavior, saveCloseBehavior } from './ui/CloseConfirmModal.tsx'
 import { StudioTopBar, type StudioTab } from './ui/StudioTopBar.tsx'
 import { StudioOfficeView } from './ui/StudioOfficeView.tsx'
 import {
@@ -55,6 +56,49 @@ function App() {
   // Controle integrado do Drawer lateral do Studio (Agente, Missão, Git)
   const [sidePanelOpen, setSidePanelOpen] = useState(false)
   const [sideTab, setSideTab] = useState<'agent' | 'git' | 'mission'>('agent')
+  const [closeModalOpen, setCloseModalOpen] = useState(false)
+
+  useEffect(() => {
+    const tauri = (window as unknown as {
+      __TAURI_INTERNALS__?: {
+        invoke: <R>(c: string, args?: unknown) => Promise<R>
+        transformCallback: (cb: () => void) => number
+      }
+    }).__TAURI_INTERNALS__
+    if (!tauri) return
+
+    let unlistenId: number | null = null
+    const cbId = tauri.transformCallback(() => {
+      const pref = loadCloseBehavior()
+      const hasActive = missions.some((m) => isOpenMission(m))
+      if (pref === 'minimize') {
+        void tauri.invoke('minimize_to_tray')
+        return
+      }
+      if (pref === 'quit' && !hasActive) {
+        void tauri.invoke('quit_app')
+        return
+      }
+      setCloseModalOpen(true)
+    })
+
+    void tauri
+      .invoke<number>('plugin:event|listen', {
+        event: 'close-requested',
+        target: { kind: 'Any' },
+        handler: cbId,
+      })
+      .then((id) => {
+        unlistenId = id
+      })
+      .catch(() => {})
+
+    return () => {
+      if (unlistenId !== null) {
+        void tauri.invoke('plugin:event|unlisten', { event: 'close-requested', eventId: unlistenId }).catch(() => {})
+      }
+    }
+  }, [missions])
 
   const online = status === 'online'
 
@@ -458,6 +502,24 @@ function App() {
             </ErrorBoundary>
           </div>
         )}
+
+        <CloseConfirmModal
+          open={closeModalOpen}
+          activeMissionsCount={missions.filter((m) => isOpenMission(m)).length}
+          onMinimize={(remember) => {
+            if (remember) saveCloseBehavior('minimize')
+            setCloseModalOpen(false)
+            const tauri = (window as unknown as { __TAURI_INTERNALS__?: { invoke: (c: string) => Promise<void> } }).__TAURI_INTERNALS__
+            void tauri?.invoke('minimize_to_tray')
+          }}
+          onQuit={(remember) => {
+            if (remember) saveCloseBehavior('quit')
+            setCloseModalOpen(false)
+            const tauri = (window as unknown as { __TAURI_INTERNALS__?: { invoke: (c: string) => Promise<void> } }).__TAURI_INTERNALS__
+            void tauri?.invoke('quit_app')
+          }}
+          onCancel={() => setCloseModalOpen(false)}
+        />
       </div>
     </ErrorBoundary>
   )
