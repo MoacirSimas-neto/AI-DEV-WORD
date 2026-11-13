@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process'
-import { accessSync, constants, existsSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { resolveCommand } from './cli/resolve.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -80,8 +81,7 @@ const DEFAULT_TIMEOUT_MS = 2500
 
 async function findExecutable(
   command: string,
-  simulatedDir: string | undefined,
-  timeoutMs: number
+  simulatedDir: string | undefined
 ): Promise<string | null> {
   if (simulatedDir) {
     const candidates =
@@ -95,22 +95,9 @@ async function findExecutable(
     return null
   }
 
-  const locator = process.platform === 'win32' ? 'where' : 'which'
-  try {
-    const { stdout } = await execFileAsync(locator, [command], {
-      timeout: timeoutMs,
-      windowsHide: true,
-    })
-    const first = stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find(Boolean)
-    if (!first) return null
-    accessSync(first, constants.F_OK)
-    return first
-  } catch {
-    return null
-  }
+  // O `where` do Windows lista primeiro o shim sem extensão do npm (script sh), que não executa:
+  // a consulta de versão falhava para codex/gemini/claude. O resolvedor do projeto respeita as extensões.
+  return resolveCommand(command)
 }
 
 export async function probeTool(
@@ -122,7 +109,7 @@ export async function probeTool(
     options.simulatedDir ??
     (process.env.AIDW_CLI_MODE === 'simulated' ? process.env.AIDW_SIMULATED_CLI_DIR : undefined)
 
-  const executablePath = await findExecutable(spec.command, simulatedDir, timeoutMs)
+  const executablePath = await findExecutable(spec.command, simulatedDir)
   if (!executablePath) {
     return {
       id: spec.id,

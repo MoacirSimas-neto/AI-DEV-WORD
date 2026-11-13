@@ -1,5 +1,6 @@
 import pty from 'node-pty'
 import { findCli } from '../cli/probe.ts'
+import { resolveCommand } from '../cli/resolve.ts'
 import { guardedLaunch, killTreeByPid, planSpawn, type SpawnPlan } from '../cli/run.ts'
 import type { PtySpawner } from './manager.ts'
 
@@ -13,6 +14,21 @@ export const spawnCliPty: PtySpawner = (cli, cwd, cols, rows, extraArgs = []) =>
 
   return spawnGuardedPty(planSpawn(executable, extraArgs), cwd, cols, rows, `terminal · ${cli}`)
 }
+
+/** Shell já instalado, sem instalar nada: PowerShell 7, Windows PowerShell ou cmd; no Linux, $SHELL ou bash. */
+export function findUserShell(): string {
+  if (process.platform === 'win32') {
+    return resolveCommand('pwsh') ?? resolveCommand('powershell') ?? process.env.ComSpec ?? 'cmd.exe'
+  }
+  return process.env.SHELL || resolveCommand('bash') || '/bin/sh'
+}
+
+/**
+ * Terminal pessoal do usuário: um shell interativo que nasce direto em `cwd` (sem `cd` montado em
+ * texto e sem comando inicial). Roda com as permissões do usuário: a pasta inicial não é sandbox.
+ */
+export const spawnShellPty = (cwd: string, cols: number, rows: number) =>
+  spawnGuardedPty({ file: findUserShell(), args: [], verbatim: false }, cwd, cols, rows, 'terminal · usuário')
 
 /**
  * PTY sob o guardião: o CLI herda o terminal do guardião, e a queda do backend (inclusive

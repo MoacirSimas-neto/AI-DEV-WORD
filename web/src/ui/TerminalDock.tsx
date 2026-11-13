@@ -1,74 +1,83 @@
 import { useEffect, useState } from 'react'
-import type { ClientMessage, ServerMessage } from '../../../shared/protocol.ts'
+import type { AgentInfo } from '../../../shared/protocol.ts'
+import type { Send, Subscribe } from '../net/useServer.ts'
 import { TerminalView } from './TerminalView.tsx'
 
 interface TerminalDockProps {
   activeProjectPath: string | null
   online: boolean
-  send: (msg: ClientMessage) => void
-  subscribe: (fn: (msg: ServerMessage) => void) => () => void
+  /** Terminais pessoais vivos no backend (`user:<n>`). */
+  shellIds: string[]
+  agents: AgentInfo[]
+  /** Fora do escritório o dock some da tela, mas continua montado: as abas e sessões ficam. */
+  hidden?: boolean
+  send: Send
+  subscribe: Subscribe
   onOpenFolderDialog: () => void
 }
 
-interface TabItem {
-  id: string
-  label: string
-  closable: boolean
-}
+const MAIN = 'user:1'
+const MIN_HEIGHT = 140
+/** Espaço mínimo que sobra para a barra superior e o escritório. */
+const OFFICE_RESERVE = 260
+const shellNumber = (id: string) => Number(id.slice(5))
+const shellLabel = (id: string) => (id === MAIN ? 'Meu Terminal' : `Terminal ${shellNumber(id)}`)
 
-export function TerminalDock({
-  activeProjectPath,
-  online,
-  send,
-  subscribe,
-  onOpenFolderDialog,
-}: TerminalDockProps) {
+export function TerminalDock({ activeProjectPath, online, shellIds, agents, hidden = false, send, subscribe, onOpenFolderDialog }: TerminalDockProps) {
   const [open, setOpen] = useState(false)
-  const [heightPx, setHeightPx] = useState(240)
-  const [tabs, setTabs] = useState<TabItem[]>([
-    { id: 'user:1', label: 'Meu Terminal', closable: false },
-  ])
-  const [activeTabId, setActiveTabId] = useState('user:1')
-  const [nextUserIndex, setNextUserIndex] = useState(2)
+  const [heightPx, setHeightPx] = useState(() => Math.max(MIN_HEIGHT, Math.round(window.innerHeight * 0.3)))
+  const [created, setCreated] = useState<string[]>([MAIN])
+  const [activeId, setActiveId] = useState(MAIN)
+  // Só monta (e portanto só inicia) o terminal de uma aba que o usuário realmente abriu.
+  const [seen, setSeen] = useState<string[]>([])
+
+  // As abas pessoais são as criadas aqui mais as que já vivem no backend (página recarregada).
+  const shells = [...new Set([...created, ...shellIds])].sort((a, b) => shellNumber(a) - shellNumber(b))
+  // Abas de agente só existem enquanto houver sessão real no backend: nada é criado para exibir.
+  const agentTabs = agents.filter((a) => a.session)
+  const current = shells.includes(activeId) || agentTabs.some((a) => a.id === activeId) ? activeId : MAIN
+
+  const show = (id: string) => {
+    setActiveId(id)
+    setOpen(true)
+    setSeen((prev) => (prev.includes(id) ? prev : [...prev, id]))
+  }
+  const toggle = () => (open ? setOpen(false) : show(current))
 
   useEffect(() => {
+    if (hidden) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
-        const tag = (e.target as HTMLElement | null)?.tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return
-        e.preventDefault()
-        setOpen((prev) => !prev)
-      }
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'j') return
+      const target = e.target instanceof Element ? e.target : null
+      // Campos de texto do app ficam com a tecla; dentro do próprio terminal o atalho recolhe o dock.
+      const typing = target?.closest('input, textarea, [contenteditable="true"]') && !target.closest('.terminal-dock')
+      if (typing) return
+      e.preventDefault()
+      e.stopPropagation() // captura: o xterm não chega a mandar a tecla para o shell
+      toggle()
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  })
 
-  const addPersonalTab = () => {
-    const id = `user:${nextUserIndex}`
-    setNextUserIndex((n) => n + 1)
-    setTabs((prev) => [...prev, { id, label: `Terminal ${nextUserIndex}`, closable: true }])
-    setActiveTabId(id)
-    setOpen(true)
+  const addShell = () => {
+    const id = `user:${Math.max(...shells.map(shellNumber)) + 1}`
+    setCreated((prev) => [...prev, id])
+    show(id)
   }
 
-  const closeTab = (id: string) => {
+  const closeShell = (id: string) => {
     send({ type: 'term-close', agentId: id })
-    setTabs((prev) => {
-      const next = prev.filter((t) => t.id !== id)
-      if (activeTabId === id && next.length > 0) setActiveTabId(next[0].id)
-      return next
-    })
+    setCreated((prev) => prev.filter((t) => t !== id))
+    setSeen((prev) => prev.filter((t) => t !== id))
   }
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
     const startY = e.clientY
     const startH = heightPx
-    const onMove = (ev: MouseEvent) => {
-      const delta = startY - ev.clientY
-      setHeightPx(Math.max(160, Math.min(window.innerHeight * 0.65, startH + delta)))
-    }
+    const onMove = (ev: MouseEvent) =>
+      setHeightPx(Math.max(MIN_HEIGHT, Math.min(window.innerHeight - OFFICE_RESERVE, startH + startY - ev.clientY)))
     const onUp = () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
@@ -77,95 +86,73 @@ export function TerminalDock({
     window.addEventListener('mouseup', onUp)
   }
 
-  return (
-    <section
-      aria-label="Terminal Integrado"
-      style={{
-        borderTop: '1px solid rgba(148, 163, 184, 0.25)',
-        background: '#0b1120',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
+  const tab = (id: string, label: string) => (
+    <button
+      key={id}
+      type="button"
+      role="tab"
+      aria-selected={current === id}
+      className={`terminal-dock-tab${current === id ? ' active' : ''}`}
+      onClick={() => show(id)}
     >
-      {open && (
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          onMouseDown={startResize}
-          style={{ height: 5, cursor: 'ns-resize', background: 'rgba(56, 189, 248, 0.2)' }}
+      {label}
+    </button>
+  )
+
+  const pane = (id: string, cliName: string, sessionActive: boolean, isShell: boolean) =>
+    seen.includes(id) && (
+      <div key={id} style={{ display: current === id ? 'block' : 'none', height: '100%' }}>
+        <TerminalView
+          agentId={id}
+          cliName={cliName}
+          sessionActive={sessionActive}
+          canStart={online && isShell && !!activeProjectPath}
+          autoStart={isShell}
+          online={online}
+          send={send}
+          subscribe={subscribe}
         />
-      )}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '4px 10px',
-          gap: 8,
-          background: '#0f172a',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {tabs.map((tab) => (
-            <div key={tab.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTabId(tab.id)
-                  setOpen(true)
-                }}
-                style={{
-                  fontWeight: activeTabId === tab.id ? 700 : 400,
-                  opacity: activeTabId === tab.id ? 1 : 0.75,
-                }}
-              >
-                {tab.label}
-              </button>
-              {tab.closable && (
-                <button
-                  type="button"
-                  aria-label={`Fechar ${tab.label}`}
-                  onClick={() => closeTab(tab.id)}
-                >
+      </div>
+    )
+
+  return (
+    <section className="terminal-dock" aria-label="Terminal Integrado" style={hidden ? { display: 'none' } : undefined}>
+      {open && <div role="separator" aria-orientation="horizontal" className="terminal-dock-resize" onMouseDown={startResize} />}
+      <div className="terminal-dock-bar">
+        <div className="terminal-dock-tabs" role="tablist">
+          {shells.map((id) => (
+            <span key={id} className="terminal-dock-tabwrap">
+              {tab(id, shellLabel(id))}
+              {id !== MAIN && (
+                <button type="button" className="terminal-dock-x" aria-label={`Fechar ${shellLabel(id)}`} onClick={() => closeShell(id)}>
                   ×
                 </button>
               )}
-            </div>
+            </span>
           ))}
-          <button type="button" onClick={addPersonalTab} aria-label="Nova aba de terminal">
+          <button type="button" className="terminal-dock-x" onClick={addShell} aria-label="Nova aba de terminal">
             +
           </button>
+          {agentTabs.map((a) => tab(a.id, a.name))}
         </div>
-        <button type="button" onClick={() => setOpen((v) => !v)}>
+        <button type="button" className="terminal-dock-tab" onClick={toggle}>
           {open ? 'Recolher Terminal (Ctrl+J)' : 'Abrir Terminal (Ctrl+J)'}
         </button>
       </div>
 
-      <div style={{ display: open ? 'block' : 'none', height: heightPx, overflow: 'hidden' }}>
-        {!activeProjectPath ? (
-          <div style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className="terminal-dock-body" style={{ display: open ? 'block' : 'none', height: heightPx }}>
+        {!activeProjectPath && shellIds.length === 0 && agentTabs.length === 0 ? (
+          <div className="terminal-dock-empty">
             <span>Selecione um projeto para abrir o terminal na pasta do workspace.</span>
             <button type="button" className="primary" onClick={onOpenFolderDialog}>
               Selecionar pasta...
             </button>
           </div>
         ) : (
-          tabs.map((tab) => (
-            <div
-              key={tab.id}
-              style={{ display: activeTabId === tab.id ? 'block' : 'none', height: '100%' }}
-            >
-              <TerminalView
-                agentId={tab.id}
-                cliName="Shell"
-                sessionActive={true}
-                canStart={Boolean(activeProjectPath)}
-                online={online}
-                send={send}
-                subscribe={subscribe}
-              />
-            </div>
-          ))
+          <>
+            {shells.map((id) => pane(id, 'Shell', shellIds.includes(id), true))}
+            {agentTabs.map((a) => pane(a.id, a.cli, true, false))}
+          </>
         )}
       </div>
     </section>

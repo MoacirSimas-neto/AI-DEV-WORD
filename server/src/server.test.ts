@@ -61,6 +61,20 @@ const terminals = new TerminalManager(
     }
   },
   () => projects.active()?.path ?? null,
+  {
+    // "Shell" falso do terminal pessoal: ecoa a entrada e encerra de verdade no kill.
+    spawnShell: () => {
+      let emit: (data: string) => void = () => {}
+      let exit: (event: { exitCode: number }) => void = () => {}
+      return {
+        onData: (listener) => (emit = listener),
+        onExit: (listener) => (exit = listener),
+        write: (data) => emit(`shell:${data}`),
+        resize: () => {},
+        kill: () => exit({ exitCode: 0 }),
+      }
+    },
+  },
 )
 const server = createAppServer({
   registry,
@@ -163,6 +177,36 @@ test('terminal é recusado sem projeto e funciona depois de adicionar um', async
   client.send({ type: 'term-input', agentId: 'dev', data: 'ls' })
   assert.equal((await client.waitFor('term-data')).data, 'eco:ls')
   client.socket.close()
+})
+
+test('terminal pessoal via WebSocket: lista vem do backend, eco isolado, reconexão e encerramento', async () => {
+  const client = await connect()
+  await client.waitFor('snapshot')
+  assert.deepEqual((await client.waitFor('term-sessions')).ids, [])
+
+  client.send({ type: 'term-open', agentId: 'user:1', cols: 80, rows: 24 })
+  assert.deepEqual((await client.waitFor('term-sessions')).ids, ['user:1'])
+  assert.equal((await client.waitFor('term-ready')).agentId, 'user:1')
+  client.send({ type: 'term-input', agentId: 'user:1', data: 'git status\n' })
+  const out = await client.waitFor('term-data')
+  assert.deepEqual([out.agentId, out.data], ['user:1', 'shell:git status\n'])
+
+  // A conexão cai (janela na bandeja, recarga): o processo fica; quem reconecta vê a sessão viva.
+  client.socket.close()
+  const again = await connect()
+  await again.waitFor('snapshot')
+  assert.deepEqual((await again.waitFor('term-sessions')).ids, ['user:1'])
+  again.send({ type: 'term-open', agentId: 'user:1', cols: 80, rows: 24 })
+  assert.equal((await again.waitFor('term-ready')).replay, 'shell:git status\n')
+
+  again.send({ type: 'term-close', agentId: 'user:1' })
+  assert.deepEqual((await again.waitFor('term-sessions')).ids, [])
+  assert.equal((await again.waitFor('term-exit')).agentId, 'user:1')
+
+  // Id que não é de agente nem `user:<n>` nunca abre processo.
+  again.send({ type: 'term-open', agentId: 'user:../../x', cols: 80, rows: 24 })
+  assert.match((await again.waitFor('term-error')).message, /Agente desconhecido/)
+  again.socket.close()
 })
 
 test('tarefa não pode ser criada em projeto inexistente', async () => {

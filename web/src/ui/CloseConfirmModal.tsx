@@ -3,6 +3,8 @@ import { useState } from 'react'
 interface CloseConfirmModalProps {
   open: boolean
   activeMissionsCount: number
+  /** Terminais (pessoais e de agentes) com processo vivo no backend. */
+  activeTerminalsCount?: number
   onMinimize: (remember: boolean) => void
   onQuit: (remember: boolean) => void
   onCancel: () => void
@@ -11,6 +13,7 @@ interface CloseConfirmModalProps {
 export function CloseConfirmModal({
   open,
   activeMissionsCount,
+  activeTerminalsCount = 0,
   onMinimize,
   onQuit,
   onCancel,
@@ -21,7 +24,7 @@ export function CloseConfirmModal({
   if (!open) return null
 
   const handleQuitClick = () => {
-    if (activeMissionsCount > 0 && !confirmingQuit) {
+    if (activeMissionsCount + activeTerminalsCount > 0 && !confirmingQuit) {
       setConfirmingQuit(true)
       return
     }
@@ -63,6 +66,14 @@ export function CloseConfirmModal({
             {confirmingQuit
               ? `Confirma encerrar completamente? ${activeMissionsCount} missão(ões) ativa(s) serão interrompidas.`
               : `Há ${activeMissionsCount} missão(ões) ativa(s) em andamento.`}
+          </div>
+        )}
+
+        {activeTerminalsCount > 0 && (
+          <div className="banner" style={{ marginBottom: 14, background: '#f59e0b22', borderColor: '#f59e0b', fontSize: '0.88rem' }}>
+            {confirmingQuit
+              ? `Confirma encerrar completamente? ${activeTerminalsCount} terminal(is) aberto(s) e seus processos serão encerrados.`
+              : `Há ${activeTerminalsCount} terminal(is) aberto(s): encerrar o aplicativo encerra os processos deles.`}
           </div>
         )}
 

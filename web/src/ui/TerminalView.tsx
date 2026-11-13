@@ -10,6 +10,8 @@ interface Props {
   /** Há uma sessão viva no backend para este agente. */
   sessionActive: boolean
   canStart: boolean
+  /** Inicia a sessão uma única vez ao montar (terminal pessoal). Depois de encerrada, só pelo botão. */
+  autoStart?: boolean
   online: boolean
   send: Send
   subscribe: Subscribe
@@ -19,10 +21,11 @@ interface Props {
  * Terminal real do agente. O xterm só desenha: cada tecla vai para o backend
  * (term-input) e tudo que aparece na tela veio do processo (term-data).
  */
-export function TerminalView({ agentId, cliName, sessionActive, canStart, online, send, subscribe }: Props) {
+export function TerminalView({ agentId, cliName, sessionActive, canStart, autoStart = false, online, send, subscribe }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const attached = useRef(false)
+  const autoStarted = useRef(false)
 
   useEffect(() => {
     const term = new Terminal({
@@ -80,6 +83,10 @@ export function TerminalView({ agentId, cliName, sessionActive, canStart, online
   useEffect(() => {
     if (!online) attached.current = false
     else if (sessionActive && !attached.current) open()
+    else if (autoStart && canStart && !autoStarted.current && !attached.current) {
+      autoStarted.current = true
+      open()
+    }
   })
 
   return (

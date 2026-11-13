@@ -19,7 +19,7 @@ import { TaskStore } from './tasks/store.ts'
 import { PlanStore } from './team/planStore.ts'
 import { agyEffortArgs, TeamRunner } from './team/runner.ts'
 import { TerminalManager } from './terminal/manager.ts'
-import { spawnCliPty } from './terminal/spawnPty.ts'
+import { spawnCliPty, spawnShellPty } from './terminal/spawnPty.ts'
 
 mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 })
 // A trava vem antes de abrir o banco: uma segunda instância não pode migrar o
@@ -77,6 +77,7 @@ const terminals = new TerminalManager(
   spawnCliPty,
   () => projects.active()?.path ?? null,
   {
+    spawnShell: spawnShellPty,
     getArgs: (agentId) => {
       const cfg = agentConfigs.get(agentId)
       const cli: 'codex' | 'gemini' | 'agy' = cfg.provider === 'antigravity' ? 'agy' : cfg.provider

@@ -1369,6 +1369,7 @@ export function createAppServer({
       skills: skills?.list() ?? [],
       skillOverrides: skills?.overrides() ?? [],
     })
+    send(socket, { type: 'term-sessions', ids: terminals.userShells() })
     socket.on('message', (raw) => {
       const text = raw.toString()
       const message = parseClientMessage(text)
@@ -1414,7 +1415,9 @@ export function createAppServer({
   registry.on('change', onAgent)
   registry.on('list', onAgentList)
   terminals.on('data', onData)
+  const onShells = (ids: string[]) => broadcast({ type: 'term-sessions', ids })
   terminals.on('exit', onExit)
+  terminals.on('sessions', onShells)
   tasks.on('tasks', onTasks)
   tasks.on('missions', onMissions)
   history.on('added', onHistory)
@@ -1439,6 +1442,7 @@ export function createAppServer({
     registry.off('list', onAgentList)
     terminals.off('data', onData)
     terminals.off('exit', onExit)
+    terminals.off('sessions', onShells)
     tasks.off('tasks', onTasks)
     tasks.off('missions', onMissions)
     history.off('added', onHistory)

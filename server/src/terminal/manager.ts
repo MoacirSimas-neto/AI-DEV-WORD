@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { statSync } from 'node:fs'
 import type { CliId } from '../../../shared/protocol.ts'
 import type { AgentRegistry } from '../agents/registry.ts'
 import { liveRedaction } from '../security/redact.ts'
@@ -21,7 +22,13 @@ export interface TerminalOptions {
   echoMs?: number
   /** Obtém parâmetros adicionais do agente (modelo, esforço) configurados na Central. */
   getArgs?: (agentId: string) => { cli: CliId; args: string[] }
+  /** Abre o shell do usuário (terminal pessoal). Sem isto, sessões `user:<n>` são recusadas. */
+  spawnShell?: (cwd: string, cols: number, rows: number) => PtyLike
 }
+
+/** Terminal pessoal: id fixo `user:<n>`, nunca um id de agente. */
+export const isUserShell = (id: string) => /^user:[1-9]\d{0,2}$/.test(id)
+const MAX_USER_SHELLS = 8
 
 interface Session {
   pty: PtyLike
@@ -46,6 +53,7 @@ export class TerminalManager extends EventEmitter {
   private readonly quietMs: number
   private readonly echoMs: number
   private readonly getArgs?: (agentId: string) => { cli: CliId; args: string[] }
+  private readonly spawnShell?: (cwd: string, cols: number, rows: number) => PtyLike
 
   constructor(
     registry: AgentRegistry,
@@ -60,6 +68,12 @@ export class TerminalManager extends EventEmitter {
     this.quietMs = options.quietMs ?? 1500
     this.echoMs = options.echoMs ?? 400
     this.getArgs = options.getArgs
+    this.spawnShell = options.spawnShell
+  }
+
+  /** Terminais pessoais vivos (a tela e a confirmação de saída leem daqui, não de estado React). */
+  userShells(): string[] {
+    return [...this.sessions.keys()].filter(isUserShell)
   }
 
   /** Inicia a sessão (ou reaproveita a existente) e devolve a saída acumulada. */
@@ -70,28 +84,30 @@ export class TerminalManager extends EventEmitter {
       return existing.buffer
     }
 
-    const isUserShell = agentId.startsWith('user:')
-    let cli: CliId
-    let extraArgs: string[] = []
-    if (isUserShell) {
-      cli = (process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/bash') as CliId
+    const userShell = isUserShell(agentId)
+    // A pasta vem só do projeto ativo registrado pelo usuário no backend; o cliente nunca envia caminho.
+    const cwd = this.activeProjectPath()
+    if (!cwd) throw new Error('Escolha um projeto antes de iniciar a sessão.')
+
+    let pty: PtyLike
+    if (userShell) {
+      if (!this.spawnShell) throw new Error('Terminal pessoal indisponível neste backend.')
+      if (this.userShells().length >= MAX_USER_SHELLS) throw new Error(`Limite de ${MAX_USER_SHELLS} terminais pessoais abertos.`)
+      if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Error('A pasta do projeto não existe mais.')
+      pty = this.spawnShell(cwd, cols, rows)
     } else {
       const agent = this.registry.get(agentId)
       if (!agent) throw new Error('Agente desconhecido.')
       const custom = this.getArgs?.(agentId)
-      cli = custom?.cli ?? agent.cli
-      extraArgs = custom?.args ?? []
+      const cli = custom?.cli ?? agent.cli
       if (agent.state === 'offline') throw new Error(`CLI "${cli}" não está disponível.`)
+      pty = this.spawn(cli, cwd, cols, rows, custom?.args ?? [])
     }
-    // O processo só nasce dentro de uma pasta que o usuário autorizou.
-    const cwd = this.activeProjectPath()
-    if (!cwd) throw new Error('Escolha um projeto antes de iniciar a sessão.')
 
-    const session: Session = { pty: this.spawn(cli, cwd, cols, rows, extraArgs), cwd, buffer: '', lastInput: 0 }
+    const session: Session = { pty, cwd, buffer: '', lastInput: 0 }
     this.sessions.set(agentId, session)
-    if (!isUserShell) {
-      this.registry.setRuntimeState(agentId, 'waiting', `Sessão aberta em ${cwd}`)
-    }
+    if (userShell) this.emit('sessions', this.userShells())
+    else this.registry.setRuntimeState(agentId, 'waiting', `Sessão aberta em ${cwd}`)
 
     // A saída do terminal só sai do backend (tela e histórico de rolagem) depois da redação.
     // O que o usuário digita vai ao processo sem alteração.
@@ -101,13 +117,15 @@ export class TerminalManager extends EventEmitter {
     })
     session.pty.onData((data) => {
       live.write(data)
-      if (Date.now() - session.lastInput > this.echoMs) this.markWorking(agentId, session)
+      if (!userShell && Date.now() - session.lastInput > this.echoMs) this.markWorking(agentId, session)
     })
     session.pty.onExit(({ exitCode }) => {
       live.end()
       clearTimeout(session.quietTimer)
       this.sessions.delete(agentId)
-      this.registry.setRuntimeState(agentId, 'idle', 'Sessão encerrada.')
+      // 'sessions' sai antes de 'exit': a tela nunca vê "sessão viva" depois do fim (reabriria sozinha).
+      if (userShell) this.emit('sessions', this.userShells())
+      else this.registry.setRuntimeState(agentId, 'idle', 'Sessão encerrada.')
       this.emit('exit', agentId, exitCode)
     })
     return session.buffer

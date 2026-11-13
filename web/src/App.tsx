@@ -68,6 +68,11 @@ function App() {
   const [firstRunOpen, setFirstRunOpen] = useState(() => !loadFirstRunState().completed)
   const [firstRunStep, setFirstRunStep] = useState(() => loadFirstRunState().lastStep)
 
+  // Terminais pessoais vivos: a lista vem do backend, não do estado das abas.
+  const [shellIds, setShellIds] = useState<string[]>([])
+  useEffect(() => subscribe((m) => m.type === 'term-sessions' && setShellIds(m.ids)), [subscribe])
+  const openTerminals = shellIds.length + agents.filter((a) => a.session).length
+
   useEffect(() => {
     const tauri = (window as unknown as {
       __TAURI_INTERNALS__?: {
@@ -81,7 +86,7 @@ function App() {
     let unlistenTrayQuitId: number | null = null
     const cbId = tauri.transformCallback(() => {
       const pref = loadCloseBehavior()
-      const hasActive = missions.some((m) => isOpenMission(m))
+      const hasActive = missions.some((m) => isOpenMission(m)) || openTerminals > 0
       if (pref === 'minimize') {
         void tauri.invoke('minimize_to_tray')
         return
@@ -94,7 +99,7 @@ function App() {
     })
 
     const trayQuitCbId = tauri.transformCallback(() => {
-      const hasActive = missions.some((m) => isOpenMission(m))
+      const hasActive = missions.some((m) => isOpenMission(m)) || openTerminals > 0
       if (!hasActive) {
         void tauri.invoke('quit_app')
         return
@@ -132,7 +137,7 @@ function App() {
         void tauri.invoke('plugin:event|unlisten', { event: 'tray-quit-requested', eventId: unlistenTrayQuitId }).catch(() => {})
       }
     }
-  }, [missions])
+  }, [missions, openTerminals])
 
   const online = status === 'online'
 
@@ -359,7 +364,6 @@ function App() {
 
         {/* 2. Visualização Principal: Escritório 2D Studio */}
         {activeTab === 'office' && (
-          <>
             <StudioOfficeView
             agents={agents}
             configs={allConfigs.length > 0 ? allConfigs : configs}
@@ -386,15 +390,17 @@ function App() {
             onOpenTasks={() => setActiveTab('tasks')}
             onOpenObservability={openObservability}
           />
-            <TerminalDock
-              activeProjectPath={activeProject?.path ?? null}
-              online={online}
-              send={send}
-              subscribe={subscribe}
-              onOpenFolderDialog={() => send({ type: 'dialog-open-folder' })}
-            />
-          </>
         )}
+        <TerminalDock
+          activeProjectPath={activeProject?.path ?? null}
+          online={online}
+          shellIds={shellIds}
+          agents={agents}
+          hidden={activeTab !== 'office'}
+          send={send}
+          subscribe={subscribe}
+          onOpenFolderDialog={() => send({ type: 'dialog-open-folder' })}
+        />
 
         {activeTab !== 'office' && (
           <div className="studio-page-breadcrumb">
@@ -570,6 +576,7 @@ function App() {
         <CloseConfirmModal
           open={closeModalOpen}
           activeMissionsCount={missions.filter((m) => isOpenMission(m)).length}
+          activeTerminalsCount={openTerminals}
           onMinimize={(remember) => {
             if (remember) saveCloseBehavior('minimize')
             setCloseModalOpen(false)

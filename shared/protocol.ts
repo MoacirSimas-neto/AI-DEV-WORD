@@ -892,6 +892,8 @@ export type ServerMessage =
   | { type: 'term-data'; agentId: string; data: string }
   | { type: 'term-exit'; agentId: string; code: number }
   | { type: 'term-error'; agentId: string; message: string }
+  /** Terminais pessoais (`user:<n>`) vivos no backend. */
+  | { type: 'term-sessions'; ids: string[] }
   /** Estado Git do projeto ativo; null quando não há projeto. */
   | { type: 'git-status'; status: GitStatus | null }
   | { type: 'git-diff'; path: string; staged: boolean; text: string }

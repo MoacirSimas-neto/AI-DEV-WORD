@@ -4086,3 +4086,93 @@ input:focus-visible {
 .dyn-recovery p {
   margin: 0;
 }
+
+/* ---------- DOCK DE TERMINAL (Etapa 14.6) ---------- */
+
+.terminal-dock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  background: #0b1120;
+}
+.terminal-dock-resize {
+  height: 5px;
+  cursor: ns-resize;
+  background: rgba(56, 189, 248, 0.2);
+}
+.terminal-dock-resize:hover {
+  background: rgba(56, 189, 248, 0.5);
+}
+.terminal-dock-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 10px;
+  background: #0f172a;
+}
+.terminal-dock-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+}
+.terminal-dock-tabwrap {
+  display: flex;
+  align-items: center;
+}
+.terminal-dock-tab,
+.terminal-dock-x {
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  border-radius: 4px;
+}
+.terminal-dock-x {
+  padding: 4px 6px;
+}
+.terminal-dock-tab:hover,
+.terminal-dock-x:hover {
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.12);
+}
+.terminal-dock-tab.active {
+  color: #e2e8f0;
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 #38bdf8;
+}
+.terminal-dock-body {
+  min-height: 140px;
+  max-height: calc(100vh - 260px);
+  overflow: hidden;
+}
+.terminal-dock-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  color: #cbd5e1;
+}
+/* O TerminalView é o mesmo do painel do agente; aqui ele ocupa a altura do dock. */
+.terminal-dock .term-panel {
+  margin: 0;
+  box-shadow: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.terminal-dock .term-bar {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.terminal-dock .term-host {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  padding: 4px 8px;
+}
