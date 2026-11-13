@@ -5098,3 +5098,15 @@ body,
   border-radius: 8px;
   color: #f1f5f9;
 }
+
+
+/* ===== Etapa 12.4.3 — High-Contrast Badges in Secondary Views ===== */
+.studio-page-view .obs-flow-status,
+.studio-page-view .status-pill,
+.studio-page-view .badge,
+.studio-page-view [class*="badge"],
+.studio-page-view [class*="status-"] {
+  color: #f8fafc;
+  background-color: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
