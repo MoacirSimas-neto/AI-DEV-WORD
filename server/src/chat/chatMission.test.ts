@@ -368,6 +368,8 @@ test('protocolo: chat-prepare-mission e chat-links validados', () => {
 })
 
 test('WebSocket: preparar, cair durante o planejamento, reconectar e ver a proposta pendente; aprovar pelo protocolo da Etapa 10', async () => {
+  const prevSecret = process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET
+  process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET = 'chat-mission-test-secret'
   const w = await world()
   const conv = w.conversation(w.projectA.id, DISCUSSION)
   let release!: (text: string) => void
@@ -434,13 +436,24 @@ test('WebSocket: preparar, cair durante o planejamento, reconectar e ver a propo
     again.send({ type: 'plan-list', projectId: A, missionId })
     const plan = await again.take('mission-plan', (m) => m.missionId === missionId)
     const pending = plan.proposals.find((p) => p.status === 'pending')!
-    again.send({ type: 'proposal-decide', missionId, proposalId: pending.id, revision: pending.revision, decision: 'approve', opId: 'ok-1' })
+    const consentRes = await fetch(`http://127.0.0.1:${port}/api/mission/consent`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-aidw-desktop-secret': 'chat-mission-test-secret',
+      },
+      body: JSON.stringify({ action: 'approve', missionId, proposalId: pending.id, revision: pending.revision }),
+    })
+    const { nonce: consentNonce } = (await consentRes.json()) as { nonce: string }
+    again.send({ type: 'proposal-decide', missionId, proposalId: pending.id, revision: pending.revision, decision: 'approve', opId: 'ok-1', consentNonce })
     const decided = await again.take('proposal-result', (m) => m.opId === 'ok-1')
     assert.equal(decided.ok, true, decided.message)
     await until(() => w.calls.some((c) => c.kind === 'step'), 'execução')
     assert.equal(w.tasks.listMissions().length, 1)
     again.socket.close()
   } finally {
+    if (prevSecret === undefined) delete process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET
+    else process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET = prevSecret
     server.close()
   }
 })

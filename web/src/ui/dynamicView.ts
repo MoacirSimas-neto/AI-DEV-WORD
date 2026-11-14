@@ -313,9 +313,24 @@ export const newOpId = () => (globalThis.crypto?.randomUUID?.() ?? `op-${Date.no
 export const startMessage = (taskId: number, mode: 'pipeline' | 'dynamic', plannerId?: string): ClientMessage =>
   mode === 'dynamic' ? { type: 'mission-start', taskId, mode: 'dynamic', ...(plannerId ? { team: { plannerId } } : {}) } : { type: 'mission-start', taskId }
 
-export function decisionMessage(proposal: Pick<DynamicProposal, 'id' | 'missionId' | 'revision'>, decision: ProposalDecision, opId: string, feedback?: string): ClientMessage {
+export function decisionMessage(
+  proposal: Pick<DynamicProposal, 'id' | 'missionId' | 'revision'>,
+  decision: ProposalDecision,
+  opId: string,
+  feedback?: string,
+  consentNonce?: string,
+): ClientMessage {
   const text = feedback?.trim()
-  return { type: 'proposal-decide', missionId: proposal.missionId, proposalId: proposal.id, revision: proposal.revision, decision, opId, ...(text ? { feedback: text.slice(0, 5000) } : {}) }
+  return {
+    type: 'proposal-decide',
+    missionId: proposal.missionId,
+    proposalId: proposal.id,
+    revision: proposal.revision,
+    decision,
+    opId,
+    ...(text ? { feedback: text.slice(0, 5000) } : {}),
+    ...(consentNonce ? { consentNonce } : {}),
+  }
 }
 
 export function resumeMessage(

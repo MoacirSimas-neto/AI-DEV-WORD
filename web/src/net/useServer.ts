@@ -27,6 +27,40 @@ const EMPTY_WORKSPACE: Workspace = { projects: [], activeProjectId: null }
  * `subscribe` entrega as mensagens cruas: o terminal usa isso para receber a
  * saída sem passar pelo estado do React (seria lento re-renderizar a cada byte).
  */
+export type MemoryConsentAction = 'create' | 'approve' | 'reject' | 'supersede'
+export type MemoryConsentRequester = (
+  action: MemoryConsentAction,
+  targetId: number,
+  details: string,
+) => Promise<{ nonce: string | null; error?: string }>
+
+export type MissionConsentAction = 'approve' | 'adjust' | 'reject' | 'close'
+export interface MissionConsentRequest {
+  action: MissionConsentAction
+  missionId: number
+  proposalId?: number
+  revision?: number
+  feedback?: string
+  details: string
+}
+export type MissionConsentRequester = (
+  request: MissionConsentRequest,
+) => Promise<{ nonce: string | null; error?: string }>
+
+const MEMORY_CONSENT_META: Record<MemoryConsentAction, { title: string; confirmLabel: string }> = {
+  create: { title: 'AI Dev World — Confirmar criação de memória', confirmLabel: 'Confirmar criação' },
+  approve: { title: 'AI Dev World — Confirmar aprovação de memória', confirmLabel: 'Confirmar aprovação' },
+  reject: { title: 'AI Dev World — Confirmar rejeição de memória', confirmLabel: 'Confirmar rejeição' },
+  supersede: { title: 'AI Dev World — Confirmar substituição de memória', confirmLabel: 'Confirmar substituição' },
+}
+
+const MISSION_CONSENT_META: Record<MissionConsentAction, { title: string; confirmLabel: string }> = {
+  approve: { title: 'AI Dev World — Confirmar aprovação de proposta', confirmLabel: 'Confirmar aprovação' },
+  adjust: { title: 'AI Dev World — Confirmar pedido de ajustes', confirmLabel: 'Confirmar ajustes' },
+  reject: { title: 'AI Dev World — Confirmar rejeição de proposta', confirmLabel: 'Confirmar rejeição' },
+  close: { title: 'AI Dev World — Confirmar encerramento de missão', confirmLabel: 'Confirmar encerramento' },
+}
+
 export function useServer() {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [agentLoadStatus, setAgentLoadStatus] = useState<AgentLoadStatus>('connecting')
@@ -288,6 +322,91 @@ export function useServer() {
     })
   }, [])
 
+  const requestMemoryConsent = useCallback<MemoryConsentRequester>(async (action, targetId, details) => {
+    const meta = MEMORY_CONSENT_META[action]
+    const tauriInvoke = (window as unknown as { __TAURI_INTERNALS__?: { invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> } }).__TAURI_INTERNALS__?.invoke
+    if (tauriInvoke) {
+      try {
+        const nonce = await tauriInvoke<string | null>('confirm_memory_action', {
+          action,
+          targetId,
+          title: meta.title,
+          details,
+          confirmLabel: meta.confirmLabel,
+        })
+        return { nonce: nonce ?? null }
+      } catch (err) {
+        return { nonce: null, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      ...(desktopTokenRef.current ? { authorization: `Bearer ${desktopTokenRef.current}` } : {}),
+    }
+    try {
+      const res = await fetch(`${apiBaseRef.current}/api/memory/consent`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({ action, targetId }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { nonce?: string; error?: string }
+      if (!res.ok || !data.nonce) {
+        return { nonce: null, error: data.error || 'Confirmação nativa indisponível no modo web/headless.' }
+      }
+      return { nonce: data.nonce }
+    } catch {
+      return { nonce: null, error: 'Falha ao solicitar autorização de memória ao backend.' }
+    }
+  }, [])
+
+  const requestMissionConsent = useCallback<MissionConsentRequester>(async (request) => {
+    const meta = MISSION_CONSENT_META[request.action]
+    const tauriInvoke = (window as unknown as { __TAURI_INTERNALS__?: { invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> } }).__TAURI_INTERNALS__?.invoke
+    if (tauriInvoke) {
+      try {
+        const nonce = await tauriInvoke<string | null>('confirm_mission_action', {
+          action: request.action,
+          missionId: request.missionId,
+          proposalId: request.proposalId ?? null,
+          revision: request.revision ?? null,
+          feedback: request.feedback ?? null,
+          title: meta.title,
+          details: request.details,
+          confirmLabel: meta.confirmLabel,
+        })
+        return { nonce: nonce ?? null }
+      } catch (err) {
+        return { nonce: null, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      ...(desktopTokenRef.current ? { authorization: `Bearer ${desktopTokenRef.current}` } : {}),
+    }
+    try {
+      const res = await fetch(`${apiBaseRef.current}/api/mission/consent`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({
+          action: request.action,
+          missionId: request.missionId,
+          proposalId: request.proposalId,
+          revision: request.revision,
+          feedback: request.feedback,
+        }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { nonce?: string; error?: string }
+      if (!res.ok || !data.nonce) {
+        return { nonce: null, error: data.error || 'Confirmação nativa indisponível no modo web/headless.' }
+      }
+      return { nonce: data.nonce }
+    } catch {
+      return { nonce: null, error: 'Falha ao solicitar autorização da missão ao backend.' }
+    }
+  }, [])
+
   return {
     status,
     agentLoadStatus,
@@ -309,5 +428,7 @@ export function useServer() {
     fetchSetupCatalog,
     requestSetupConsent,
     installSetupTool,
+    requestMemoryConsent,
+    requestMissionConsent,
   }
 }

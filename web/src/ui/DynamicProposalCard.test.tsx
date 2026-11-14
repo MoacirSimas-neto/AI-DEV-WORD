@@ -18,6 +18,7 @@ function setup(props: Partial<Parameters<typeof DynamicProposalCard>[0]> = {}) {
       online
       send={server.send}
       subscribe={server.subscribe}
+      onRequestMissionConsent={async () => ({ nonce: 'test-consent-nonce' })}
       {...props}
     />,
   )
@@ -121,7 +122,7 @@ describe('DynamicProposalCard', () => {
     await user.click(screen.getByRole('button', { name: 'Aprovar…' }))
     await user.click(screen.getByRole('button', { name: 'Confirmar aprovação' }))
     const rerender = (online: boolean) =>
-      view.rerender(<DynamicProposalCard proposal={proposal()} steps={[]} nameOf={nameOf} decidable online={online} send={server.send} subscribe={server.subscribe} />)
+      view.rerender(<DynamicProposalCard proposal={proposal()} steps={[]} nameOf={nameOf} decidable online={online} send={server.send} subscribe={server.subscribe} onRequestMissionConsent={async () => ({ nonce: 'test-consent-nonce' })} />)
     rerender(false)
     expect(screen.getByRole('button', { name: 'Confirmar aprovação' })).toHaveProperty('disabled', true)
     rerender(true)
@@ -133,6 +134,13 @@ describe('DynamicProposalCard', () => {
   it('avisa quando a mesma mudança de equipe já foi rejeitada antes', () => {
     setup({ proposal: proposal({ previouslyRejected: [{ agentId: 'dev', action: 'convene', revisions: [1] }], revision: 2 }) })
     expect(screen.getByText('já rejeitado na revisão 1')).toBeTruthy()
+  })
+
+  it('não envia proposal-decide se o consentimento nativo for cancelado', async () => {
+    const { server, user } = setup({ onRequestMissionConsent: async () => ({ nonce: null }) })
+    await user.click(screen.getByRole('button', { name: 'Aprovar…' }))
+    await user.click(screen.getByRole('button', { name: 'Confirmar aprovação' }))
+    expect(server.of('proposal-decide')).toHaveLength(0)
   })
 })
 

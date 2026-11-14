@@ -76,6 +76,8 @@ const terminals = new TerminalManager(
     },
   },
 )
+const DESKTOP_SECRET = 'aidw-test-desktop-secret'
+process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET = DESKTOP_SECRET
 const server = createAppServer({
   registry,
   terminals,
@@ -494,6 +496,21 @@ test('WebSocket de memória: listar com filtros, aprovar, rejeitar e substituir 
     projects.add(projectDir)
     pId = projects.active()!.id
   }
+  const consentFor = async (action: 'create' | 'approve' | 'reject' | 'supersede', targetId: number) => {
+    const port = (server.address() as AddressInfo).port
+    const res = await fetch(`http://127.0.0.1:${port}/api/memory/consent`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-aidw-desktop-secret': DESKTOP_SECRET,
+        origin: ORIGIN,
+      },
+      body: JSON.stringify({ action, targetId }),
+    })
+    assert.equal(res.status, 200)
+    const data = (await res.json()) as { nonce: string }
+    return data.nonce
+  }
 
   // 1. Criar memória aprovada pelo usuário
   client.send({
@@ -505,6 +522,7 @@ test('WebSocket de memória: listar com filtros, aprovar, rejeitar e substituir 
       category: 'architecture',
       content: 'Arquitetura: microsserviços Node e SQLite local',
     },
+    consentNonce: await consentFor('create', pId),
   })
   const changed1 = await client.waitFor('memory-changed')
   assert.equal(changed1.projectId, pId)
@@ -527,7 +545,7 @@ test('WebSocket de memória: listar com filtros, aprovar, rejeitar e substituir 
   // Aguarda evento de criação antes de aprovar
   await client.waitFor('memory-changed')
 
-  client.send({ type: 'memory-approve', id: proposal.id })
+  client.send({ type: 'memory-approve', id: proposal.id, consentNonce: await consentFor('approve', proposal.id) })
   await client.waitFor('memory-changed')
   assert.equal(memory.get(proposal.id)?.status, 'approved')
 
@@ -541,7 +559,7 @@ test('WebSocket de memória: listar com filtros, aprovar, rejeitar e substituir 
   })
   await client.waitFor('memory-changed')
 
-  client.send({ type: 'memory-reject', id: proposal2.id })
+  client.send({ type: 'memory-reject', id: proposal2.id, consentNonce: await consentFor('reject', proposal2.id) })
   await client.waitFor('memory-changed')
   assert.equal(memory.get(proposal2.id)?.status, 'rejected')
 
@@ -550,6 +568,7 @@ test('WebSocket de memória: listar com filtros, aprovar, rejeitar e substituir 
     type: 'memory-supersede',
     id: created.id,
     content: 'Arquitetura: monolito modular Node e SQLite local',
+    consentNonce: await consentFor('supersede', created.id),
   })
   await client.waitFor('memory-changed')
   assert.equal(memory.get(created.id)?.status, 'superseded')

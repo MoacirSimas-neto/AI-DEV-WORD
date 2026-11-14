@@ -175,6 +175,8 @@ async function world(options: { file?: string; dir?: string; limits?: Partial<Dy
 // ---------- demonstração ponta a ponta pelo protocolo ----------
 
 test('demonstração: Tech Lead propõe → backend valida → pendente → aprovação pelo protocolo → equipe aplicada → Dev executa → QA verifica → eventos persistidos', async () => {
+  const prevSecret = process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET
+  process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET = 'dyn-test-secret'
   const w = await world()
   const terminals = new TerminalManager(w.registry, () => ({ onData: () => {}, onExit: () => {}, write: () => {}, resize: () => {}, kill: () => {} }), () => w.dir)
   const server = createAppServer({ registry: w.registry, terminals, projects: w.projects, git: new GitService(), tasks: w.tasks, history: w.history, team: w.runner, agentConfigs: w.configs, memory: w.memory, skills: w.skills, events: w.events, plans: w.plans, allowedOrigins: [ORIGIN] })
@@ -233,14 +235,20 @@ test('demonstração: Tech Lead propõe → backend valida → pendente → apro
     assert.deepEqual([foreign.proposals, foreign.steps], [[], []])
 
     // 4. Usuário SIMULADO aprova pelo protocolo autorizado (parte do teste, não uma aprovação real).
-    const decision: ClientMessage = { type: 'proposal-decide', missionId: mission.id, proposalId: proposal.id, revision: 1, decision: 'approve', opId: 'demo-op-1' }
+    const consentRes = await fetch(`http://127.0.0.1:${port}/api/mission/consent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-aidw-desktop-secret': 'dyn-test-secret' },
+      body: JSON.stringify({ action: 'approve', missionId: mission.id, proposalId: proposal.id, revision: 1 }),
+    })
+    const { nonce } = (await consentRes.json()) as { nonce: string }
+    const decision: ClientMessage = { type: 'proposal-decide', missionId: mission.id, proposalId: proposal.id, revision: 1, decision: 'approve', opId: 'demo-op-1', consentNonce: nonce }
     again.send(decision)
     const result = await again.take('proposal-result', (m) => m.opId === 'demo-op-1')
     assert.deepEqual([result.ok, result.applied, result.status], [true, true, 'approved'])
-    // O reenvio da mesma mensagem (reconexão, duplo clique) não executa nada de novo.
+    // O reenvio do mesmo nonce é recusado (uso único); a idempotência do runner continua protegendo o opId.
     user.send(decision)
     const repeated = await user.take('proposal-result', (m) => m.opId === 'demo-op-1')
-    assert.deepEqual([repeated.ok, repeated.applied], [true, false])
+    assert.deepEqual([repeated.ok, repeated.applied], [false, false])
 
     // 5. Dev executa e QA verifica, em sequência; com a fila vazia o Tech Lead recomenda encerrar (10.4).
     await until(() => w.phase(mission.id) === 'awaiting_approval' && w.plans.listProposals(w.q(mission.id)).length === 2, 'recomendação de encerramento')
@@ -304,7 +312,13 @@ test('demonstração: Tech Lead propõe → backend valida → pendente → apro
     // 7. O usuário SIMULADO aprova a recomendação de encerramento.
     const closure = w.pending(mission.id)
     assert.equal(closure.kind, 'closure')
-    user.send({ type: 'proposal-decide', missionId: mission.id, proposalId: closure.id, revision: closure.revision, decision: 'approve', opId: 'demo-op-close' })
+    const closeConsentRes = await fetch(`http://127.0.0.1:${port}/api/mission/consent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-aidw-desktop-secret': 'dyn-test-secret' },
+      body: JSON.stringify({ action: 'approve', missionId: mission.id, proposalId: closure.id, revision: closure.revision }),
+    })
+    const { nonce: closeNonce } = (await closeConsentRes.json()) as { nonce: string }
+    user.send({ type: 'proposal-decide', missionId: mission.id, proposalId: closure.id, revision: closure.revision, decision: 'approve', opId: 'demo-op-close', consentNonce: closeNonce })
     await until(() => w.phase(mission.id) === 'done', 'encerramento')
     assert.equal(w.events.list({ projectId: w.project.id, missionId: mission.id }).find((e) => e.type === 'mission.completed')!.data.basedOn, 'approved-closure-proposal')
 
@@ -313,8 +327,10 @@ test('demonstração: Tech Lead propõe → backend valida → pendente → apro
     user.send({ type: 'proposal-decide', missionId: classic.id, proposalId: proposal.id, revision: 1, decision: 'approve', opId: 'op-classic' })
     const refused = await user.take('proposal-result', (m) => m.opId === 'op-classic')
     assert.equal(refused.ok, false)
-    assert.match(refused.message, /fluxo clássico/)
+    assert.match(refused.message, /Autorização humana obrigatória/)
   } finally {
+    if (prevSecret === undefined) delete process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET
+    else process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET = prevSecret
     for (const socket of sockets) socket.terminate()
     server.close()
   }
@@ -1219,12 +1235,23 @@ test('protocolo de recuperação: mensagens validadas; missão clássica não ac
 // =====================================================================
 
 async function serve(w: World) {
+  const prevSecret = process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET
+  process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET = 'dyn-serve-secret'
   const terminals = new TerminalManager(w.registry, () => ({ onData: () => {}, onExit: () => {}, write: () => {}, resize: () => {}, kill: () => {} }), () => w.dir)
   const server = createAppServer({ registry: w.registry, terminals, projects: w.projects, git: new GitService(), tasks: w.tasks, history: w.history, team: w.runner, agentConfigs: w.configs, memory: w.memory, skills: w.skills, events: w.events, plans: w.plans, allowedOrigins: [ORIGIN] })
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const port = (server.address() as AddressInfo).port
   const sockets: WebSocket[] = []
+  const consent = async (body: Record<string, unknown>) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/mission/consent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-aidw-desktop-secret': 'dyn-serve-secret' },
+      body: JSON.stringify(body),
+    })
+    const data = (await res.json()) as { nonce?: string }
+    return data.nonce
+  }
   const connect = async () => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
       origin: ORIGIN,
@@ -1246,15 +1273,17 @@ async function serve(w: World) {
     return { send: (m: ClientMessage) => socket.send(JSON.stringify(m)), take }
   }
   const close = () => {
+    if (prevSecret === undefined) delete process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET
+    else process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET = prevSecret
     for (const s of sockets) s.terminate()
     server.close()
   }
-  return { connect, close }
+  return { connect, close, consent }
 }
 
 test('interface ↔ backend: iniciar dinâmica, revisão obsoleta, ajuste, reconexão, clique repetido, equipe e cancelamento', async () => {
   const w = await world()
-  const { connect, close } = await serve(w)
+  const { connect, close, consent } = await serve(w)
   try {
     const ui = await connect()
     w.lead.length = 0
@@ -1279,7 +1308,14 @@ test('interface ↔ backend: iniciar dinâmica, revisão obsoleta, ajuste, recon
         steps: [stepJson('modelo', 'dados', 'analyze'), stepJson('impl', 'dev', 'implement', ['modelo'], [{ kind: 'step', key: 'modelo' }]), stepJson('teste', 'qa', 'verify', ['impl'])],
       }),
     )
-    ui.send(decisionMessage(first, 'adjust', 'op-adjust', 'Não quero Segurança agora. Consulte Dados primeiro.'))
+    const adjNonce = await consent({
+      action: 'adjust',
+      missionId: mission.id,
+      proposalId: first.id,
+      revision: first.revision,
+      feedback: 'Não quero Segurança agora. Consulte Dados primeiro.',
+    })
+    ui.send(decisionMessage(first, 'adjust', 'op-adjust', 'Não quero Segurança agora. Consulte Dados primeiro.', adjNonce))
     assert.equal((await ui.take('proposal-result', (m) => m.opId === 'op-adjust')).applied, true)
     await waitProposals(w, mission.id, 2, 'proposta ajustada')
     assert.match(w.calls.at(-1)!.prompt, /Texto do usuário: Não quero Segurança agora\. Consulte Dados primeiro\./)
@@ -1295,11 +1331,17 @@ test('interface ↔ backend: iniciar dinâmica, revisão obsoleta, ajuste, recon
     const foreign = await again.take('mission-plan', (m) => m.projectId === w.project.id + 50)
     assert.deepEqual([foreign.proposals.length, foreign.steps.length], [0, 0])
 
-    // Clique repetido (mesmo opId, de duas abas): aplica uma vez só.
+    // Clique repetido (mesmo opId, de duas abas): cada nonce é de uso único; a segunda aba é recusada.
     const second = recovered.proposals[1]
     w.lead.push(closureText(2))
-    again.send(decisionMessage(second, 'approve', 'op-approve'))
-    ui.send(decisionMessage(second, 'approve', 'op-approve'))
+    const appNonce = await consent({
+      action: 'approve',
+      missionId: mission.id,
+      proposalId: second.id,
+      revision: second.revision,
+    })
+    again.send(decisionMessage(second, 'approve', 'op-approve', undefined, appNonce))
+    ui.send(decisionMessage(second, 'approve', 'op-approve', undefined, appNonce))
     const results = [await again.take('proposal-result', (m) => m.opId === 'op-approve'), await ui.take('proposal-result', (m) => m.opId === 'op-approve')]
     assert.deepEqual(results.map((r) => r.applied).sort(), [false, true])
 

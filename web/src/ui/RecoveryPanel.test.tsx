@@ -7,10 +7,10 @@ import { RecoveryPanel } from './RecoveryPanel.tsx'
 const nameOf = (id: string) => ({ dev: 'Dev' })[id] ?? id
 const stopped = mission({ phase: 'awaiting_decision' })
 
-function setup(online = true) {
+function setup(online = true, onRequestMissionConsent: Parameters<typeof RecoveryPanel>[0]['onRequestMissionConsent'] = async () => ({ nonce: 'test-consent-nonce' })) {
   const server = fakeServer()
   const user = userEvent.setup()
-  const view = render(<RecoveryPanel mission={stopped} nameOf={nameOf} online={online} send={server.send} subscribe={server.subscribe} />)
+  const view = render(<RecoveryPanel mission={stopped} nameOf={nameOf} online={online} send={server.send} subscribe={server.subscribe} onRequestMissionConsent={onRequestMissionConsent} />)
   return { server, user, view }
 }
 
@@ -111,7 +111,7 @@ describe('RecoveryPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Voltar' }))
     await user.click(screen.getByRole('button', { name: 'Encerrar missão…' }))
     await user.click(screen.getByRole('button', { name: 'Confirmar encerramento' }))
-    expect(server.of('mission-close')).toEqual([{ type: 'mission-close', missionId: 3 }])
+    expect(server.of('mission-close')).toEqual([{ type: 'mission-close', missionId: 3, consentNonce: 'test-consent-nonce' }])
     expect(server.of('mission-cancel')).toHaveLength(0)
   })
 

@@ -7,7 +7,7 @@ import type {
   MemoryScope,
   MemoryStatus,
 } from '../../../shared/protocol.ts'
-import type { Send, Subscribe } from '../net/useServer.ts'
+import type { MemoryConsentAction, MemoryConsentRequester, Send, Subscribe } from '../net/useServer.ts'
 
 interface Props {
   projectId: number | null
@@ -16,6 +16,7 @@ interface Props {
   online: boolean
   send: Send
   subscribe: Subscribe
+  onRequestMemoryConsent?: MemoryConsentRequester
   onClose: () => void
 }
 
@@ -66,6 +67,7 @@ export function MemoryCenter({
   online,
   send,
   subscribe,
+  onRequestMemoryConsent,
   onClose,
 }: Props) {
   const [entries, setEntries] = useState<MemoryEntry[]>([])
@@ -122,9 +124,30 @@ export function MemoryCenter({
     })
   }, [subscribe, projectId, loadMemories])
 
-  const handleCreate = (e: FormEvent) => {
+  const authorizeMemory = async (
+    action: MemoryConsentAction,
+    targetId: number,
+    details: string,
+  ): Promise<string | null> => {
+    if (!onRequestMemoryConsent) {
+      setNotice('Confirmação nativa indisponível nesta sessão.')
+      return null
+    }
+    const res = await onRequestMemoryConsent(action, targetId, details)
+    if (res.error) setNotice(res.error)
+    return res.nonce
+  }
+
+  const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
     if (!projectId || !newContent.trim()) return
+    const content = newContent.trim()
+    const nonce = await authorizeMemory(
+      'create',
+      projectId,
+      `Criar e aprovar memória (${CATEGORY_LABEL[newCategory]}) no projeto "${projectName ?? projectId}":\n\n${content}`,
+    )
+    if (!nonce) return
     send({
       type: 'memory-create',
       projectId,
@@ -132,23 +155,47 @@ export function MemoryCenter({
         scope: newScope,
         agentId: newScope === 'agent' ? newAgentId || null : null,
         category: newCategory,
-        content: newContent.trim(),
+        content,
       },
+      consentNonce: nonce,
     })
     setCreating(false)
     setNewContent('')
   }
 
-  const handleSupersede = (e: FormEvent) => {
+  const handleSupersede = async (e: FormEvent) => {
     e.preventDefault()
     if (!supersedingEntry || !supersedingContent.trim()) return
+    const content = supersedingContent.trim()
+    const nonce = await authorizeMemory(
+      'supersede',
+      supersedingEntry.id,
+      `Substituir memória #${supersedingEntry.id} (${CATEGORY_LABEL[supersedingEntry.category]}):\n\n${content}`,
+    )
+    if (!nonce) return
     send({
       type: 'memory-supersede',
       id: supersedingEntry.id,
-      content: supersedingContent.trim(),
+      content,
+      consentNonce: nonce,
     })
     setSupersedingEntry(null)
     setSupersedingContent('')
+  }
+
+  const handleDecide = async (entry: MemoryEntry, action: 'approve' | 'reject') => {
+    const label = action === 'approve' ? 'Aprovar' : 'Rejeitar'
+    const nonce = await authorizeMemory(
+      action,
+      entry.id,
+      `${label} memória #${entry.id} (origem: ${entry.author}, ${CATEGORY_LABEL[entry.category]}):\n\n${entry.content}`,
+    )
+    if (!nonce) return
+    send({
+      type: action === 'approve' ? 'memory-approve' : 'memory-reject',
+      id: entry.id,
+      consentNonce: nonce,
+    })
   }
 
   const openVersions = (id: number) => {
@@ -459,7 +506,7 @@ export function MemoryCenter({
                         <button
                           type="button"
                           disabled={!online}
-                          onClick={() => send({ type: 'memory-approve', id: m.id })}
+                          onClick={() => void handleDecide(m, 'approve')}
                         >
                           ✓ Aprovar
                         </button>
@@ -467,7 +514,7 @@ export function MemoryCenter({
                           type="button"
                           className="btn-quiet"
                           disabled={!online}
-                          onClick={() => send({ type: 'memory-reject', id: m.id })}
+                          onClick={() => void handleDecide(m, 'reject')}
                         >
                           ✕ Rejeitar
                         </button>

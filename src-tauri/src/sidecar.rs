@@ -454,6 +454,79 @@ pub fn desktop_bootstrap(
     Ok(DesktopBootstrapResult { port, code })
 }
 
+fn is_valid_memory_consent_action(action: &str) -> bool {
+    matches!(action, "create" | "approve" | "reject" | "supersede")
+}
+
+fn is_valid_mission_consent_action(action: &str) -> bool {
+    matches!(action, "approve" | "adjust" | "reject" | "close")
+}
+
+fn json_escape(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 2);
+    out.push('"');
+    for ch in input.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                use std::fmt::Write;
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn request_desktop_consent(
+    state: &SidecarManager,
+    path: &str,
+    payload: &str,
+) -> Result<String, String> {
+    let status = state.get_status();
+    if status.status != "ready" {
+        return Err("Backend ainda não está pronto".into());
+    }
+    let secret = state.bootstrap_secret.lock().unwrap().clone();
+    if secret.is_empty() {
+        return Err("Segredo de bootstrap indisponível".into());
+    }
+    let port = status.port;
+    let addr = format!("127.0.0.1:{port}");
+    let mut stream = TcpStream::connect_timeout(
+        &addr.parse().map_err(|e| format!("Endereço inválido: {e}"))?,
+        Duration::from_millis(800),
+    )
+    .map_err(|e| format!("Falha ao conectar ao backend: {e}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1200)));
+    let req = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nx-aidw-desktop-secret: {secret}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        payload.len(),
+        payload
+    );
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| format!("Falha ao solicitar consentimento: {e}"))?;
+    let mut resp = String::new();
+    stream
+        .read_to_string(&mut resp)
+        .map_err(|e| format!("Falha ao ler resposta de consentimento: {e}"))?;
+    let (_, body) = resp
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "Resposta HTTP inválida do backend".to_string())?;
+    if !resp.starts_with("HTTP/1.1 200") && !resp.starts_with("HTTP/1.0 200") {
+        let msg = extract_json_string(body, "error")
+            .unwrap_or_else(|| "Consentimento rejeitado pelo backend".to_string());
+        return Err(msg);
+    }
+    extract_json_string(body, "nonce").ok_or_else(|| "Nonce ausente na resposta".to_string())
+}
+
 #[tauri::command]
 pub fn confirm_tool_install(
     app: tauri::AppHandle,
@@ -479,43 +552,99 @@ pub fn confirm_tool_install(
         return Ok(None);
     }
 
-    let status = state.get_status();
-    if status.status != "ready" {
-        return Err("Backend ainda não está pronto".into());
-    }
-    let secret = state.bootstrap_secret.lock().unwrap().clone();
-    if secret.is_empty() {
-        return Err("Segredo de bootstrap indisponível".into());
-    }
-    let port = status.port;
-    let addr = format!("127.0.0.1:{port}");
     let payload = format!("{{\"toolId\":\"{}\"}}", tool_id.replace('"', ""));
-    let mut stream = TcpStream::connect_timeout(
-        &addr.parse().map_err(|e| format!("Endereço inválido: {e}"))?,
-        Duration::from_millis(800),
-    )
-    .map_err(|e| format!("Falha ao conectar ao backend: {e}"))?;
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(1200)));
-    let req = format!(
-        "POST /api/setup/consent HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nx-aidw-desktop-secret: {secret}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        payload.len(),
-        payload
-    );
-    stream
-        .write_all(req.as_bytes())
-        .map_err(|e| format!("Falha ao solicitar consentimento: {e}"))?;
-    let mut resp = String::new();
-    stream
-        .read_to_string(&mut resp)
-        .map_err(|e| format!("Falha ao ler resposta de consentimento: {e}"))?;
-    let (_, body) = resp
-        .split_once("\r\n\r\n")
-        .ok_or_else(|| "Resposta HTTP inválida do backend".to_string())?;
-    if !resp.starts_with("HTTP/1.1 200") && !resp.starts_with("HTTP/1.0 200") {
-        return Err("Consentimento rejeitado pelo backend".into());
+    let nonce = request_desktop_consent(&state, "/api/setup/consent", &payload)?;
+    Ok(Some(nonce))
+}
+
+#[tauri::command]
+pub fn confirm_memory_action(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SidecarManager>>,
+    action: String,
+    target_id: i64,
+    title: String,
+    details: String,
+    confirm_label: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+    if !is_valid_memory_consent_action(&action) || target_id <= 0 {
+        return Err("Operação ou alvo de memória inválido".into());
     }
-    let nonce = extract_json_string(body, "nonce")
-        .ok_or_else(|| "Nonce ausente na resposta".to_string())?;
+
+    let approved = app
+        .dialog()
+        .message(details)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            confirm_label,
+            "Cancelar".to_string(),
+        ))
+        .blocking_show();
+
+    if !approved {
+        return Ok(None);
+    }
+
+    let payload = format!("{{\"action\":\"{action}\",\"targetId\":{target_id}}}");
+    let nonce = request_desktop_consent(&state, "/api/memory/consent", &payload)?;
+    Ok(Some(nonce))
+}
+
+#[tauri::command]
+pub fn confirm_mission_action(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<SidecarManager>>,
+    action: String,
+    mission_id: i64,
+    proposal_id: Option<i64>,
+    revision: Option<i64>,
+    feedback: Option<String>,
+    title: String,
+    details: String,
+    confirm_label: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+    if !is_valid_mission_consent_action(&action) || mission_id <= 0 {
+        return Err("Operação ou missão inválida".into());
+    }
+    if action != "close" {
+        let pid = proposal_id.unwrap_or(0);
+        let rev = revision.unwrap_or(0);
+        if pid <= 0 || rev <= 0 {
+            return Err("Proposta ou revisão inválida".into());
+        }
+    }
+
+    let approved = app
+        .dialog()
+        .message(details)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            confirm_label,
+            "Cancelar".to_string(),
+        ))
+        .blocking_show();
+
+    if !approved {
+        return Ok(None);
+    }
+
+    let payload = if action == "close" {
+        format!("{{\"action\":\"close\",\"missionId\":{mission_id}}}")
+    } else {
+        let pid = proposal_id.unwrap_or(0);
+        let rev = revision.unwrap_or(0);
+        let fb = json_escape(feedback.as_deref().unwrap_or(""));
+        format!(
+            "{{\"action\":\"{action}\",\"missionId\":{mission_id},\"proposalId\":{pid},\"revision\":{rev},\"feedback\":{fb}}}"
+        )
+    };
+    let nonce = request_desktop_consent(&state, "/api/mission/consent", &payload)?;
     Ok(Some(nonce))
 }
 
@@ -552,4 +681,28 @@ fn generate_random_hex_32() -> String {
         }
     }
     buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod memory_consent_tests {
+    use super::{is_valid_memory_consent_action, is_valid_mission_consent_action, json_escape};
+
+    #[test]
+    fn validates_allowed_memory_consent_actions() {
+        for ok in ["create", "approve", "reject", "supersede"] {
+            assert!(is_valid_memory_consent_action(ok));
+        }
+        assert!(!is_valid_memory_consent_action("delete"));
+        assert!(!is_valid_memory_consent_action(""));
+    }
+
+    #[test]
+    fn validates_allowed_mission_consent_actions_and_escapes_json() {
+        for ok in ["approve", "adjust", "reject", "close"] {
+            assert!(is_valid_mission_consent_action(ok));
+        }
+        assert!(!is_valid_mission_consent_action("cancel"));
+        assert!(!is_valid_mission_consent_action(""));
+        assert_eq!(json_escape("a\"b\\c\nd"), "\"a\\\"b\\\\c\\nd\"");
+    }
 }

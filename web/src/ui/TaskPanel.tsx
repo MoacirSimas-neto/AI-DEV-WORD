@@ -15,7 +15,7 @@ import type {
   TaskStatus,
 } from '../../../shared/protocol.ts'
 import { MAX_MISSION_SPECIALISTS } from '../../../shared/protocol.ts'
-import type { Send, Subscribe } from '../net/useServer.ts'
+import type { MissionConsentRequester, Send, Subscribe } from '../net/useServer.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
 import { Markdown } from './chat/markdown.tsx'
 import { ClarificationBox } from './ClarificationBox.tsx'
@@ -37,6 +37,7 @@ interface Props {
   onOpenChat?: (conversationId: number) => void
   onOpenChatNew?: () => void
   onOpenObservability?: (missionId: number) => void
+  onRequestMissionConsent?: MissionConsentRequester
 }
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = { low: 'Baixa', medium: 'Média', high: 'Alta' }
@@ -61,6 +62,7 @@ export function TaskPanel({
   onOpenChat,
   onOpenChatNew,
   onOpenObservability,
+  onRequestMissionConsent,
 }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [title, setTitle] = useState('')
@@ -280,6 +282,7 @@ export function TaskPanel({
             origin={chatLinks.find((l) => l.missionId === activeMission.id) ?? null}
             onOpenChat={onOpenChat}
             onOpenObservability={onOpenObservability ? () => onOpenObservability(activeMission.id) : undefined}
+            onRequestMissionConsent={onRequestMissionConsent}
           />
         </section>
       )}

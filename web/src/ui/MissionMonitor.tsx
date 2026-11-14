@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { isOpenMission } from '../../../shared/missionPhases.ts'
 import { computeMissionProgress } from '../../../shared/missionProgress.ts'
 import type { AgentConfig, AgentInfo, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
-import type { Send, Subscribe } from '../net/useServer.ts'
+import type { MissionConsentRequester, Send, Subscribe } from '../net/useServer.ts'
 import { ClarificationBox } from './ClarificationBox.tsx'
 import { DynamicMissionMonitor } from './DynamicMissionMonitor.tsx'
 import { DYNAMIC_PHASE_LABEL } from './dynamicView.ts'
@@ -21,6 +21,7 @@ interface Props {
   onToggleCollapse: () => void
   onOpenTasks: () => void
   onOpenObservability?: (missionId: number) => void
+  onRequestMissionConsent?: MissionConsentRequester
 }
 
 export function MissionMonitor({
@@ -37,6 +38,7 @@ export function MissionMonitor({
   onToggleCollapse,
   onOpenTasks,
   onOpenObservability,
+  onRequestMissionConsent,
 }: Props) {
   const [selectedMissionId, setSelectedMissionId] = useState<number | null>(null)
   const [liveOutput, setLiveOutput] = useState<Record<number, string>>({})
@@ -164,6 +166,7 @@ export function MissionMonitor({
           subscribe={subscribe}
           liveOutput={liveOutput[currentMission.id]}
           onOpenObservability={onOpenObservability ? () => onOpenObservability(currentMission.id) : undefined}
+          onRequestMissionConsent={onRequestMissionConsent}
         />
       ) : (
         <>

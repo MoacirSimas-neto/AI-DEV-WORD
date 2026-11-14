@@ -38,6 +38,13 @@ import { defaultSpecializations } from './agents/specializations.ts'
 import type { GitService } from './git/service.ts'
 import type { HistoryStore } from './history/store.ts'
 import { HUMAN, type MemoryStore } from './memory/store.ts'
+import { MEMORY_CONSENT_ACTIONS, MemoryConsentGate, type MemoryConsentAction } from './memory/consent.ts'
+import {
+  MISSION_CONSENT_ACTIONS,
+  MissionConsentGate,
+  proposalConsentFingerprint,
+  type MissionConsentAction,
+} from './team/missionConsent.ts'
 import type { EventStore } from './observability/store.ts'
 import type { ProjectStore } from './projects/store.ts'
 import type { SkillStore } from './skills/store.ts'
@@ -279,11 +286,12 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       }
       return { type: 'mission-start', taskId: msg.taskId, ...modeFields }
     }
-    case 'proposal-decide':
+    case 'proposal-decide': {
       // A decisão só chega por aqui, vinda da interface: texto de CLI ou de agente nunca vira mensagem do cliente.
       if (!isId(msg.missionId) || !isId(msg.proposalId) || !Number.isInteger(msg.revision) || (msg.revision as number) < 1) return null
       if (!DECISIONS.has(msg.decision as string) || !isOpId(msg.opId)) return null
       if (msg.feedback !== undefined && (typeof msg.feedback !== 'string' || msg.feedback.length > 5000)) return null
+      const consentNonce = typeof msg.consentNonce === 'string' && msg.consentNonce.length <= 128 ? msg.consentNonce : undefined
       return {
         type: 'proposal-decide',
         missionId: msg.missionId,
@@ -292,9 +300,14 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         decision: msg.decision as 'approve' | 'reject' | 'adjust',
         opId: msg.opId,
         ...(typeof msg.feedback === 'string' ? { feedback: msg.feedback } : {}),
+        ...(consentNonce ? { consentNonce } : {}),
       }
-    case 'mission-close':
-      return isId(msg.missionId) ? { type: 'mission-close', missionId: msg.missionId } : null
+    }
+    case 'mission-close': {
+      if (!isId(msg.missionId)) return null
+      const consentNonce = typeof msg.consentNonce === 'string' && msg.consentNonce.length <= 128 ? msg.consentNonce : undefined
+      return { type: 'mission-close', missionId: msg.missionId, ...(consentNonce ? { consentNonce } : {}) }
+    }
     case 'mission-recovery':
       return isId(msg.projectId) && isId(msg.missionId) ? { type: 'mission-recovery', projectId: msg.projectId, missionId: msg.missionId } : null
     case 'mission-resume':
@@ -341,16 +354,22 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (!isId(msg.projectId) || typeof e !== 'object' || e === null) return null
       if (typeof e.scope !== 'string' || typeof e.category !== 'string' || typeof e.content !== 'string') return null
       if (e.content.length > 5000 || (e.agentId !== null && typeof e.agentId !== 'string')) return null
-      return { type: 'memory-create', projectId: msg.projectId, entry: e as unknown as MemoryInput }
+      const consentNonce = typeof msg.consentNonce === 'string' && msg.consentNonce.length <= 128 ? msg.consentNonce : undefined
+      return { type: 'memory-create', projectId: msg.projectId, entry: e as unknown as MemoryInput, consentNonce }
     }
     case 'memory-approve':
-    case 'memory-reject':
+    case 'memory-reject': {
+      if (!isId(msg.id)) return null
+      const consentNonce = typeof msg.consentNonce === 'string' && msg.consentNonce.length <= 128 ? msg.consentNonce : undefined
+      return { type: msg.type, id: msg.id, consentNonce }
+    }
     case 'memory-versions':
       return isId(msg.id) ? { type: msg.type, id: msg.id } : null
-    case 'memory-supersede':
-      return isId(msg.id) && typeof msg.content === 'string' && msg.content.length <= 5000
-        ? { type: 'memory-supersede', id: msg.id, content: msg.content }
-        : null
+    case 'memory-supersede': {
+      if (!isId(msg.id) || typeof msg.content !== 'string' || msg.content.length > 5000) return null
+      const consentNonce = typeof msg.consentNonce === 'string' && msg.consentNonce.length <= 128 ? msg.consentNonce : undefined
+      return { type: 'memory-supersede', id: msg.id, content: msg.content, consentNonce }
+    }
     case 'agent-config-set': {
       if (typeof msg.config !== 'object' || msg.config === null) return null
       const c = msg.config as Record<string, unknown>
@@ -563,6 +582,8 @@ export function createAppServer({
   }
 
   const desktopBootstrapSecret = process.env.AIDW_DESKTOP_BOOTSTRAP_SECRET?.trim() ?? ''
+  const memoryConsent = new MemoryConsentGate()
+  const missionConsent = new MissionConsentGate()
   const effectiveAllowedOrigins = desktopBootstrapSecret
     ? Array.from(
         new Set([
@@ -676,6 +697,136 @@ export function createAppServer({
           res
             .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
             .end(JSON.stringify(consent))
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid JSON"}')
+        }
+      })
+      return
+    }
+    if (req.method === 'POST' && req.url === '/api/memory/consent') {
+      if (!desktopBootstrapSecret) {
+        res
+          .writeHead(403, { 'content-type': 'application/json' })
+          .end('{"error":"Confirmação nativa indisponível no modo web/headless."}')
+        return
+      }
+      const provided = req.headers['x-aidw-desktop-secret']
+      if (typeof provided !== 'string' || !safeEqual(provided, desktopBootstrapSecret)) {
+        res.writeHead(403, { 'content-type': 'application/json' }).end('{"error":"Native confirmation required"}')
+        return
+      }
+      if (origin && !effectiveAllowedOrigins.includes(origin)) {
+        res.writeHead(403).end()
+        return
+      }
+      let raw = ''
+      req.on('data', (chunk) => {
+        raw += chunk
+        if (raw.length > 1024) req.destroy()
+      })
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(raw || '{}') as { action?: unknown; targetId?: unknown }
+          const action = typeof parsed.action === 'string' ? parsed.action : ''
+          if (!MEMORY_CONSENT_ACTIONS.has(action as MemoryConsentAction) || !isId(parsed.targetId)) {
+            res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid action or targetId"}')
+            return
+          }
+          const ticket = memoryConsent.issue(action as MemoryConsentAction, parsed.targetId)
+          res
+            .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+            .end(JSON.stringify(ticket))
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid JSON"}')
+        }
+      })
+      return
+    }
+    if (req.method === 'POST' && req.url === '/api/mission/consent') {
+      if (!desktopBootstrapSecret) {
+        res
+          .writeHead(403, { 'content-type': 'application/json' })
+          .end('{"error":"Confirmação nativa indisponível no modo web/headless."}')
+        return
+      }
+      const provided = req.headers['x-aidw-desktop-secret']
+      if (typeof provided !== 'string' || !safeEqual(provided, desktopBootstrapSecret)) {
+        res.writeHead(403, { 'content-type': 'application/json' }).end('{"error":"Native confirmation required"}')
+        return
+      }
+      if (origin && !effectiveAllowedOrigins.includes(origin)) {
+        res.writeHead(403).end()
+        return
+      }
+      let raw = ''
+      req.on('data', (chunk) => {
+        raw += chunk
+        if (raw.length > 8192) req.destroy()
+      })
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(raw || '{}') as {
+            action?: unknown
+            missionId?: unknown
+            proposalId?: unknown
+            revision?: unknown
+            feedback?: unknown
+          }
+          const action = typeof parsed.action === 'string' ? parsed.action : ''
+          if (!MISSION_CONSENT_ACTIONS.has(action as MissionConsentAction) || !isId(parsed.missionId)) {
+            res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid action or missionId"}')
+            return
+          }
+          const mission = tasks.getMission(parsed.missionId)
+          if (!mission || mission.mode !== 'dynamic') {
+            res.writeHead(404, { 'content-type': 'application/json' }).end('{"error":"Missão dinâmica não encontrada."}')
+            return
+          }
+          if (action === 'close') {
+            if (mission.phase !== 'awaiting_decision') {
+              res.writeHead(409, { 'content-type': 'application/json' }).end('{"error":"A missão não está aguardando decisão para encerramento."}')
+              return
+            }
+            const ticket = missionConsent.issue({
+              action: 'close',
+              missionId: mission.id,
+              missionPhase: mission.phase,
+            })
+            res
+              .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+              .end(JSON.stringify({ nonce: ticket.nonce, expiresAt: ticket.expiresAt }))
+            return
+          }
+          if (!isId(parsed.proposalId) || !Number.isInteger(parsed.revision) || (parsed.revision as number) < 1) {
+            res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid proposalId or revision"}')
+            return
+          }
+          const feedback = typeof parsed.feedback === 'string' ? parsed.feedback : ''
+          if (feedback.length > 5000) {
+            res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Feedback too long"}')
+            return
+          }
+          if (mission.phase !== 'awaiting_approval') {
+            res.writeHead(409, { 'content-type': 'application/json' }).end('{"error":"A missão não está aguardando aprovação da proposta."}')
+            return
+          }
+          const proposal = plans?.getProposal(parsed.proposalId)
+          if (!proposal || proposal.missionId !== mission.id || proposal.revision !== parsed.revision || proposal.status !== 'pending') {
+            res.writeHead(409, { 'content-type': 'application/json' }).end('{"error":"A proposta não está mais pendente nesta revisão."}')
+            return
+          }
+          const ticket = missionConsent.issue({
+            action: action as MissionConsentAction,
+            missionId: mission.id,
+            missionPhase: mission.phase,
+            proposalId: proposal.id,
+            revision: proposal.revision,
+            proposalFingerprint: proposalConsentFingerprint(proposal),
+            feedback,
+          })
+          res
+            .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+            .end(JSON.stringify({ nonce: ticket.nonce, expiresAt: ticket.expiresAt }))
         } catch {
           res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":"Invalid JSON"}')
         }
@@ -1138,6 +1289,17 @@ export function createAppServer({
         break
       case 'proposal-decide':
         try {
+          const mission = tasks.getMission(message.missionId)
+          const proposalBefore = plans?.getProposal(message.proposalId)
+          missionConsent.consume(message.consentNonce, {
+            action: message.decision,
+            missionId: message.missionId,
+            missionPhase: mission?.phase ?? '',
+            proposalId: message.proposalId,
+            revision: message.revision,
+            proposalFingerprint: proposalBefore ? proposalConsentFingerprint(proposalBefore) : null,
+            feedback: message.feedback,
+          })
           const { proposal, applied } = team.decideProposal(message)
           send(socket, {
             type: 'proposal-result',
@@ -1164,6 +1326,12 @@ export function createAppServer({
         break
       case 'mission-close':
         try {
+          const mission = tasks.getMission(message.missionId)
+          missionConsent.consume(message.consentNonce, {
+            action: 'close',
+            missionId: message.missionId,
+            missionPhase: mission?.phase ?? '',
+          })
           team.closeMission(message.missionId)
         } catch (error) {
           send(socket, { type: 'notice', message: errorText(error) })
@@ -1299,12 +1467,46 @@ export function createAppServer({
       case 'memory-approve':
       case 'memory-reject':
       case 'memory-supersede':
-        // Estas mensagens só vêm da interface: são a ação humana que torna uma memória válida.
+        // Exige nonce de uso único emitido após confirmação humana nativa no desktop.
         try {
-          if (message.type === 'memory-create') memory.createApproved({ projectId: message.projectId, ...message.entry })
-          else if (message.type === 'memory-approve') memory.approve(message.id, HUMAN)
-          else if (message.type === 'memory-reject') memory.reject(message.id, HUMAN)
-          else memory.supersede(message.id, message.content, HUMAN)
+          let action: MemoryConsentAction
+          let entry
+          if (message.type === 'memory-create') {
+            action = 'create'
+            memoryConsent.consume(message.consentNonce, action, message.projectId)
+            entry = memory.createApproved({ projectId: message.projectId, ...message.entry })
+          } else if (message.type === 'memory-approve') {
+            action = 'approve'
+            memoryConsent.consume(message.consentNonce, action, message.id)
+            entry = memory.approve(message.id, HUMAN)
+          } else if (message.type === 'memory-reject') {
+            action = 'reject'
+            memoryConsent.consume(message.consentNonce, action, message.id)
+            entry = memory.reject(message.id, HUMAN)
+          } else {
+            action = 'supersede'
+            memoryConsent.consume(message.consentNonce, action, message.id)
+            entry = memory.supersede(message.id, message.content, HUMAN)
+          }
+          if (entry.sourceMissionId) {
+            events?.record({
+              projectId: entry.projectId,
+              missionId: entry.sourceMissionId,
+              taskId: null,
+              agentId: null,
+              type: 'approval.received',
+              state: 'completed',
+              evidence: 'observed',
+              summary: `Memória #${entry.id} (${action}) confirmada pelo usuário.`,
+              data: {
+                actor: HUMAN,
+                verification: 'native_consent',
+                action,
+                memoryId: entry.id,
+                author: entry.author,
+              },
+            })
+          }
         } catch (error) {
           send(socket, { type: 'notice', message: errorText(error) })
         }

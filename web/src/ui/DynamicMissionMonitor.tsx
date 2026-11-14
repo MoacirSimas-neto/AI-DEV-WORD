@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import type { AgentConfig, AgentInfo, MissionInfo, PlannedStep, TaskInfo } from '../../../shared/protocol.ts'
 import { isOpenMission } from '../../../shared/missionPhases.ts'
 import { useMissionEvents, usePlan } from '../net/useMission.ts'
-import type { Send, Subscribe } from '../net/useServer.ts'
+import type { MissionConsentRequester, Send, Subscribe } from '../net/useServer.ts'
 import { ClarificationBox } from './ClarificationBox.tsx'
 import { DynamicProposalCard } from './DynamicProposalCard.tsx'
 import {
@@ -34,10 +34,11 @@ interface Props {
   origin?: { conversationId: number; title?: string } | null
   /** Volta para a conversa de origem (omitido quando o monitor já está dentro do chat). */
   onOpenChat?: (conversationId: number) => void
+  onRequestMissionConsent?: MissionConsentRequester
 }
 
 /** Missão dinâmica: só o que o backend gravou — passos aprovados, propostas, gatilhos e decisões. */
-export function DynamicMissionMonitor({ mission, task, agents, configs, online, send, subscribe, liveOutput, onOpenObservability, origin, onOpenChat }: Props) {
+export function DynamicMissionMonitor({ mission, task, agents, configs, online, send, subscribe, liveOutput, onOpenObservability, origin, onOpenChat, onRequestMissionConsent }: Props) {
   const plan = usePlan(send, subscribe, online, mission.projectId, mission.id)
   const events = useMissionEvents(send, subscribe, online, mission.projectId, mission.id)
   const nameOf = useCallback(
@@ -160,11 +161,12 @@ export function DynamicMissionMonitor({ mission, task, agents, configs, online, 
             online={online}
             send={send}
             subscribe={subscribe}
+            onRequestMissionConsent={onRequestMissionConsent}
           />
         </section>
       )}
 
-      {mission.phase === 'awaiting_decision' && <RecoveryPanel mission={mission} nameOf={nameOf} online={online} send={send} subscribe={subscribe} />}
+      {mission.phase === 'awaiting_decision' && <RecoveryPanel mission={mission} nameOf={nameOf} online={online} send={send} subscribe={subscribe} onRequestMissionConsent={onRequestMissionConsent} />}
 
       <section className="dyn-current">
         <h4 className="dyn-section-title">Plano atual aprovado</h4>

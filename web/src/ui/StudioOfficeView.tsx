@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { isOpenMission } from '../../../shared/missionPhases.ts'
 import type { AgentConfig, AgentInfo, GitStatus, MissionInfo, TaskInfo } from '../../../shared/protocol.ts'
 import type { WorldAction } from '../game/WorldBridge.ts'
-import type { Send, Subscribe } from '../net/useServer.ts'
+import type { MissionConsentRequester, Send, Subscribe } from '../net/useServer.ts'
 import { LazyChatView, LazyPhaserGame } from '../lazyScreens.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
 import { AgentWindow } from './AgentWindow.tsx'
@@ -33,6 +33,7 @@ interface Props {
   onAction?: (action: WorldAction) => void
   onOpenTasks: () => void
   onOpenObservability: (missionId?: number | null, agentId?: string | null) => void
+  onRequestMissionConsent?: MissionConsentRequester
 }
 
 function formatDockRole(ag: AgentInfo): string {
@@ -78,6 +79,7 @@ export function StudioOfficeView({
   onAction,
   onOpenTasks,
   onOpenObservability,
+  onRequestMissionConsent,
 }: Props) {
   const [zoom, setZoom] = useState<number>(1.0)
 
@@ -448,6 +450,7 @@ export function StudioOfficeView({
                   onToggleCollapse={() => {}}
                   onOpenTasks={onOpenTasks}
                   onOpenObservability={(mId) => onOpenObservability(mId, null)}
+                  onRequestMissionConsent={onRequestMissionConsent}
                 />
               </ErrorBoundary>
             </div>

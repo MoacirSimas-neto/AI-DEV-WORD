@@ -51,6 +51,8 @@ function App() {
     fetchSetupCatalog,
     requestSetupConsent,
     installSetupTool,
+    requestMemoryConsent,
+    requestMissionConsent,
   } = useServer()
 
   // Etapa 12.1: o chat com o Tech Lead é a porta de entrada; o escritório segue a uma aba.
@@ -389,6 +391,7 @@ function App() {
             onAction={handleWorldAction}
             onOpenTasks={() => setActiveTab('tasks')}
             onOpenObservability={openObservability}
+            onRequestMissionConsent={requestMissionConsent}
           />
         )}
         <TerminalDock
@@ -432,6 +435,7 @@ function App() {
                     setActiveTab('chat')
                   }}
                   onOpenObservability={(missionId) => openObservability(missionId)}
+                  onRequestMissionConsent={requestMissionConsent}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -467,6 +471,7 @@ function App() {
                 online={online}
                 send={send}
                 subscribe={subscribe}
+                onRequestMemoryConsent={requestMemoryConsent}
                 onClose={() => setActiveTab('office')}
               />
             </ErrorBoundary>

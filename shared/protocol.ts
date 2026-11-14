@@ -976,9 +976,9 @@ export type ClientMessage =
    * Decisão humana sobre uma proposta de missão dinâmica. `revision` é a que o usuário viu;
    * `opId` identifica o clique: o reenvio da mesma decisão não executa nada de novo.
    */
-  | { type: 'proposal-decide'; missionId: number; proposalId: number; revision: number; decision: ProposalDecision; feedback?: string; opId: string }
+  | { type: 'proposal-decide'; missionId: number; proposalId: number; revision: number; decision: ProposalDecision; feedback?: string; opId: string; consentNonce?: string }
   /** O usuário confirma o encerramento de uma missão dinâmica que aguarda decisão. */
-  | { type: 'mission-close'; missionId: number }
+  | { type: 'mission-close'; missionId: number; consentNonce?: string }
   /** Estado de uma missão dinâmica parada: passos interrompidos, alterações no Git e ações possíveis. */
   | { type: 'mission-recovery'; projectId: number; missionId: number }
   /**
@@ -999,10 +999,10 @@ export type ClientMessage =
   | { type: 'mission-clarify'; missionId: number; answer: string }
   /** Memória: toda aprovação, rejeição e substituição é uma ação humana vinda daqui. */
   | { type: 'memory-list'; projectId: number; filter?: MemoryFilter }
-  | { type: 'memory-create'; projectId: number; entry: MemoryInput }
-  | { type: 'memory-approve'; id: number }
-  | { type: 'memory-reject'; id: number }
-  | { type: 'memory-supersede'; id: number; content: string }
+  | { type: 'memory-create'; projectId: number; entry: MemoryInput; consentNonce?: string }
+  | { type: 'memory-approve'; id: number; consentNonce?: string }
+  | { type: 'memory-reject'; id: number; consentNonce?: string }
+  | { type: 'memory-supersede'; id: number; content: string; consentNonce?: string }
   | { type: 'memory-versions'; id: number }
   /** Central de Agentes: configuração individual, perfis, restauração e agentes personalizados */
   | {

@@ -6,7 +6,7 @@ import type {
   SkillInfo,
   SpecializationInfo,
 } from '../../../shared/protocol.ts'
-import type { AgentLoadStatus, Send, Subscribe } from '../net/useServer.ts'
+import type { AgentLoadStatus, MemoryConsentRequester, Send, Subscribe } from '../net/useServer.ts'
 import { AgentCenter } from './AgentCenter.tsx'
 import { MemoryCenter } from './MemoryCenter.tsx'
 import { SkillsPanel } from './SkillsPanel.tsx'
@@ -27,6 +27,7 @@ export function TeamCenter({
   online,
   send,
   subscribe,
+  onRequestMemoryConsent,
   onClose,
 }: {
   initialSection?: TeamSection
@@ -42,6 +43,7 @@ export function TeamCenter({
   online: boolean
   send: Send
   subscribe: Subscribe
+  onRequestMemoryConsent?: MemoryConsentRequester
   onClose: () => void
 }) {
   const [section, setSection] = useState<TeamSection>(initialSection)
@@ -120,6 +122,7 @@ export function TeamCenter({
             online={online}
             send={send}
             subscribe={subscribe}
+            onRequestMemoryConsent={onRequestMemoryConsent}
             onClose={onClose}
           />
         )}

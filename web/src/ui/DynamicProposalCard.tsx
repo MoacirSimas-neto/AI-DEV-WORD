@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DynamicProposal, PlannedStep, ProposalDecision } from '../../../shared/protocol.ts'
-import type { Send, Subscribe } from '../net/useServer.ts'
+import type { MissionConsentRequester, Send, Subscribe } from '../net/useServer.ts'
 import { decisionMessage, KIND_LABEL, MODE_LABEL, OpGate, PROPOSAL_STATUS_LABEL, proposalImpact } from './dynamicView.ts'
 
 interface Props {
@@ -13,13 +13,14 @@ interface Props {
   online: boolean
   send: Send
   subscribe: Subscribe
+  onRequestMissionConsent?: MissionConsentRequester
 }
 
 const refLabel = (ref: DynamicProposal['sharedContext'][number]) =>
   ref.kind === 'plan' ? 'Plano aprovado' : ref.kind === 'git-diff' ? 'Diferenças do Git' : `Resultado de ${ref.key}${ref.revision ? ` (revisão ${ref.revision})` : ''}`
 
 /** Proposta do Tech Lead: o que ela pede, o que muda se for aprovada e as ações humanas. */
-export function DynamicProposalCard({ proposal, steps, nameOf, decidable, online, send, subscribe }: Props) {
+export function DynamicProposalCard({ proposal, steps, nameOf, decidable, online, send, subscribe, onRequestMissionConsent }: Props) {
   const [mode, setMode] = useState<ProposalDecision | null>(null)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -48,13 +49,35 @@ export function DynamicProposalCard({ proposal, steps, nameOf, decidable, online
     if (!online) gate.current.reset()
   }, [online])
 
-  const submit = (decision: ProposalDecision) => {
-    if (decision === 'adjust' && !text.trim()) return
+  const submit = async (decision: ProposalDecision) => {
+    const trimmed = text.trim()
+    if (decision === 'adjust' && !trimmed) return
+    if (!onRequestMissionConsent) {
+      setResult({ ok: false, message: 'Confirmação nativa indisponível nesta sessão.' })
+      return
+    }
     const opId = gate.current.begin()
     if (!opId) return
     setBusy(true)
     setResult(null)
-    send(decisionMessage(proposal, decision, opId, text))
+    const actionLabel = decision === 'approve' ? 'Aprovar' : decision === 'adjust' ? 'Pedir ajustes na' : 'Rejeitar'
+    const kindLabel = KIND_LABEL[proposal.kind]
+    const details = `${actionLabel} ${kindLabel} (revisão ${proposal.revision}) da missão #${proposal.missionId}:\n\n${proposal.objective || 'Objetivo não informado'}${trimmed ? `\n\nObservação: ${trimmed}` : ''}`
+    const consent = await onRequestMissionConsent({
+      action: decision,
+      missionId: proposal.missionId,
+      proposalId: proposal.id,
+      revision: proposal.revision,
+      feedback: trimmed || undefined,
+      details,
+    })
+    if (!consent.nonce) {
+      gate.current.reset()
+      setBusy(false)
+      if (consent.error) setResult({ ok: false, message: consent.error })
+      return
+    }
+    send(decisionMessage(proposal, decision, opId, text, consent.nonce))
   }
 
   return (

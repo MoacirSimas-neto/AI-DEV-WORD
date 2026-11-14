@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MissionInfo, RecoveryState, ResumeAction } from '../../../shared/protocol.ts'
-import type { Send, Subscribe } from '../net/useServer.ts'
+import type { MissionConsentRequester, Send, Subscribe } from '../net/useServer.ts'
 import { BLOCK_REASON_LABEL, MODE_LABEL, OpGate, resumeMessage, STEP_STATUS_LABEL } from './dynamicView.ts'
 
 interface Props {
@@ -9,13 +9,14 @@ interface Props {
   online: boolean
   send: Send
   subscribe: Subscribe
+  onRequestMissionConsent?: MissionConsentRequester
 }
 
 /**
  * Missão dinâmica parada (awaiting_decision): o estado vem do backend (mission-recovery) e só as
  * ações que ele permite aparecem. Nada é descartado no repositório.
  */
-export function RecoveryPanel({ mission, nameOf, online, send, subscribe }: Props) {
+export function RecoveryPanel({ mission, nameOf, online, send, subscribe, onRequestMissionConsent }: Props) {
   const [state, setState] = useState<RecoveryState | null>(null)
   const [accept, setAccept] = useState(false)
   const [detail, setDetail] = useState('')
@@ -187,9 +188,31 @@ export function RecoveryPanel({ mission, nameOf, online, send, subscribe }: Prop
           <div className="dyn-confirm-actions">
             <button
               type="button"
-              disabled={!online}
-              onClick={() => {
-                send(confirm === 'close' ? { type: 'mission-close', missionId: mission.id } : { type: 'mission-cancel', missionId: mission.id })
+              disabled={!online || busy}
+              onClick={async () => {
+                if (confirm === 'cancel') {
+                  send({ type: 'mission-cancel', missionId: mission.id })
+                  setConfirm(null)
+                  return
+                }
+                if (!onRequestMissionConsent) {
+                  setResult({ ok: false, message: 'Confirmação nativa indisponível nesta sessão.' })
+                  setConfirm(null)
+                  return
+                }
+                setBusy(true)
+                setResult(null)
+                const consent = await onRequestMissionConsent({
+                  action: 'close',
+                  missionId: mission.id,
+                  details: `Encerrar missão #${mission.id} como concluída? Os passos não executados deixam de valer.`,
+                })
+                setBusy(false)
+                if (!consent.nonce) {
+                  if (consent.error) setResult({ ok: false, message: consent.error })
+                  return
+                }
+                send({ type: 'mission-close', missionId: mission.id, consentNonce: consent.nonce })
                 setConfirm(null)
               }}
             >
