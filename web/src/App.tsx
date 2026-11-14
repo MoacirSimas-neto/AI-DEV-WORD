@@ -33,6 +33,7 @@ export type NavTab = StudioTab | 'home' | 'prototypes'
 function App() {
   const {
     status,
+    agentLoadStatus,
     authRequired,
     pair,
     agents,
@@ -455,6 +456,7 @@ function App() {
             <ErrorBoundary fallbackTitle="Falha na Central de Agentes">
               <Suspense fallback={pageFallback}>
                 <LazyAgentCenter
+                  loadStatus={agentLoadStatus}
                   agents={agents}
                   configs={configs}
                   allConfigs={allConfigs}

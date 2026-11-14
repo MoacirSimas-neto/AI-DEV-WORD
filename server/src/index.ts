@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { AgentConfigStore } from './agents/configStore.ts'
-import { AgentRegistry, DEFAULT_AGENTS } from './agents/registry.ts'
+import { AgentRegistry } from './agents/registry.ts'
 import { cliMode, requireSimulatedClis } from './cli/mode.ts'
 import { findCli, launchAgentCli, probeCli } from './cli/probe.ts'
 import { ProcessSupervisor, setSupervisor } from './cli/supervisor.ts'
@@ -63,14 +63,10 @@ const memory = new MemoryStore(projects.db, history)
 const skills = new SkillStore(projects.db)
 const events = new EventStore(projects.db)
 const plans = new PlanStore(projects.db, tasks)
-const registry = new AgentRegistry(DEFAULT_AGENTS, probeCli)
+const registry = new AgentRegistry([], probeCli)
 
 // Sincroniza agentes personalizados e o CLI de cada agente conforme a configuração persistida
 registry.syncFromConfigs(agentConfigs.list())
-for (const cfg of agentConfigs.list()) {
-  const cli = cfg.provider === 'antigravity' ? 'agy' : cfg.provider
-  registry.setCli(cfg.agentId, cli)
-}
 
 const terminals = new TerminalManager(
   registry,
@@ -157,7 +153,6 @@ server.listen(PORT, HOST, () => {
   console.log(`AI Dev World: backend em http://${HOST}:${PORT}`)
   console.log(`Código de pareamento local: ${server.pairingCode}`)
   console.log(`Dados locais: ${DATABASE_FILE}`)
-  for (const agent of registry.list()) void registry.check(agent.id)
 })
 
 // Não deixar CLIs órfãos quando o backend é encerrado.

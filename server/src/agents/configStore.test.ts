@@ -20,6 +20,34 @@ test('AgentConfigStore inicializa com padrões e lista configurações', () => {
   assert.equal(store.get('tutor').specializationId, 'tutor')
 })
 
+test('reinício preserva escolhas e ausências; restauração individual só afeta o agente indicado', () => {
+  const db = new DatabaseSync(':memory:')
+  const initial = new AgentConfigStore(db)
+  const architect = initial.updateAgent('architect', {
+    description: '', avatarPreset: 'tutor', specializationId: 'developer', provider: 'codex', model: 'o3',
+  })
+  const dev = initial.updateAgent('dev', { model: 'o3' })
+  // Fixture de uma base onde o agente padrão não consta mais.
+  db.exec("DELETE FROM agent_configs WHERE agent_id = 'qa'")
+  const reopened = new AgentConfigStore(db)
+  assert.deepEqual(reopened.find('architect'), architect)
+  assert.equal(reopened.find('qa'), null)
+  reopened.resetDefaults('architect')
+  assert.equal(reopened.get('architect').avatarPreset, DEFAULT_CONFIGS.architect.avatarPreset)
+  assert.equal(reopened.get('architect').model, DEFAULT_CONFIGS.architect.model)
+  assert.deepEqual(reopened.find('dev'), dev)
+  assert.throws(() => reopened.resetDefaults('qa'), /cadastrados/)
+  db.close()
+})
+
+test('base da etapa anterior sem agentes continua vazia após inicialização', () => {
+  const db = new DatabaseSync(':memory:')
+  new AgentConfigStore(db)
+  db.exec('DELETE FROM agent_configs')
+  assert.deepEqual(new AgentConfigStore(db).list(), [])
+  db.close()
+})
+
 test('AgentConfigStore atualiza configuração de agente individual', () => {
   const db = new DatabaseSync(':memory:')
   const store = new AgentConfigStore(db)

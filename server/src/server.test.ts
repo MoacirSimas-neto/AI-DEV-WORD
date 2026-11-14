@@ -581,6 +581,13 @@ test('WebSocket de skills: snapshot, ativação global, ajuste por agente, cria�
   const created = (await client.waitFor('skills')).skills.find((s) => s.id === 'estilo-local')!
   assert.equal(created.content, 'Prefira funções puras. token=[SEGREDO REMOVIDO]')
   assert.equal(created.enabled, false)
+  client.send({
+    type: 'skill-save',
+    createOnly: true,
+    skill: { id: ' ESTILO-LOCAL ', name: 'Colisão', content: 'Não deve substituir a skill existente.' },
+  })
+  assert.match((await client.waitFor('notice')).message, /Já existe uma skill/)
+  assert.deepEqual(skills.get(created.id), created)
 
   // Erros voltam só para quem pediu e não mudam nada.
   client.send({ type: 'skill-set-agent', agentId: 'fantasma', skillId: 'ponytail', state: 'off' })
@@ -633,10 +640,11 @@ test('eventos: events-list responde só com a trilha do projeto pedido e eventos
 test('WebSocket recusa conexão sem token ou com token inválido (401) e aceita Sec-WebSocket-Protocol', async () => {
   await new Promise<void>((resolve, reject) => {
     const wsNoToken = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: ORIGIN })
-    wsNoToken.on('error', () => {})
+    wsNoToken.once('error', reject)
     wsNoToken.once('unexpected-response', (_req, res) => {
-      assert.equal(res.statusCode, 401)
-      resolve()
+      res.resume()
+      if (res.statusCode === 401) resolve()
+      else reject(new Error(`Esperava HTTP 401 sem token, recebi ${res.statusCode}`))
     })
     wsNoToken.once('open', () => {
       wsNoToken.close()
@@ -649,10 +657,11 @@ test('WebSocket recusa conexão sem token ou com token inválido (401) e aceita 
       origin: ORIGIN,
       headers: { Authorization: 'Bearer token-invalido' },
     })
-    wsBadToken.on('error', () => {})
+    wsBadToken.once('error', reject)
     wsBadToken.once('unexpected-response', (_req, res) => {
-      assert.equal(res.statusCode, 401)
-      resolve()
+      res.resume()
+      if (res.statusCode === 401) resolve()
+      else reject(new Error(`Esperava HTTP 401 com token inválido, recebi ${res.statusCode}`))
     })
     wsBadToken.once('open', () => {
       wsBadToken.close()

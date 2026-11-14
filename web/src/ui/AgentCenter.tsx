@@ -14,7 +14,7 @@ import type {
   SpecializationInfo,
 } from '../../../shared/protocol.ts'
 import { AVATAR_PRESET_OPTIONS } from '../game/agentLooks.ts'
-import type { Send, Subscribe } from '../net/useServer.ts'
+import type { AgentLoadStatus, Send, Subscribe } from '../net/useServer.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
 import { SkillsPanel } from './SkillsPanel.tsx'
 
@@ -28,6 +28,7 @@ interface Props {
   skills?: SkillInfo[]
   skillOverrides?: SkillAgentOverride[]
   online: boolean
+  loadStatus: AgentLoadStatus
   send: Send
   subscribe?: Subscribe
   onClose: () => void
@@ -140,6 +141,7 @@ export function AgentCenter({
   skills = [],
   skillOverrides = [],
   online,
+  loadStatus,
   send,
   subscribe,
   onClose,
@@ -174,8 +176,7 @@ export function AgentCenter({
   const [previewAnim, setPreviewAnim] = useState<PortraitAnimMode>('idle')
 
   const specList = specializations && specializations.length > 0 ? specializations : DEFAULT_SPECIALIZATIONS
-  const mergedConfigs: AgentConfig[] =
-    allConfigs && allConfigs.length > 0 ? allConfigs : configs
+  const mergedConfigs = allConfigs ?? configs
 
   useEffect(() => {
     if (!subscribe) return
@@ -350,7 +351,7 @@ export function AgentCenter({
           <button
             type="button"
             className="btn-primary-glow"
-            disabled={!online}
+            disabled={!online || loadStatus !== 'ready'}
             onClick={openCreateForm}
           >
             + Criar Agente
@@ -371,7 +372,20 @@ export function AgentCenter({
         </div>
       )}
 
-      <SkillsPanel skills={skills} overrides={skillOverrides} agents={allConfigs ?? configs} online={online} send={send} />
+      {loadStatus !== 'ready' ? (
+        <p role={loadStatus === 'error' ? 'alert' : 'status'}>
+          {{
+            connecting: 'Conectando ao backend…',
+            loading: 'Carregando agentes…',
+            reconnecting: 'Recuperando conexão…',
+            error: 'Erro ao carregar agentes. Verifique a conexão ou o pareamento local.',
+          }[loadStatus]}
+        </p>
+      ) : (
+      <>
+      <SkillsPanel skills={skills} overrides={skillOverrides} agents={mergedConfigs} online={online} send={send} />
+      {mergedConfigs.length === 0 && <p role="status">Nenhum agente cadastrado.</p>}
+      {mergedConfigs.length > 0 && filteredConfigs.length === 0 && <p role="status">Nenhum agente corresponde aos filtros.</p>}
 
       {/* Barra de Perfis e Filtros */}
       <div className="agent-toolbar-row">
@@ -555,6 +569,7 @@ export function AgentCenter({
                     value={specializationId}
                     onChange={(e) => setSpecializationId(e.target.value as SpecializationId)}
                   >
+                    <option value="none">Sem especialização</option>
                     {specList.map((sp) => (
                       <option key={sp.id} value={sp.id}>
                         {sp.name} ({sp.id})
@@ -762,7 +777,8 @@ export function AgentCenter({
                     <strong>{cfg.name ?? cfg.agentId}</strong>
                     {liveAgent ? (
                       <span className={`lamp lamp-${liveAgent.checking ? 'checking' : liveAgent.state}`}>
-                        {liveAgent.checking ? 'Verificando…' : liveAgent.state}
+                        {liveAgent.checking ? 'Verificando…' : liveAgent.session ? 'Sessão CLI ativa' :
+                          liveAgent.checkedAt ? liveAgent.state : 'CLI não verificado'}
                       </span>
                     ) : (
                       <span className="lamp lamp-offline">Inativo</span>
@@ -774,12 +790,19 @@ export function AgentCenter({
                       {cfg.isBuiltin ? 'Padrão' : 'Personalizado'}
                     </span>
                     <span className="agent-badge">{CATEGORY_LABELS[cat]}</span>
+                    {cfg.agentId === 'architect' && cat === 'planning' && <span className="agent-badge">Tech Lead</span>}
                     <span className="agent-badge">Spec: {cfg.specializationId ?? 'developer'}</span>
                   </div>
                 </div>
               </div>
 
               {cfg.description && <p className="agent-card-desc">{cfg.description}</p>}
+              <p className="agent-card-desc">
+                Skills: {skills.filter((skill) => {
+                  const override = skillOverrides.find((item) => item.agentId === cfg.agentId && item.skillId === skill.id)
+                  return override ? override.state === 'on' : skill.enabled
+                }).map((skill) => skill.name).join(', ') || 'Nenhuma atribuída'}
+              </p>
 
               <div className="agent-config-field">
                 <label htmlFor={`provider-${cfg.agentId}`}>Provedor:</label>
@@ -988,7 +1011,7 @@ export function AgentCenter({
                 <span className="agent-cli-version">
                   {liveAgent?.cliVersion
                     ? `${liveAgent.cli}: ${liveAgent.cliVersion}`
-                    : `${cliCommand}: ${liveAgent?.state === 'offline' ? 'indisponível' : 'configurado'}`}
+                    : `${cliCommand}: ${!liveAgent?.checkedAt ? 'não verificado' : liveAgent.state === 'offline' ? 'indisponível' : 'configurado'}`}
                 </span>
                 <div className="agent-card-actions">
                   <button
@@ -1007,7 +1030,20 @@ export function AgentCenter({
                   >
                     Editar
                   </button>
-                  {!cfg.isBuiltin && (
+                  {cfg.isBuiltin ? (
+                    <button
+                      type="button"
+                      className="btn-quiet btn-xs"
+                      disabled={!online}
+                      onClick={() => {
+                        if (window.confirm(`Restaurar as configurações de ${cfg.name ?? cfg.agentId}?`)) {
+                          send({ type: 'agent-config-reset', agentId: cfg.agentId })
+                        }
+                      }}
+                    >
+                      Restaurar padrão
+                    </button>
+                  ) : (
                     <button
                       type="button"
                       className="btn-quiet btn-xs"
@@ -1023,6 +1059,8 @@ export function AgentCenter({
           )
         })}
       </div>
+      </>
+      )}
     </aside>
   )
 }

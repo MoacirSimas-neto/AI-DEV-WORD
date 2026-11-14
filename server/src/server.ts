@@ -372,7 +372,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         ? { type: 'agent-config-profile', profile: msg.profile as AgentProfileId }
         : null
     case 'agent-config-reset':
-      return { type: 'agent-config-reset' }
+      if (msg.agentId !== undefined && typeof msg.agentId !== 'string') return null
+      return { type: 'agent-config-reset', agentId: msg.agentId }
     case 'agent-create': {
       if (typeof msg.agent !== 'object' || msg.agent === null) return null
       const a = msg.agent as Record<string, unknown>
@@ -411,8 +412,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (!optional(s.description, 1000) || !optional(s.origin, 1000) || !optional(s.version, 100)) return null
       if (s.mode !== undefined && s.mode !== 'context' && s.mode !== 'native') return null
       if (s.enabled !== undefined && typeof s.enabled !== 'boolean') return null
+      if (msg.createOnly !== undefined && typeof msg.createOnly !== 'boolean') return null
       return {
         type: 'skill-save',
+        createOnly: msg.createOnly,
         skill: {
           id: s.id,
           name: s.name,
@@ -1219,13 +1222,14 @@ export function createAppServer({
         break
       case 'agent-config-reset':
         try {
-          agentConfigs.resetDefaults()
+          agentConfigs.resetDefaults(message.agentId)
           for (const cfg of agentConfigs.list()) {
             registry.setCli(cfg.agentId, providerToCli(cfg.provider))
           }
           history.add({
             kind: 'agent',
-            message: 'Configurações dos agentes restauradas para o padrão.',
+            message: message.agentId ? 'Configuração do agente restaurada para o padrão.' : 'Configurações dos agentes restauradas para o padrão.',
+            agentId: message.agentId,
           })
         } catch (error) {
           send(socket, { type: 'notice', message: errorText(error) })
@@ -1337,7 +1341,7 @@ export function createAppServer({
         if (!skills) break
         try {
           if (message.type === 'skill-save') {
-            const saved = skills.save(message.skill)
+            const saved = skills.save(message.skill, message.createOnly)
             history.add({ kind: 'agent', message: `Skill salva: ${saved.name} (${saved.id}) · versão ${saved.version} · ${saved.hash.slice(0, 12)}` })
           } else if (message.type === 'skill-set-enabled') {
             const saved = skills.setEnabled(message.id, message.enabled)
@@ -1356,19 +1360,25 @@ export function createAppServer({
   }
 
   wss.on('connection', (socket: WebSocket) => {
-    send(socket, {
-      type: 'snapshot',
-      agents: registry.list(),
-      workspace: projects.workspace(),
-      tasks: tasks.list(),
-      missions: tasks.listMissions(),
-      history: history.list(),
-      configs: agentConfigs.list(),
-      allConfigs: agentConfigs.list({ includeInactive: true }),
-      specializations: defaultSpecializations.list(),
-      skills: skills?.list() ?? [],
-      skillOverrides: skills?.overrides() ?? [],
-    })
+    try {
+      send(socket, {
+        type: 'snapshot',
+        agents: registry.list(),
+        workspace: projects.workspace(),
+        tasks: tasks.list(),
+        missions: tasks.listMissions(),
+        history: history.list(),
+        configs: agentConfigs.list(),
+        allConfigs: agentConfigs.list({ includeInactive: true }),
+        specializations: defaultSpecializations.list(),
+        skills: skills?.list() ?? [],
+        skillOverrides: skills?.overrides() ?? [],
+      })
+    } catch {
+      send(socket, { type: 'snapshot-error' })
+      socket.close(1011)
+      return
+    }
     send(socket, { type: 'term-sessions', ids: terminals.userShells() })
     socket.on('message', (raw) => {
       const text = raw.toString()

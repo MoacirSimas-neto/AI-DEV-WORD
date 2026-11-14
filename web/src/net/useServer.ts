@@ -14,6 +14,7 @@ import type {
 } from '../../../shared/protocol.ts'
 
 export type ConnectionStatus = 'connecting' | 'online' | 'offline'
+export type AgentLoadStatus = 'connecting' | 'loading' | 'reconnecting' | 'error' | 'ready'
 export type Send = (message: ClientMessage) => void
 export type MessageListener = (message: ServerMessage) => void
 export type Subscribe = (listener: MessageListener) => () => void
@@ -28,6 +29,7 @@ const EMPTY_WORKSPACE: Workspace = { projects: [], activeProjectId: null }
  */
 export function useServer() {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
+  const [agentLoadStatus, setAgentLoadStatus] = useState<AgentLoadStatus>('connecting')
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [workspace, setWorkspace] = useState<Workspace>(EMPTY_WORKSPACE)
   const [tasks, setTasks] = useState<TaskInfo[]>([])
@@ -48,6 +50,8 @@ export function useServer() {
   useEffect(() => {
     let disposed = false
     let retry: ReturnType<typeof setTimeout> | undefined
+    let snapshotTimer: ReturnType<typeof setTimeout> | undefined
+    let receivedSnapshot = false
     const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
     const invokeTauri = async <T,>(cmd: string): Promise<T> => {
       const tauri = (window as unknown as { __TAURI_INTERNALS__: { invoke: <R>(c: string) => Promise<R> } })
@@ -56,13 +60,14 @@ export function useServer() {
     }
 
     const connect = async () => {
-      let wsUrl = `ws://${location.host}/ws`
+      let wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`
       let apiBase = ''
       if (isTauri) {
         try {
           const st = await invokeTauri<{ status: string; port: number }>('get_backend_status')
           if (disposed) return
           if (st.status !== 'ready') {
+            if (st.status === 'error') setAgentLoadStatus('error')
             retry = setTimeout(() => void connect(), 300)
             return
           }
@@ -88,11 +93,16 @@ export function useServer() {
             })
             if (pairRes.ok) {
               const pairData = (await pairRes.json().catch(() => null)) as { token?: string } | null
+              if (disposed) return
               if (pairData?.token) desktopTokenRef.current = pairData.token
             }
+            if (!desktopTokenRef.current) throw new Error('Falha no pareamento desktop')
           }
         } catch {
-          if (!disposed) retry = setTimeout(() => void connect(), RETRY_MS)
+          if (!disposed) {
+            setAgentLoadStatus('error')
+            retry = setTimeout(() => void connect(), RETRY_MS)
+          }
           return
         }
       }
@@ -102,14 +112,37 @@ export function useServer() {
         ? new WebSocket(wsUrl, ['aidw-auth', desktopTokenRef.current])
         : new WebSocket(wsUrl)
       socketRef.current = socket
+      let snapshotFailed = false
       socket.onopen = () => {
+        if (disposed) return
         setStatus('online')
         setAuthRequired(false)
+        setAgentLoadStatus('loading')
+        snapshotTimer = setTimeout(() => setAgentLoadStatus('error'), 5000)
       }
       socket.onmessage = (event) => {
-        const message = JSON.parse(String(event.data)) as ServerMessage
-        if (message.type === 'snapshot') {
-          setAgents(Array.isArray(message.agents) ? message.agents : [])
+        if (disposed) return
+        let message: ServerMessage
+        try {
+          message = JSON.parse(String(event.data)) as ServerMessage
+        } catch {
+          return
+        }
+        if (!message || typeof message.type !== 'string') return
+        if (message.type === 'snapshot-error') {
+          clearTimeout(snapshotTimer)
+          snapshotFailed = true
+          setAgentLoadStatus('error')
+        } else if (message.type === 'snapshot') {
+          clearTimeout(snapshotTimer)
+          if (!Array.isArray(message.agents) || !Array.isArray(message.configs) ||
+              (message.allConfigs !== undefined && !Array.isArray(message.allConfigs))) {
+            setAgentLoadStatus('error')
+            return
+          }
+          receivedSnapshot = true
+          setAgents(message.agents)
+          setAgentLoadStatus('ready')
           setWorkspace(message.workspace ?? EMPTY_WORKSPACE)
           setTasks(Array.isArray(message.tasks) ? message.tasks : [])
           setMissions(Array.isArray(message.missions) ? message.missions : [])
@@ -148,12 +181,14 @@ export function useServer() {
       }
       socket.onclose = () => {
         if (disposed) return
+        clearTimeout(snapshotTimer)
         setStatus('offline')
+        setAgentLoadStatus(receivedSnapshot && !snapshotFailed ? 'reconnecting' : 'error')
         if (!isTauri) {
           void fetch(`${apiBase}/api/session`, { credentials: 'include' })
             .then((r) => (r.ok ? r.json() : null))
             .then((data: { authenticated?: boolean } | null) => {
-              if (!disposed && data && data.authenticated === false) {
+              if (!disposed && socketRef.current === socket && socket.readyState === WebSocket.CLOSED && data?.authenticated === false) {
                 setAuthRequired(true)
               }
             })
@@ -167,6 +202,7 @@ export function useServer() {
     return () => {
       disposed = true
       clearTimeout(retry)
+      clearTimeout(snapshotTimer)
       socketRef.current?.close()
     }
   }, [reconnectTick])
@@ -254,6 +290,7 @@ export function useServer() {
 
   return {
     status,
+    agentLoadStatus,
     authRequired,
     pair,
     agents,

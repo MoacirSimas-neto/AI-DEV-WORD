@@ -64,7 +64,6 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [
   },
 ]
 
-const BUILTIN_IDS = new Set(DEFAULT_AGENTS.map((d) => d.id))
 
 /**
  * Fonte da verdade do estado dos agentes. Emite 'change' (AgentInfo) a cada
@@ -120,7 +119,11 @@ export class AgentRegistry extends EventEmitter {
         ...(def.specializationId !== undefined ? { specializationId: def.specializationId } : {}),
         ...(def.avatarPreset !== undefined ? { avatarPreset: def.avatarPreset } : {}),
         ...(def.isBuiltin !== undefined ? { isBuiltin: def.isBuiltin } : {}),
-        ...(cliChanged ? { cliVersion: null, auth: 'unknown', message: 'Configuração atualizada.' } : {}),
+        ...(cliChanged ? {
+          cliVersion: null, auth: 'unknown', checkedAt: null, checking: false,
+          message: 'CLI não verificado.',
+          ...(this.isBusy(def.id) ? {} : { state: 'offline' }),
+        } : {}),
       }
       const updated = this.update(def.id, patch)
       this.emit('list', this.list())
@@ -143,9 +146,9 @@ export class AgentRegistry extends EventEmitter {
     return created
   }
 
-  /** Remove um agente personalizado do registro ativo (nunca remove os 4 agentes padrão). */
+  /** Remove um agente do registro ativo sem interromper uma sessão ou missão. */
   unregisterAgent(agentId: string): boolean {
-    if (BUILTIN_IDS.has(agentId) || !this.agents.has(agentId) || this.isBusy(agentId)) return false
+    if (!this.agents.has(agentId) || this.isBusy(agentId)) return false
     this.agents.delete(agentId)
     this.inSession.delete(agentId)
     this.inMission.delete(agentId)
@@ -173,7 +176,7 @@ export class AgentRegistry extends EventEmitter {
       })
     }
     for (const id of [...this.agents.keys()]) {
-      if (!BUILTIN_IDS.has(id) && !activeIds.has(id)) {
+      if (!activeIds.has(id)) {
         this.unregisterAgent(id)
       }
     }
@@ -197,6 +200,7 @@ export class AgentRegistry extends EventEmitter {
     const done = { checking: false, checkedAt: new Date().toISOString() }
     try {
       const result = await this.probe(agent.cli)
+      if (this.agents.get(agentId)?.cli !== agent.cli) return this.get(agentId) ?? null
       // Uma sessão ou missão pode ter começado durante a consulta: nesse caso só
       // os dados do CLI são atualizados, sem mexer em estado/mensagem.
       const busy = this.isBusy(agentId)
@@ -220,6 +224,7 @@ export class AgentRegistry extends EventEmitter {
         ...(busy ? {} : { state: result.auth === 'missing' ? 'error' : 'idle', message }),
       })
     } catch (error) {
+      if (this.agents.get(agentId)?.cli !== agent.cli) return this.get(agentId) ?? null
       const message = error instanceof Error ? error.message : String(error)
       return this.update(agentId, { ...done, ...(this.isBusy(agentId) ? {} : { state: 'error', message }) })
     }

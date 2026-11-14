@@ -194,15 +194,15 @@ export class AgentConfigStore extends EventEmitter {
     super()
     this.db = db
     this.specializations = specializations
-    this.db.exec(SCHEMA)
     this.migrate()
-    this.ensureDefaults()
   }
 
   /** Migração incremental e idempotente para bancos existentes sem perda de dados. */
   private migrate() {
     this.db.exec('BEGIN IMMEDIATE')
     try {
+      const newDatabase = !this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'agent_configs'").get()
+      this.db.exec(SCHEMA)
       // Lido dentro da transação de escrita: outra conexão não altera a tabela entre a leitura e o ALTER.
       const info = this.db.prepare('PRAGMA table_info(agent_configs)').all() as { name: string }[]
       const existingCols = new Set(info.map((c) => c.name))
@@ -213,34 +213,38 @@ export class AgentConfigStore extends EventEmitter {
       }
 
       // Preenche metadados dos 4 agentes padrão em bancos legados preservando provider/model/effort
-      const updateBuiltinMeta = this.db.prepare(`
-        UPDATE agent_configs
-        SET
-          name = CASE WHEN name = '' THEN ? ELSE name END,
-          role = CASE WHEN role = '' THEN ? ELSE role END,
-          description = CASE WHEN description = '' THEN ? ELSE description END,
-          role_category = ?,
-          specialization_id = CASE WHEN specialization_id = '' OR specialization_id = 'developer' THEN ? ELSE specialization_id END,
-          avatar_preset = ?,
-          is_builtin = 1,
-          active = 1,
-          created_at = CASE WHEN created_at = '' THEN updated_at ELSE created_at END
-        WHERE agent_id = ?
-      `)
+      if (!existingCols.has('is_builtin')) {
+        const updateBuiltinMeta = this.db.prepare(`
+          UPDATE agent_configs
+          SET
+            name = CASE WHEN name = '' THEN ? ELSE name END,
+            role = CASE WHEN role = '' THEN ? ELSE role END,
+            description = CASE WHEN description = '' THEN ? ELSE description END,
+            role_category = ?,
+            specialization_id = CASE WHEN specialization_id = '' OR specialization_id = 'developer' THEN ? ELSE specialization_id END,
+            avatar_preset = ?,
+            is_builtin = 1,
+            active = 1,
+            created_at = CASE WHEN created_at = '' THEN updated_at ELSE created_at END
+          WHERE agent_id = ?
+        `)
 
-      for (const def of Object.values(DEFAULT_CONFIGS)) {
-        updateBuiltinMeta.run(
-          def.name!,
-          def.role!,
-          def.description!,
-          def.roleCategory!,
-          def.specializationId!,
-          def.avatarPreset!,
-          def.agentId,
-        )
+        for (const def of Object.values(DEFAULT_CONFIGS)) {
+          updateBuiltinMeta.run(
+            def.name!,
+            def.role!,
+            def.description!,
+            def.roleCategory!,
+            def.specializationId!,
+            def.avatarPreset!,
+            def.agentId,
+          )
+        }
       }
 
       this.db.exec(`UPDATE agent_configs SET created_at = updated_at WHERE created_at = ''`)
+      if (newDatabase || (!existingCols.has('is_builtin') &&
+        this.db.prepare('SELECT 1 FROM agent_configs LIMIT 1').get())) this.ensureDefaults()
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
@@ -600,7 +604,10 @@ export class AgentConfigStore extends EventEmitter {
     return list
   }
 
-  resetDefaults(): AgentConfig[] {
+  resetDefaults(agentId?: string): AgentConfig[] {
+    if (agentId !== undefined && (!BUILTIN_AGENT_IDS.has(agentId) || !this.find(agentId))) {
+      throw new Error('Só agentes padrão cadastrados podem ser restaurados.')
+    }
     const now = new Date().toISOString()
     const stmt = this.db.prepare(`
       UPDATE agent_configs
@@ -623,6 +630,7 @@ export class AgentConfigStore extends EventEmitter {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       for (const def of Object.values(DEFAULT_CONFIGS)) {
+        if (agentId !== undefined && def.agentId !== agentId) continue
         stmt.run(
           def.name!,
           def.role!,

@@ -5,7 +5,7 @@ export type CliId = 'codex' | 'gemini' | 'agy'
 export type ProviderId = 'codex' | 'gemini' | 'antigravity'
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'extra-high' | 'default'
 
-export type SpecializationId = 'tech-lead' | 'developer' | 'qa-tester' | 'tutor'
+export type SpecializationId = 'tech-lead' | 'developer' | 'qa-tester' | 'tutor' | 'none'
 export type RoleCategory = 'planning' | 'developing' | 'reviewing' | 'teaching'
 export type KnowledgeDocKind = 'agent' | 'principios' | 'dossie' | 'referencias'
 export type AvatarPreset =
@@ -847,6 +847,7 @@ export interface ChatMissionLink {
 export const CHAT_MISSION_CONTEXT = { messages: 12, chars: 6000, perMessage: 1500 } as const
 
 export type ServerMessage =
+  | { type: 'snapshot-error' }
   | { type: 'chat-conversations'; projectId: number; conversations: ChatConversation[] }
   /** Página de mensagens (mais antigas primeiro). hasMore = há mensagens antes da primeira. */
   | { type: 'chat-messages'; projectId: number; conversationId: number; messages: ChatMessage[]; hasMore: boolean; beforeId: number | null }
@@ -1014,7 +1015,7 @@ export type ClientMessage =
       }
     }
   | { type: 'agent-config-profile'; profile: AgentProfileId }
-  | { type: 'agent-config-reset' }
+  | { type: 'agent-config-reset'; agentId?: string }
   | { type: 'agent-create'; agent: CustomAgentInput }
   | { type: 'agent-update'; agentId: string; patch: CustomAgentPatch }
   | { type: 'agent-set-active'; agentId: string; active: boolean }
@@ -1022,7 +1023,7 @@ export type ClientMessage =
   | { type: 'specializations-list' }
   /** Skills globais: registro, ativação para todos e ajuste por agente. */
   | { type: 'skills-list' }
-  | { type: 'skill-save'; skill: SkillInput }
+  | { type: 'skill-save'; skill: SkillInput; createOnly?: boolean }
   | { type: 'skill-set-enabled'; id: string; enabled: boolean }
   | { type: 'skill-set-agent'; agentId: string; skillId: string; state: 'inherit' | 'on' | 'off' }
   /** Trilha de eventos de um projeto (ou de uma missão dele). afterId pagina: só eventos com id maior. */
