@@ -2337,9 +2337,11 @@ input:focus-visible {
   flex-direction: column;
   gap: 14px;
   padding: 16px;
-  background: #fff8e7;
+  background: var(--night-2);
+  color: var(--parchment);
+  border: 1px solid var(--night-3);
   border-left: 5px solid var(--sky);
-  box-shadow: 0 0 0 2px var(--ink);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
 .agent-creator-head {
@@ -2351,12 +2353,13 @@ input:focus-visible {
 
 .agent-creator-head h3 {
   font: 700 20px/1.1 var(--pixel);
+  color: var(--parchment);
   margin: 0 0 4px 0;
 }
 
 .agent-creator-head p {
   font-size: 13px;
-  color: var(--ink-soft);
+  color: var(--stone);
   margin: 0;
 }
 
@@ -2385,15 +2388,49 @@ input:focus-visible {
   gap: 10px;
 }
 
+.agent-creator-panel .agent-config-field label {
+  color: var(--parchment);
+}
+
+.agent-creator-panel .agent-config-field input,
+.agent-creator-panel .agent-config-field select,
 .agent-creator-fields textarea {
   width: 100%;
   padding: 6px 9px;
-  border: 0;
-  background: #fffaf0;
-  color: var(--ink);
+  border: 1px solid var(--night-3);
+  background: var(--night);
+  color: var(--parchment);
   font: 13px/1.4 var(--body);
+  box-shadow: none;
+}
+
+.agent-creator-fields textarea {
   resize: vertical;
-  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.agent-creator-panel .agent-config-field input::placeholder,
+.agent-creator-fields textarea::placeholder {
+  color: var(--stone);
+}
+
+.agent-creator-panel .agent-config-field input:focus,
+.agent-creator-panel .agent-config-field select:focus,
+.agent-creator-fields textarea:focus {
+  outline: none;
+  border-color: var(--sky);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+}
+
+.agent-creator-panel .agent-config-field input:disabled,
+.agent-creator-panel .agent-config-field select:disabled,
+.agent-creator-fields textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.agent-creator-panel .agent-config-field select option {
+  background: var(--night);
+  color: var(--parchment);
 }
 
 .agent-spec-info-box {
@@ -2401,14 +2438,16 @@ input:focus-visible {
   flex-direction: column;
   gap: 3px;
   padding: 8px 10px;
-  background: var(--parchment-2);
+  background: var(--night);
+  color: var(--parchment);
+  border: 1px solid var(--night-3);
   border-left: 3px solid var(--moss);
   font-size: 12px;
 }
 
 .agent-spec-files {
   font: 11px var(--mono);
-  color: var(--ink-soft);
+  color: var(--stone);
 }
 
 .agent-creator-preview-col {
@@ -2486,6 +2525,7 @@ input:focus-visible {
 
 .agent-preset-picker > label {
   font: 600 12px var(--body);
+  color: var(--parchment);
 }
 
 .agent-preset-grid {
@@ -2500,10 +2540,21 @@ input:focus-visible {
   align-items: center;
   gap: 4px;
   padding: 6px 4px;
-  background: #fffaf0;
-  color: var(--ink);
+  background: var(--night);
+  color: var(--parchment);
+  border: 1px solid var(--night-3);
   font: 600 11px var(--body);
   text-align: center;
+  cursor: pointer;
+}
+
+.preset-option-btn:hover {
+  background: var(--night-3);
+}
+
+.preset-option-btn:focus-visible {
+  outline: 2px solid var(--sky);
+  outline-offset: 1px;
 }
 
 .preset-option-btn .portrait {
@@ -2512,15 +2563,16 @@ input:focus-visible {
 }
 
 .preset-selected {
-  background: #e0f2fe !important;
-  box-shadow: 0 0 0 2px var(--sky), 0 3px 0 var(--ink) !important;
+  background: var(--night-3) !important;
+  color: var(--parchment) !important;
+  box-shadow: 0 0 0 2px var(--sky) !important;
 }
 
 .agent-creator-actions {
   display: flex;
   gap: 10px;
   padding-top: 6px;
-  border-top: 1px dashed var(--ink-soft);
+  border-top: 1px dashed var(--night-3);
 }
 
 .agent-card-top {
