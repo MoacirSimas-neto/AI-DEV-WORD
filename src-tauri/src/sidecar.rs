@@ -350,6 +350,12 @@ fn is_backend_healthy(port: u16) -> bool {
     }
 }
 
+fn bundled_server_dir(resource_dir: &Path) -> Option<PathBuf> {
+    [resource_dir.join("_up_/server"), resource_dir.join("server")]
+        .into_iter()
+        .find(|dir| dir.join("src/index.ts").is_file())
+}
+
 fn resolve_paths(app: &AppHandle) -> Result<(PathBuf, PathBuf, PathBuf), String> {
     let exe_dir = std::env::current_exe()
         .ok()
@@ -368,10 +374,8 @@ fn resolve_paths(app: &AppHandle) -> Result<(PathBuf, PathBuf, PathBuf), String>
         .ok_or_else(|| "Runtime Node sidecar não encontrado".to_string())?;
 
     if let Ok(res_dir) = app.path().resource_dir() {
-        let bundled_server = res_dir.join("server");
-        let bundled_entry = bundled_server.join("src").join("index.ts");
-        if bundled_entry.exists() {
-            return Ok((node_bin, bundled_server, PathBuf::from("src/index.ts")));
+        if let Some(server_dir) = bundled_server_dir(&res_dir) {
+            return Ok((node_bin, server_dir, PathBuf::from("src/index.ts")));
         }
     }
 
@@ -380,11 +384,23 @@ fn resolve_paths(app: &AppHandle) -> Result<(PathBuf, PathBuf, PathBuf), String>
         .parent()
         .unwrap()
         .join("server");
-    if dev_server.join("src/index.ts").exists() {
+    if cfg!(debug_assertions) && dev_server.join("src/index.ts").exists() {
         return Ok((node_bin, dev_server, PathBuf::from("src/index.ts")));
     }
 
     Err("Entrada do backend (server/src/index.ts) não encontrada".into())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn resolves_sidecar_from_packaged_resource_tree() {
+        let root = std::env::temp_dir().join(format!("aidw-sidecar-path-{}", std::process::id()));
+        let server = root.join("_up_/server");
+        std::fs::create_dir_all(server.join("src")).unwrap();
+        std::fs::write(server.join("src/index.ts"), "").unwrap();
+        assert_eq!(super::bundled_server_dir(&root), Some(server));
+    }
 }
 
 #[tauri::command]
