@@ -1,6 +1,6 @@
 [package]
 name = "ai-dev-world"
-version = "0.1.0"
+version = "1.0.0"
 description = "AI Dev World Desktop Shell"
 edition = "2021"
 

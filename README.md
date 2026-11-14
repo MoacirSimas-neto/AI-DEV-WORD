@@ -1,8 +1,8 @@
-# AI Dev World
+# AI Dev World (v1.0.0)
 
-Aplicativo **local** para coordenar agentes de IA de programação num projeto da sua máquina. Cada agente é um personagem num escritório 2D (Phaser) e executa um **CLI oficial já instalado e autenticado por você**. O app não usa chaves de API próprias: ele chama os CLIs.
+Aplicativo desktop **local-first** para desenvolvimento supervisionado por agentes de IA. Cada agente atua como personagem em um escritório 2D interativo (Phaser) e executa um **CLI oficial já instalado e autenticado por você**. O aplicativo não usa chaves de API próprias: ele orquestra os CLIs locais sob aprovações humanas explícitas.
 
-> **Estado:** protótipo em desenvolvimento ativo, para uso pessoal e de desenvolvimento. **Não está pronto para distribuição pública** (sem instalador, sem assinatura de código, sem auditoria ofensiva completa).
+> **Versão 1.0.0 (Windows x64):** empacotado com Tauri 2 e instalador NSIS (`currentUser`). **Distribuído sem assinatura digital** (sem certificado de code signing — o Windows SmartScreen pode exibir aviso na instalação). Uso dos modelos depende das contas, cotas e condições dos respectivos provedores.
 
 ---
 
@@ -16,27 +16,35 @@ Aplicativo **local** para coordenar agentes de IA de programação num projeto d
 
 **Claude Code não é um provedor integrado.** Nenhum outro provedor é suportado hoje.
 
-Agentes padrão: **Arquiteto** (Tech Lead / planejamento), **Dev** (implementação), **QA** (revisão) e **Tutor**. O provedor, o modelo e o esforço de cada um são configurados na Central de Agentes. Também é possível criar agentes personalizados com especializações.
+Agentes padrão: **Arquiteto** (Tech Lead / planejamento), **Dev** (implementação), **QA** (revisão de código e evidências) e **Tutor**. O provedor, o modelo e o esforço de cada um são configurados na Central de Agentes. Também é possível criar agentes personalizados com especializações.
+
+> **Sobre o QA:** o agente de QA realiza inspeção estática de código e evidências. A Observabilidade identifica quando os testes não foram executados pelo sistema (`tests.executed: unavailable` / `staticReviewOnly: true`). A execução autônoma de testes reais pelo QA ainda não está comprovada na versão 1.0.
 
 ---
 
-## Funcionalidades
+## Recursos principais
 
-- **Escritório 2D (Phaser):** agentes com estado ao vivo (planejando, executando, revisando, aguardando aprovação), dock de agentes, terminal inferior integrado (`Ctrl+J`) e objetos clicáveis que levam às telas.
-- **Central Unificada da Equipe:** gestão integrada de **Agentes** (padrão e personalizados com especializações e avatares), **Skills** (biblioteca com importação Markdown desativada por padrão) e **Memória** (escopo por projeto ou equipe).
-- **Terminais:** sessão PTY real do CLI de cada agente e abas de shell pessoal no dock inferior, sempre na pasta do projeto ativo.
-- **Projetos e tarefas:** pastas autorizadas por você, com tarefas por projeto e assistente de primeira execução (First-Run Wizard).
-- **Observabilidade:** trilha de eventos por missão (início/fim de CLI, delegação, propostas, decisões, arquivos alterados), com a natureza de cada evidência: observado pelo sistema, declarado pelo agente ou incluído no contexto.
-- **Git Control:** estado do repositório, diff, commit e push com pré-visualização.
-- **Recuperação de missões** após fechamento ou queda do app.
-- **Aplicativo Desktop (Tauri 2):** sidecar Node.js empacotado, token Bearer local e suporte a build Windows (NSIS).
+- **Escritório 2D interativo (Phaser):** agentes com estado ao vivo (planejando, executando, revisando, aguardando aprovação), dock de agentes, terminal inferior integrado (`Ctrl+J`) e objetos clicáveis.
+- **Central da Equipe:** gestão unificada de **Agentes** (padrão e personalizados com especializações e avatares), **Skills** (biblioteca com importação Markdown desativada por padrão) e **Memória** (escopo por projeto ou equipe, com consentimento nativo).
+- **Gerenciamento de tarefas e missões:** modos Clássico e Dinâmico (delegação estruturada pelo Tech Lead com aprovação humana a cada proposta, ajuste ou replanejamento).
+- **Terminal integrado:** sessões PTY reais (`node-pty`) do CLI de cada agente e abas de shell pessoal no dock inferior (`Ctrl+J`), sempre na pasta do projeto ativo.
+- **Painel Git:** visualização de status, diff, staging, commit e push com pré-visualização.
+- **Observabilidade e histórico:** trilha de eventos por missão com classificação de evidência (`observed`, `declared`, `unavailable`).
+- **Controle de permissões e segurança:** consentimento nativo no Tauri para operações sensíveis de memória (`memory-approve`) e decisões de missão (`proposal-decide`, `mission-close`) via nonce de uso único vinculado à operação, remoção de segredos e conferência SHA-256 contra escritas não autorizadas.
+- **Recuperação de missões:** retomada segura após fechamento ou queda do app.
 
-## Arquitetura do Sistema
+## Arquitetura
+
+- **Desktop Shell:** Tauri 2 + Rust (gerenciamento de janela, diálogos nativos de confirmação, segredo interno de desktop e supervisão de sidecar via Job Object no Windows).
+- **Interface:** React 19, TypeScript, Vite, Phaser 3 e `@xterm/xterm`.
+- **Backend local:** Node.js (sidecar empacotado), servidor HTTP + WebSocket (`ws`) em `127.0.0.1`, `node-pty`.
+- **Persistência:** SQLite em modo WAL (`data.sqlite`).
+- **Execução de agentes:** CLIs externas (`codex`, `gemini`, `agy`).
 
 ```mermaid
 flowchart LR
-  UI["React + Vite + Phaser (WebView2)"] <-->|"WebSocket + HTTP (Bearer + Origin)"| BE["Node.js Backend (127.0.0.1:4517)"]
-  Tauri["Tauri 2 / Rust Shell"] -->|"Spawna sidecar + token"| BE
+  UI["React + Vite + Phaser + xterm (WebView2)"] <-->|"WebSocket + HTTP (Bearer + Origin)"| BE["Node.js Backend Sidecar (127.0.0.1)"]
+  Tauri["Tauri 2 / Rust Shell"] -->|"Spawna sidecar + consentimento nativo"| BE
   BE --> SQLite["SQLite (WAL)"]
   BE --> PTY["node-pty / Guardião"]
   PTY --> CLIs["CLIs Oficiais (codex / gemini / agy)"]
@@ -92,12 +100,42 @@ Missões clássicas interrompidas são marcadas como falhas, e a tarefa volta pa
 
 ## Requisitos
 
-- **Node.js 22.18+** (desenvolvido no Node 24).
-- **Git** no `PATH`.
-- Pelo menos um dos CLIs acima instalado e autenticado.
-- Windows ou Linux. No Linux, `build-essential` e `python3` (compilação do `node-pty`).
+### Para uso via instalador Windows (v1.0.0)
+- **Windows 10 ou Windows 11 (x64)**.
+- **Microsoft Edge WebView2 Runtime** (caso ausente, o instalador inclui bootstrapper para download automático).
+- **Git** disponível no `PATH`.
+- Pelo menos uma CLI oficial instalada e autenticada (`codex`, `gemini` ou `agy`). O uso, limites e eventual cobrança dependem exclusivamente da sua conta e das condições de cada provedor.
 
-## Instalação e desenvolvimento
+### Para desenvolvimento a partir do código-fonte
+- **Node.js 22.18+** (sidecar empacotado na versão **24.19.0 x64**).
+- **Rust / Cargo** e tooling Tauri 2 (apenas para `npm run tauri:dev` ou `npm run tauri:build`).
+- No Linux, `build-essential` e `python3` (compilação do `node-pty`).
+
+## Instalação no Windows (NSIS)
+
+1. Execute o instalador `AI Dev World_1.0.0_x64-setup.exe` (gerado em `src-tauri/target/release/bundle/nsis/`).
+   - **Verificação de integridade (SHA-256):** `9C2FBFEF11AFC2FB948376511BDEAE9013553AD70401FE9F56013CFF15D65C2C`
+2. Como o instalador **não possui assinatura digital**, o Windows SmartScreen pode exibir um aviso; confirme apenas após conferir o SHA-256 acima.
+3. A instalação é feita por usuário (`currentUser`) em `%LOCALAPPDATA%\AI Dev World` sem exigir privilégios de administrador e sem alterar configurações globais do Windows.
+
+### Primeiro início e configuração das CLIs
+
+1. Ao abrir o **AI Dev World**, o backend sidecar local inicia automaticamente e conecta a interface via WebSocket autenticado.
+2. No assistente inicial (ou no seletor do topo), escolha a pasta de um repositório Git local autorizado.
+3. Instale e faça login nas CLIs desejadas pelo seu terminal antes de usá-las:
+   - **Codex CLI (`codex`)**, **Gemini CLI (`gemini`)** ou **Antigravity CLI (`agy`)**.
+   - A disponibilidade e os custos/cotas seguem os planos e regras de cada provedor (não há gratuidade irrestrita garantida).
+4. Na **Central da Equipe → Agentes**, verifique o status de detecção de cada CLI e escolha provedor, modelo e esforço por agente. **A verificação de login do Gemini executa um prompt mínimo e consome 1 requisição.**
+
+### Onde ficam os dados, atualização e desinstalação
+
+- **App desktop instalado (Tauri):** `%APPDATA%\com.aidevworld.desktop\data.sqlite` (junto de `data.sqlite-wal` e `data.sqlite-shm`).
+- **Modo desenvolvimento (`npm run dev`):** `~/.ai-dev-world` (ou a pasta definida em `AIDW_DATA_DIR`).
+- **Trava de instância:** `instance.lock` garante um único backend por pasta de dados.
+- **Atualizar sem perder dados:** feche o AI Dev World, faça backup opcional dos três arquivos `data.sqlite*` e execute o novo instalador. Como o identificador `com.aidevworld.desktop` é preservado, seus projetos, conversas, agentes, memórias e histórico permanecem intactos.
+- **Desinstalar sem perder dados:** feche o app e desinstale normalmente pelo Windows; os dados em `%APPDATA%\com.aidevworld.desktop` não precisam ser apagados e podem ser restaurados ou copiados antes da remoção manual.
+
+## Desenvolvimento a partir do código-fonte
 
 ```bash
 npm install
@@ -105,6 +143,8 @@ npm run dev
 ```
 
 Abra `http://localhost:5173`. O backend escuta só em `127.0.0.1:4517` e aceita apenas a origem da interface local.
+
+> **Limitação do modo web/headless:** ações protegidas por consentimento nativo — como aprovação de missões (`proposal-decide`, `mission-close`) e aprovação de memórias (`memory-approve`) — exigem o aplicativo desktop Tauri. No navegador (`npm run dev`), essas operações não possuem diálogo nativo de confirmação e são bloqueadas pelo backend.
 
 | Variável | Padrão | Uso |
 | --- | --- | --- |
@@ -114,16 +154,11 @@ Abra `http://localhost:5173`. O backend escuta só em `127.0.0.1:4517` e aceita 
 
 Para uma instância isolada (testes, validação), use outra `AIDW_DATA_DIR` e outras portas.
 
-### Configuração dos CLIs
+Para gerar o instalador Windows x64 localmente:
 
-1. Instale e faça login em cada CLI pelo terminal, da forma oficial de cada um.
-2. No app, a Central de Agentes mostra se o CLI foi encontrado e se há login. **A verificação de login do Gemini executa um prompt mínimo e gasta 1 requisição.**
-3. Escolha provedor, modelo e esforço por agente.
-
-### Dados locais e instância única
-
-- Banco: `data.sqlite` em `AIDW_DATA_DIR`, em modo **WAL** com `busy_timeout` de 5 s. Os arquivos `-wal` e `-shm` ao lado fazem parte do banco: para fazer backup, feche o app e copie os três.
-- **Um backend por pasta de dados:** um segundo backend apontando para a mesma pasta é recusado com uma mensagem clara, antes de abrir o banco. A trava (`instance.lock`) é liberada pelo sistema operacional se o processo morrer, então não é preciso apagar nada depois de uma queda.
+```bash
+npm run tauri:build
+```
 
 ---
 
@@ -156,13 +191,14 @@ No Windows, o `agy.cmd` ou `agy.bat` simulado recebe as opções até `-p` na li
 
 ## Limitações conhecidas
 
-- Todo CLI (missão ou terminal) roda sob um **guardião** ligado ao backend por um canal local. Se o backend cair, mesmo à força, o canal fecha e o guardião encerra a árvore de processos do CLI (medido: nenhum processo restante 1,5 s depois). O guardião só encerra o que ele mesmo iniciou. **Não coberto:** o guardião ser encerrado sozinho, e um CLI que se desligue da própria árvore (daemon). A garantia completa depende de um supervisor no app desktop (Job Object no Windows).
+- **Sem assinatura digital:** o executável e o instalador NSIS (`1.0.0`) não possuem certificado de assinatura de código; o Windows SmartScreen pode alertar na primeira execução.
+- **QA e testes:** o QA realiza inspeção estática de código e evidências; a Observabilidade registra `tests.executed: unavailable` (`staticReviewOnly: true`) quando os testes não foram executados pelo sistema. A execução autônoma de testes reais pelo QA ainda não está comprovada na versão 1.0.
+- Todo CLI (missão ou terminal) roda sob um **guardião** ligado ao backend por um canal local (e Job Object no Windows quando iniciado pelo Tauri). Se o guardião for encerrado isoladamente ou um CLI criar um daemon desvinculado, processos órfãos externos não são garantidos.
 - Backends de versões anteriores à trava de instância não a respeitam. Não rode versões antigas e novas na mesma pasta de dados.
-- O escritório Phaser é **desmontado ao trocar de aba** e remontado em cerca de 0,1 s ao voltar. Isso foi decidido na Etapa 11.2 depois de comparar com a opção de mantê-lo montado, oculto e com o loop suspenso. Medidas no Chromium: CPU oculto ~0% nas duas; troca de aba 94 ms contra 31 ms; memória do navegador fora do escritório 371–416 MB contra 441 MB. Mantê-lo montado também manteria vivos o painel lateral e o terminal. A memória em repouso pesou mais que os 60 ms de troca.
+- O escritório Phaser é **desmontado ao trocar de aba** e remontado em cerca de 0,1 s ao voltar para economizar memória fora do escritório.
 - Os CLIs não informam custo nem tokens. Os limites contam chamadas e passos.
-- Empacotamento desktop Windows via Tauri 2 (`npm run tauri:build`) com sidecar Node.js; distribuição pública continua condicionada a assinatura de código e validação externa em máquinas limpas.
 
 ## Documentação e Portfólio
 
 - Arquitetura e segurança: [docs/architecture/TAURI-DESKTOP-ARCHITECTURE.md](docs/architecture/TAURI-DESKTOP-ARCHITECTURE.md), [docs/architecture/DESKTOP-SECURITY-MODEL.md](docs/architecture/DESKTOP-SECURITY-MODEL.md)
-- Roteiro de demonstração e textos de portfólio: [docs/PORTFOLIO-SHOWCASE.md](docs/PORTFOLIO-SHOWCASE.md)
+- Showcase, capturas reais e textos de portfólio: [docs/PORTFOLIO-SHOWCASE.md](docs/PORTFOLIO-SHOWCASE.md)
