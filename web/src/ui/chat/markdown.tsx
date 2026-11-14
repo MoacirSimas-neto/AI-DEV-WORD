@@ -41,10 +41,14 @@ function inline(text: string, keyBase = 'i'): ReactNode[] {
 
 type Block =
   | { kind: 'code'; lang: string; text: string }
+  | { kind: 'hr' }
   | { kind: 'heading'; level: number; text: string }
-  | { kind: 'list'; ordered: boolean; items: string[] }
+  | { kind: 'list'; ordered: boolean; start: number; items: string[] }
   | { kind: 'quote'; text: string }
   | { kind: 'para'; text: string }
+
+const HR_RE = /^\s*([-*_])(?:\s*\1){2,}\s*$/
+const PREFIXED_HEADING_RE = /^\s*(\[[^\]\n]{1,80}\]:)\s+(#{1,6})\s+(.*)$/
 
 function parseBlocks(source: string): Block[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
@@ -61,21 +65,44 @@ function parseBlocks(source: string): Block[] {
       blocks.push({ kind: 'code', lang: fence[1], text: body.join('\n') })
       continue
     }
-    const heading = /^(#{1,4})\s+(.*)$/.exec(line)
+    if (HR_RE.test(line)) {
+      blocks.push({ kind: 'hr' })
+      i++
+      continue
+    }
+    const prefixedHeading = PREFIXED_HEADING_RE.exec(line)
+    if (prefixedHeading) {
+      blocks.push({ kind: 'para', text: prefixedHeading[1] })
+      blocks.push({ kind: 'heading', level: prefixedHeading[2].length, text: prefixedHeading[3] })
+      i++
+      continue
+    }
+    const heading = /^\s*(#{1,6})\s+(.*)$/.exec(line)
     if (heading) {
       blocks.push({ kind: 'heading', level: heading[1].length, text: heading[2] })
       i++
       continue
     }
-    if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
-      const ordered = /^\s*\d+[.)]\s+/.test(line)
+    const listMatch = /^\s*(?:([-*+])|(\d+)[.)])\s+/.exec(line)
+    if (listMatch) {
+      const ordered = Boolean(listMatch[2])
+      const start = ordered ? Number.parseInt(listMatch[2], 10) : 1
+      const itemRe = ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/
       const items: string[] = []
-      // A lista segue enquanto o tipo de marcador (com ou sem número) for o mesmo.
-      while (i < lines.length && (ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/).test(lines[i])) {
-        items.push(lines[i].replace(/^\s*([-*+]|\d+[.)])\s+/, ''))
-        i++
+      while (i < lines.length) {
+        if (itemRe.test(lines[i])) {
+          items.push(lines[i].replace(itemRe, ''))
+          i++
+          continue
+        }
+        // Mantém itens separados por linha em branco na mesma lista.
+        if (!lines[i].trim() && i + 1 < lines.length && itemRe.test(lines[i + 1])) {
+          i++
+          continue
+        }
+        break
       }
-      blocks.push({ kind: 'list', ordered, items })
+      blocks.push({ kind: 'list', ordered, start, items })
       continue
     }
     if (/^\s*>/.test(line)) {
@@ -89,7 +116,15 @@ function parseBlocks(source: string): Block[] {
       continue
     }
     const body: string[] = []
-    while (i < lines.length && lines[i].trim() && !/^\s*(```|#{1,4}\s|[-*+]\s|\d+[.)]\s|>)/.test(lines[i])) body.push(lines[i++])
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !HR_RE.test(lines[i]) &&
+      !PREFIXED_HEADING_RE.test(lines[i]) &&
+      !/^\s*(```|#{1,6}\s|[-*+]\s|\d+[.)]\s|>)/.test(lines[i])
+    ) {
+      body.push(lines[i++])
+    }
     if (body.length === 0) body.push(lines[i++])
     blocks.push({ kind: 'para', text: body.join('\n') })
   }
@@ -119,14 +154,16 @@ export function Markdown({ text }: { text: string }) {
                 <code>{b.text}</code>
               </pre>
             )
+          case 'hr':
+            return <hr key={key} />
           case 'heading': {
-            const Tag = (['h3', 'h4', 'h5', 'h6'] as const)[b.level - 1]
+            const Tag = (['h3', 'h4', 'h5', 'h6'] as const)[Math.min(b.level - 1, 3)]
             return <Tag key={key}>{inline(b.text, key)}</Tag>
           }
           case 'list': {
             const Tag = b.ordered ? 'ol' : 'ul'
             return (
-              <Tag key={key}>
+              <Tag key={key} start={b.ordered && b.start !== 1 ? b.start : undefined}>
                 {b.items.map((item, j) => (
                   <li key={j}>{inline(item, `${key}-${j}`)}</li>
                 ))}

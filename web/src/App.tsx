@@ -402,7 +402,7 @@ function App() {
           onOpenFolderDialog={() => send({ type: 'dialog-open-folder' })}
         />
 
-        {activeTab !== 'office' && (
+        {activeTab !== 'office' && activeTab !== 'chat' && (
           <div className="studio-page-breadcrumb">
             <button type="button" className="btn btn-sm" onClick={() => setActiveTab('office')}>
               ← Voltar ao Escritório

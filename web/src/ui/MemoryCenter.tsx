@@ -19,6 +19,19 @@ interface Props {
   onClose: () => void
 }
 
+/** Formata timestamp ISO UTC para o fuso local do usuário. */
+function formatLocalDateTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 16).replace('T', ' ')
+  return d.toLocaleString([], {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 const CATEGORY_LABEL: Record<MemoryCategory, string> = {
   decision: 'Decisão',
   requirement: 'Requisito',
@@ -319,7 +332,7 @@ export function MemoryCenter({
                   </span>
                   <strong>Memória #{v.id}</strong>
                   <span className="task-assignee">Autor: {v.author}</span>
-                  <span className="history-time">{v.createdAt.slice(0, 16).replace('T', ' ')}</span>
+                  <span className="history-time">{formatLocalDateTime(v.createdAt)}</span>
                 </div>
                 <p className="task-desc">{v.content}</p>
                 {v.approvedBy && (
@@ -424,7 +437,7 @@ export function MemoryCenter({
                   <span className="task-assignee">
                     {m.scope === 'team' ? '👥 Compartilhada' : `👤 Individual (${agentName})`}
                   </span>
-                  <span className="history-time">{m.createdAt.slice(0, 16).replace('T', ' ')}</span>
+                  <span className="history-time">{formatLocalDateTime(m.createdAt)}</span>
                 </div>
 
                 <p className="task-desc">{m.content}</p>

@@ -13,6 +13,7 @@
   --parchment: #f6ebd4;
   --parchment-2: #e7d6b4;
   --ink: #1e2530;
+  --ink-on-honey: #1e2530;
   --ink-soft: #5c6470;
   --honey: #f59e0b;
   --honey-dark: #b45309;
@@ -157,7 +158,7 @@ h1 {
 
 .nav-tab-active {
   background: var(--honey) !important;
-  color: var(--ink) !important;
+  color: var(--ink-on-honey) !important;
   box-shadow:
     0 -2px 0 #090f1a,
     0 2px 0 #090f1a,
@@ -253,7 +254,7 @@ button {
   padding: 5px 12px;
   border: 0;
   background: var(--honey);
-  color: var(--ink);
+  color: var(--ink-on-honey);
   font: 600 15px/1.3 var(--pixel);
   white-space: nowrap;
   cursor: pointer;
@@ -267,6 +268,12 @@ button {
 
 button:hover:not(:disabled) {
   background: #fbbf24;
+  color: var(--ink-on-honey);
+}
+
+button:focus-visible {
+  outline: 2px solid #f8fafc;
+  outline-offset: 2px;
 }
 
 button:active:not(:disabled) {
@@ -287,6 +294,7 @@ button:disabled {
 
 .btn-quiet {
   background: var(--parchment-2);
+  color: var(--ink);
   box-shadow:
     0 -3px 0 var(--ink),
     0 3px 0 var(--ink),
@@ -297,6 +305,7 @@ button:disabled {
 
 .btn-quiet:hover:not(:disabled) {
   background: var(--parchment);
+  color: var(--ink);
 }
 
 .btn-xs {
@@ -2184,15 +2193,22 @@ input:focus-visible {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
+  min-width: 0;
   background: #fffaf0;
   box-shadow: 0 0 0 2px var(--ink);
 }
 
 .agent-card-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px 8px;
+}
+
+.agent-card-header .lamp {
+  white-space: normal;
+  max-width: 100%;
 }
 
 .agent-card-header strong {
@@ -4440,4 +4456,649 @@ input:focus-visible {
 .team-center-window select option {
   background: #0b1320 !important;
   color: #f6ebd4 !important;
+}
+
+/* Central de Equipe: Editor de Agentes & Lista de Memórias em tema dark */
+.team-center-window .agent-center-window,
+.team-center-window .agent-creator-panel,
+.team-center-window .agent-config-card,
+.team-center-window .agent-profiles-bar,
+.team-center-window .agent-profile-preview,
+.team-center-window .memory-center-window .task-item,
+.memory-center-window .task-item {
+  background: var(--night-2);
+  color: #f6ebd4;
+  border: 1px solid var(--night-3);
+  box-shadow: none;
+}
+
+.team-center-window .agent-creator-panel {
+  border-left: 5px solid var(--sky);
+}
+
+.team-center-window .agent-creator-panel .agent-config-field input,
+.team-center-window .agent-creator-panel .agent-config-field select,
+.team-center-window .agent-creator-panel textarea,
+.team-center-window .agent-creator-fields textarea {
+  background: var(--night);
+  color: #f6ebd4 !important;
+  border: 1px solid var(--night-3);
+  box-shadow: none;
+}
+
+.team-center-window .agent-creator-head p,
+.team-center-window .agent-effort-auto,
+.team-center-window .agent-card-role,
+.team-center-window .memory-center-window .history-time {
+  color: #cbd5e1 !important;
+}
+
+.team-center-window .team-default-toggle span,
+.team-center-window .agent-preset-picker > label,
+.team-center-window .preview-stage-meta strong,
+.team-center-window .agent-card-header strong,
+.team-center-window .memory-center-window .task-desc,
+.team-center-window .memory-center-window .task-assignee,
+.memory-center-window .task-desc,
+.memory-center-window .task-assignee {
+  color: #f6ebd4 !important;
+}
+
+.team-center-window .preview-stage-meta span {
+  color: #cbd5e1;
+}
+
+.team-center-window .preset-option-btn {
+  background: var(--night);
+  color: #f6ebd4;
+  border: 1px solid var(--night-3);
+  box-shadow: none !important;
+}
+
+.team-center-window .preset-option-btn:hover,
+.team-center-window .preset-option-btn.preset-selected {
+  background: var(--night-3) !important;
+  color: #f6ebd4 !important;
+}
+
+.team-center-window .preset-option-btn.preset-selected {
+  box-shadow: 0 0 0 2px var(--sky) !important;
+}
+
+.team-center-window .agent-spec-info-box {
+  background: var(--night) !important;
+  color: #f6ebd4 !important;
+  border: 1px solid var(--night-3);
+  border-left: 3px solid var(--moss);
+}
+
+.team-center-window .agent-spec-info-box strong,
+.team-center-window .agent-spec-info-box span {
+  color: #f6ebd4 !important;
+}
+
+.team-center-window .agent-spec-info-box .agent-spec-files {
+  color: #cbd5e1 !important;
+}
+
+.team-center-window .agent-card-footer {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.team-center-window .agent-cli-version {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  color: #cbd5e1;
+  font-size: 11.5px;
+}
+
+.task-panel-window button:not(.btn-quiet):not(.btn-primary-glow):not(.window-close):not(:disabled),
+.team-center-window button:not(.btn-quiet):not(.btn-primary-glow):not(.window-close):not(.team-center-tab):not(.preset-option-btn):not(.agent-profiles-bar button):not(.agent-config-card button:not(.btn-primary)):not(:disabled),
+.memory-center-window button:not(.btn-quiet):not(.btn-primary-glow):not(.window-close):not(:disabled),
+.mission-monitor-panel button:not(.btn-quiet):not(.btn-primary-glow):not(.window-close):not(:disabled) {
+  color: var(--ink-on-honey) !important;
+}
+
+.team-center-window .memory-center-window .agent-badge,
+.team-center-window .memory-center-window .cc-spec-pill,
+.memory-center-window .agent-badge,
+.memory-center-window .cc-spec-pill {
+  background: var(--night-3);
+  color: #e2e8f0;
+  border: 1px solid #334155;
+}
+
+.team-center-window .btn-quiet,
+.memory-center-window .btn-quiet {
+  background: var(--night-3);
+  color: #f6ebd4;
+  border: 1px solid #334155;
+}
+
+.team-center-window,
+.team-center-window *,
+.memory-center-window,
+.memory-center-window * {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #0b1320;
+}
+
+.team-center-window ::-webkit-scrollbar,
+.memory-center-window ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.team-center-window ::-webkit-scrollbar-track,
+.memory-center-window ::-webkit-scrollbar-track {
+  background: #0b1320;
+}
+
+.team-center-window ::-webkit-scrollbar-thumb,
+.memory-center-window ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+/* Etapa 17.1: Gerenciador de Tarefas e Monitor de Missões em tema dark */
+.task-panel-window,
+.mission-monitor-panel {
+  background: var(--night);
+  color: #f6ebd4;
+}
+
+.task-panel-window .window-id h2,
+.task-panel-window h3,
+.task-panel-window h4,
+.task-panel-window label,
+.task-panel-window summary,
+.task-panel-window strong,
+.mission-monitor-panel .window-id h2,
+.mission-monitor-panel h3,
+.mission-monitor-panel label,
+.mission-monitor-panel strong {
+  color: #f6ebd4 !important;
+}
+
+.task-panel-window .agent-role,
+.task-panel-window small,
+.task-panel-window .task-advanced-hint,
+.task-panel-window .mission-step-desc,
+.mission-monitor-panel .mission-sub,
+.mission-monitor-panel .mission-empty-desc,
+.mission-monitor-panel small {
+  color: #cbd5e1 !important;
+}
+
+.task-panel-window .mission-card,
+.task-panel-window .task-item,
+.task-panel-window .mode-selector,
+.task-panel-window .task-advanced-panel,
+.task-panel-window .task-form,
+.task-panel-window .mission-approval-box,
+.task-panel-window .mission-live-box,
+.mission-monitor-panel .mission-empty-state,
+.mission-monitor-panel .mission-overview-card,
+.mission-monitor-panel .mission-approval-box,
+.mission-monitor-panel .mission-live-box,
+.mission-monitor-panel .mission-review-box,
+.mission-monitor-panel .mission-details-box {
+  background: var(--night-2);
+  color: #f6ebd4;
+  border: 1px solid var(--night-3);
+  box-shadow: none;
+}
+
+.task-panel-window .mission-error-box,
+.mission-monitor-panel .mission-error-box {
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+  border: 1px solid #ef4444;
+  box-shadow: none;
+}
+
+.task-panel-window .mission-team-chip,
+.mission-monitor-panel .mission-team-chip {
+  background: var(--night-3);
+  color: #f6ebd4;
+  border: 1px solid #334155;
+}
+
+.task-panel-window .mission-plan-text,
+.task-panel-window .mission-live-output,
+.task-panel-window .dyn-tech pre,
+.task-panel-window .dyn-plan-step pre,
+.mission-monitor-panel .mission-plan-text,
+.mission-monitor-panel .mission-live-output,
+.mission-monitor-panel .dyn-tech pre,
+.mission-monitor-panel .dyn-plan-step pre {
+  background: #070d17;
+  color: #f6ebd4;
+  border: 1px solid var(--night-3);
+  box-shadow: none;
+}
+
+.task-panel-window .dyn-overview,
+.task-panel-window .dyn-current,
+.task-panel-window .dyn-limits,
+.task-panel-window .dyn-history,
+.task-panel-window .dyn-recovery,
+.task-panel-window .dyn-trigger,
+.task-panel-window .dyn-proposal,
+.mission-monitor-panel .dyn-overview,
+.mission-monitor-panel .dyn-current,
+.mission-monitor-panel .dyn-limits,
+.mission-monitor-panel .dyn-history,
+.mission-monitor-panel .dyn-recovery,
+.mission-monitor-panel .dyn-trigger,
+.mission-monitor-panel .dyn-proposal {
+  background: var(--night-2);
+  color: #f6ebd4;
+  border: 1px solid var(--night-3);
+  box-shadow: none;
+}
+
+.task-panel-window .dyn-trigger,
+.mission-monitor-panel .dyn-trigger {
+  border-left: 4px solid var(--purple);
+}
+
+.task-panel-window .dyn-recovery,
+.mission-monitor-panel .dyn-recovery {
+  border-left: 4px solid var(--honey-dark);
+}
+
+.task-panel-window .dyn-proposal-pending,
+.mission-monitor-panel .dyn-proposal-pending {
+  border-color: var(--honey);
+  box-shadow: 0 0 0 1px var(--honey), 0 0 0 4px rgba(245, 158, 11, 0.18);
+}
+
+.task-panel-window .dyn-change,
+.task-panel-window .dyn-feedback,
+.task-panel-window .dyn-confirm,
+.task-panel-window .dyn-plan-step,
+.task-panel-window .dyn-impact,
+.mission-monitor-panel .dyn-change,
+.mission-monitor-panel .dyn-feedback,
+.mission-monitor-panel .dyn-confirm,
+.mission-monitor-panel .dyn-plan-step,
+.mission-monitor-panel .dyn-impact {
+  background: var(--night);
+  color: #f6ebd4;
+  border: 1px solid var(--night-3);
+}
+
+.task-panel-window .dyn-change,
+.mission-monitor-panel .dyn-change {
+  border-left: 4px solid var(--moss);
+}
+
+.task-panel-window .dyn-change-release,
+.mission-monitor-panel .dyn-change-release {
+  border-left-color: var(--stone);
+}
+
+.task-panel-window .dyn-plan-step,
+.mission-monitor-panel .dyn-plan-step {
+  border-left: 4px solid var(--stone);
+}
+
+.task-panel-window .dyn-step-running,
+.mission-monitor-panel .dyn-step-running {
+  background: rgba(16, 185, 129, 0.12);
+  border-left-color: var(--mint);
+}
+
+.task-panel-window .dyn-step-completed,
+.mission-monitor-panel .dyn-step-completed {
+  border-left-color: var(--moss);
+}
+
+.task-panel-window .dyn-step-failed,
+.task-panel-window .dyn-step-interrupted,
+.task-panel-window .dyn-step-cancelled,
+.mission-monitor-panel .dyn-step-failed,
+.mission-monitor-panel .dyn-step-interrupted,
+.mission-monitor-panel .dyn-step-cancelled {
+  border-left-color: var(--clay);
+}
+
+.task-panel-window .dyn-impact,
+.mission-monitor-panel .dyn-impact {
+  border-left: 4px solid var(--honey-dark);
+}
+
+.task-panel-window .dyn-waiting,
+.mission-monitor-panel .dyn-waiting {
+  background: rgba(56, 189, 248, 0.12);
+  color: #e0f2fe;
+  border-left: 4px solid var(--sky);
+}
+
+.task-panel-window .dyn-unknown,
+.mission-monitor-panel .dyn-unknown {
+  background: rgba(239, 68, 68, 0.14);
+  color: #fecaca;
+  border-left: 4px solid var(--clay);
+}
+
+.task-panel-window .dyn-result-ok,
+.mission-monitor-panel .dyn-result-ok {
+  background: rgba(20, 83, 45, 0.45);
+  color: #bbf7d0;
+}
+
+.task-panel-window .dyn-result-error,
+.mission-monitor-panel .dyn-result-error {
+  background: rgba(127, 29, 29, 0.45);
+  color: #fecaca;
+}
+
+.task-panel-window .dyn-monitor,
+.task-panel-window .dyn-objective,
+.task-panel-window .dyn-block,
+.task-panel-window .dyn-block li,
+.task-panel-window .dyn-impact li,
+.task-panel-window .dyn-limits li,
+.task-panel-window .dyn-change-details dd,
+.task-panel-window .dyn-accept,
+.task-panel-window .task-desc,
+.mission-monitor-panel .dyn-monitor,
+.mission-monitor-panel .dyn-objective,
+.mission-monitor-panel .dyn-block,
+.mission-monitor-panel .dyn-block li,
+.mission-monitor-panel .dyn-impact li,
+.mission-monitor-panel .dyn-limits li,
+.mission-monitor-panel .dyn-change-details dd,
+.mission-monitor-panel .dyn-accept {
+  color: #f6ebd4;
+}
+
+.task-panel-window .dyn-dim,
+.task-panel-window .dyn-section-title,
+.task-panel-window .dyn-trigger h5,
+.task-panel-window .dyn-recovery h5,
+.task-panel-window .dyn-block h5,
+.task-panel-window .dyn-impact h5,
+.task-panel-window .dyn-kicker,
+.task-panel-window .dyn-change-details dt,
+.task-panel-window .dyn-tech summary,
+.task-panel-window .dyn-history summary,
+.task-panel-window .dyn-plan-step summary,
+.task-panel-window .dyn-origin,
+.mission-monitor-panel .dyn-dim,
+.mission-monitor-panel .dyn-section-title,
+.mission-monitor-panel .dyn-trigger h5,
+.mission-monitor-panel .dyn-recovery h5,
+.mission-monitor-panel .dyn-block h5,
+.mission-monitor-panel .dyn-impact h5,
+.mission-monitor-panel .dyn-kicker,
+.mission-monitor-panel .dyn-change-details dt,
+.mission-monitor-panel .dyn-tech summary,
+.mission-monitor-panel .dyn-history summary,
+.mission-monitor-panel .dyn-plan-step summary,
+.mission-monitor-panel .dyn-origin {
+  color: #cbd5e1 !important;
+}
+
+.task-panel-window .dyn-member,
+.mission-monitor-panel .dyn-member {
+  background: rgba(20, 83, 45, 0.55);
+  color: #bbf7d0;
+  box-shadow: 0 0 0 1px #22c55e;
+}
+
+.task-panel-window .dyn-member-released,
+.task-panel-window .dyn-status,
+.task-panel-window .dyn-step-status,
+.task-panel-window .dyn-step-head code,
+.mission-monitor-panel .dyn-member-released,
+.mission-monitor-panel .dyn-status,
+.mission-monitor-panel .dyn-step-status,
+.mission-monitor-panel .dyn-step-head code {
+  background: var(--night-3);
+  color: #f6ebd4;
+}
+
+.task-panel-window .dyn-status-approved,
+.task-panel-window .dyn-step-status-completed,
+.mission-monitor-panel .dyn-status-approved,
+.mission-monitor-panel .dyn-step-status-completed {
+  background: #166534;
+  color: #dcfce7;
+}
+
+.task-panel-window .dyn-status-rejected,
+.task-panel-window .dyn-step-status-failed,
+.task-panel-window .dyn-step-status-interrupted,
+.mission-monitor-panel .dyn-status-rejected,
+.mission-monitor-panel .dyn-step-status-failed,
+.mission-monitor-panel .dyn-step-status-interrupted {
+  background: #991b1b;
+  color: #fee2e2;
+}
+
+.task-panel-window .dyn-step-status-running,
+.mission-monitor-panel .dyn-step-status-running {
+  background: var(--mint);
+  color: #052e16;
+}
+
+.task-panel-window .dyn-step-error,
+.task-panel-window .dyn-limit-hit,
+.mission-monitor-panel .dyn-step-error,
+.mission-monitor-panel .dyn-limit-hit {
+  color: #fca5a5;
+}
+
+.task-panel-window .dyn-replaced,
+.mission-monitor-panel .dyn-replaced {
+  color: #fdba74;
+}
+
+.task-panel-window .dyn-mode,
+.mission-monitor-panel .dyn-mode {
+  background: #0c4a6e;
+  color: #bae6fd;
+}
+
+.task-panel-window .dyn-mode-implement,
+.mission-monitor-panel .dyn-mode-implement {
+  background: #78350f;
+  color: #fde68a;
+}
+
+.task-panel-window .dyn-mode-verify,
+.mission-monitor-panel .dyn-mode-verify {
+  background: #581c87;
+  color: #e9d5ff;
+}
+
+.task-panel-window,
+.task-panel-window *,
+.mission-monitor-panel,
+.mission-monitor-panel * {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #0b1320;
+}
+
+.task-panel-window ::-webkit-scrollbar,
+.mission-monitor-panel ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.task-panel-window ::-webkit-scrollbar-track,
+.mission-monitor-panel ::-webkit-scrollbar-track {
+  background: #0b1320;
+}
+
+.task-panel-window ::-webkit-scrollbar-thumb,
+.mission-monitor-panel ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+.task-panel-window ::-webkit-scrollbar-thumb:hover,
+.mission-monitor-panel ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+.task-panel-window .mode-option {
+  background: var(--night);
+  color: #f6ebd4;
+  border: 1px solid var(--night-3);
+  box-shadow: none;
+}
+
+.task-panel-window .mode-option.is-selected {
+  background: var(--night-3);
+  border-color: var(--sky);
+  box-shadow: 0 0 0 1px var(--sky);
+}
+
+.task-panel-window input,
+.task-panel-window select,
+.task-panel-window textarea,
+.mission-monitor-panel input,
+.mission-monitor-panel select,
+.mission-monitor-panel textarea {
+  background: var(--night);
+  color: #f6ebd4 !important;
+  border: 1px solid var(--night-3);
+  box-shadow: none;
+}
+
+.task-panel-window select option,
+.mission-monitor-panel select option {
+  background: var(--night) !important;
+  color: #f6ebd4 !important;
+}
+
+.task-panel-window .btn-quiet,
+.mission-monitor-panel .btn-quiet {
+  background: var(--night-3);
+  color: #f6ebd4;
+  border: 1px solid #334155;
+}
+
+/* Etapa 17.2: Seleção de equipe, lista de tarefas expansível e Markdown dark */
+.task-panel-window .team-selector-box,
+.task-panel-window .team-specialist-form {
+  background: var(--night-2);
+  color: #f6ebd4;
+  border: 1px solid var(--night-3);
+  border-left: 4px solid var(--sky);
+  box-shadow: none;
+}
+
+.task-panel-window .team-selector-head h3,
+.task-panel-window .team-specialists-head h4,
+.task-panel-window .team-specialist-form h5,
+.task-panel-window .team-default-toggle,
+.task-panel-window .team-default-toggle span,
+.task-panel-window .team-slot-meta strong {
+  color: #f6ebd4 !important;
+}
+
+.task-panel-window .team-selector-head p,
+.task-panel-window .team-slot-stage,
+.task-panel-window .team-slot-spec,
+.task-panel-window .team-slot-model {
+  color: #cbd5e1 !important;
+}
+
+.task-panel-window .team-slot-card,
+.task-panel-window .team-specialist-chip {
+  background: var(--night);
+  color: #f6ebd4;
+  border: 1px solid var(--night-3);
+  box-shadow: none;
+}
+
+.task-panel-window .team-selector-warning {
+  background: rgba(180, 83, 9, 0.25);
+  color: #fde68a;
+  border: 1px solid #b45309;
+  border-left: 4px solid var(--honey);
+}
+
+.task-panel-window .task-list,
+.memory-center-window .task-list {
+  max-height: none;
+  overflow-y: visible;
+  padding-right: 0;
+}
+
+.task-panel-window .task-review-hint {
+  font-size: 11.5px;
+  color: #fde68a;
+  background: rgba(180, 83, 9, 0.22);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+
+.chat-md hr {
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+  margin: 10px 0;
+}
+
+.task-panel-window .task-desc-markdown {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.5;
+  color: #e2e8f0;
+}
+
+.task-panel-window .task-desc-markdown.is-collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.task-panel-window .task-desc-markdown h1,
+.task-panel-window .task-desc-markdown h2,
+.task-panel-window .task-desc-markdown h3,
+.task-panel-window .task-desc-markdown h4 {
+  font-size: 13.5px;
+  margin: 6px 0 3px;
+  color: #f6ebd4 !important;
+}
+
+.task-panel-window .task-desc-markdown p,
+.task-panel-window .task-desc-markdown ul,
+.task-panel-window .task-desc-markdown ol {
+  margin: 3px 0;
+}
+
+.task-panel-window .task-desc-markdown ul,
+.task-panel-window .task-desc-markdown ol {
+  padding-left: 18px;
+}
+
+.task-panel-window .task-desc-markdown code {
+  background: var(--night);
+  color: #bae6fd;
+  padding: 1px 4px;
+  font-size: 12px;
+}
+
+.task-panel-window .task-expand-btn {
+  align-self: flex-start;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.task-panel-window .task-mission-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }

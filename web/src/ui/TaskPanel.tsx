@@ -17,6 +17,7 @@ import type {
 import { MAX_MISSION_SPECIALISTS } from '../../../shared/protocol.ts'
 import type { Send, Subscribe } from '../net/useServer.ts'
 import { AgentPortrait } from './AgentPortrait.tsx'
+import { Markdown } from './chat/markdown.tsx'
 import { ClarificationBox } from './ClarificationBox.tsx'
 import { DynamicMissionMonitor } from './DynamicMissionMonitor.tsx'
 import { DYNAMIC_PHASE_LABEL, startMessage } from './dynamicView.ts'
@@ -70,6 +71,7 @@ export function TaskPanel({
   const [liveOutput, setLiveOutput] = useState<{ missionId: number; text: string } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [showManualForm, setShowManualForm] = useState(false)
+  const [expandedTasks, setExpandedTasks] = useState<Record<number, boolean>>({})
 
   // Modo da missão: clássico (pipeline) ou dinâmico (Tech Lead propõe a equipe e os passos).
   const [missionMode, setMissionMode] = useState<'pipeline' | 'dynamic'>('pipeline')
@@ -243,7 +245,7 @@ export function TaskPanel({
   }
 
   return (
-    <aside className="window">
+    <aside className="window task-panel-window">
       <header className="window-head">
         <div className="window-id">
           <h2>Gerenciador de Tarefas</h2>
@@ -703,47 +705,95 @@ export function TaskPanel({
           {projectTasks.map((t) => {
             const assigned = agents.find((a) => a.id === t.agentId)
             const canStartMission = !activeMission && t.status !== 'done'
-            return (
-              <li key={t.id} className={`task-item task-priority-${t.priority}`}>
-                <div className="task-item-head">
-                  <span className={`task-status-pill status-${t.status}`}>{STATUS_LABEL[t.status]}</span>
-                  <strong>{t.title}</strong>
-                  <span className="task-priority-tag">{PRIORITY_LABEL[t.priority]}</span>
-                </div>
-                {t.description && <p className="task-desc">{t.description}</p>}
-                <div className="task-footer">
-                  <span className="task-assignee">
-                    {assigned ? `Atribuído: ${assigned.name}` : 'Sem agente'}
-                  </span>
-                  <div className="task-actions">
-                    {canStartMission && (
-                      <button
-                        type="button"
-                        disabled={!online || !teamReady}
-                        title={
-                          !teamReady
-                            ? 'Verifique a disponibilidade do CLI antes de iniciar'
-                            : dynamic
-                              ? `Iniciar missão dinâmica com ${lead?.name ?? leadId} como Tech Lead`
-                              : `Iniciar missão com ${effectivePlannerId} → ${effectiveDevId} → ${effectiveQaId}`
-                        }
-                        onClick={() => startMissionForTask(t.id)}
-                      >
-                        {dynamic ? 'Missão dinâmica' : 'Modo Equipe'}
-                      </button>
-                    )}
-                    <button type="button" className="btn-quiet" onClick={() => startEdit(t)}>
-                      Editar
-                    </button>
+            const isLong = Boolean(t.description && (t.description.length > 220 || t.description.split('\n').length > 4))
+            const isExpanded = Boolean(expandedTasks[t.id])
+            const latestClosedMission = missions
+              .filter((m) => m.taskId === t.id && !isOpenMission(m))
+              .sort((a, b) => b.id - a.id)[0]
+            const footer = (
+              <div className="task-footer">
+                <span className="task-assignee">
+                  {assigned ? `Atribuído: ${assigned.name}` : 'Sem agente'}
+                </span>
+                <div className="task-actions">
+                  {latestClosedMission && onOpenObservability && (
                     <button
                       type="button"
                       className="btn-quiet"
-                      onClick={() => send({ type: 'task-delete', taskId: t.id })}
+                      onClick={() => onOpenObservability(latestClosedMission.id)}
                     >
-                      Excluir
+                      Histórico da Missão #{latestClosedMission.id}
                     </button>
-                  </div>
+                  )}
+                  {canStartMission && (
+                    <button
+                      type="button"
+                      disabled={!online || !teamReady}
+                      title={
+                        !teamReady
+                          ? 'Verifique a disponibilidade do CLI antes de iniciar'
+                          : dynamic
+                            ? `Iniciar missão dinâmica com ${lead?.name ?? leadId} como Tech Lead`
+                            : `Iniciar missão com ${effectivePlannerId} → ${effectiveDevId} → ${effectiveQaId}`
+                      }
+                      onClick={() => startMissionForTask(t.id)}
+                    >
+                      {dynamic ? 'Missão dinâmica' : 'Modo Equipe'}
+                    </button>
+                  )}
+                  <button type="button" className="btn-quiet" onClick={() => startEdit(t)}>
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-quiet"
+                    onClick={() => send({ type: 'task-delete', taskId: t.id })}
+                  >
+                    Excluir
+                  </button>
                 </div>
+              </div>
+            )
+            const expandBtn = isLong ? (
+              <button
+                type="button"
+                className="btn-quiet btn-xs task-expand-btn"
+                aria-expanded={isExpanded}
+                onClick={() => setExpandedTasks((prev) => ({ ...prev, [t.id]: !isExpanded }))}
+              >
+                {isExpanded ? 'Ver menos' : 'Ver mais'}
+              </button>
+            ) : null
+            return (
+              <li key={t.id} className={`task-item task-priority-${t.priority} ${isExpanded ? 'is-expanded' : ''}`}>
+                <div className="task-item-head">
+                  <span
+                    className={`task-status-pill status-${t.status}`}
+                    title={
+                      t.status === 'review' && latestClosedMission
+                        ? `Missão #${latestClosedMission.id} concluída pelos agentes (${DYNAMIC_PHASE_LABEL[latestClosedMission.phase] ?? latestClosedMission.phase}); aguardando sua revisão antes de marcar como Concluída.`
+                        : undefined
+                    }
+                  >
+                    {STATUS_LABEL[t.status]}
+                  </span>
+                  <strong>{t.title}</strong>
+                  {t.status === 'review' && latestClosedMission && (
+                    <span className="task-review-hint">
+                      Missão #{latestClosedMission.id} concluída · aguardando revisão humana
+                    </span>
+                  )}
+                  <span className="task-priority-tag">{PRIORITY_LABEL[t.priority]}</span>
+                </div>
+                {isExpanded && footer}
+                {isExpanded && expandBtn}
+                {t.description && (
+                  <div className={`task-desc task-desc-markdown ${isLong && !isExpanded ? 'is-collapsed' : ''}`}>
+                    <Markdown text={t.description} />
+                  </div>
+                )}
+                {!isExpanded && expandBtn}
+                {!isExpanded && footer}
               </li>
             )
           })}

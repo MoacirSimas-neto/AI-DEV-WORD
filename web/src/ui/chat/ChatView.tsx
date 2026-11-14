@@ -548,6 +548,9 @@ function ChatMissionCard({
   const runningStep = activeSteps.find((s) => s.status === 'running')
   const nextStep = activeSteps.find((s) => s.status === 'approved')
   const team = mission ? teamView(mission.plannerId || 'architect', plan.proposals) : { active: [], released: [] }
+  const snapshotTeamIds = Object.keys(mission?.teamSnapshot ?? {})
+  const displayTeamIds = plan.proposals.length > 0 ? team.active : (snapshotTeamIds.length > 0 ? snapshotTeamIds : team.active)
+  const teamLabel = plan.proposals.length > 0 ? 'Equipe ativa' : `Equipe da missão (${displayTeamIds.length})`
   const milestones = chatMissionMilestones(events, nameOf)
   const replanBlocker = chatReplanBlocker({
     online,
@@ -608,7 +611,7 @@ function ChatMissionCard({
         <div className="chat-mission-summary">
           {objective && <p className="chat-mission-objective">{objective}</p>}
           <div className="chat-mission-facts">
-            {team.active.length > 0 && <span>Equipe: {team.active.map(nameOf).join(', ')}</span>}
+            {displayTeamIds.length > 0 && <span>{teamLabel}: {displayTeamIds.map(nameOf).join(', ')}</span>}
             {runningStep && (
               <span>
                 Em andamento: <code>r{runningStep.revision}/{runningStep.key}</code> ({nameOf(runningStep.agentId)})
