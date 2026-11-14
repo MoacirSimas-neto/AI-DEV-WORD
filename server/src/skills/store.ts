@@ -167,8 +167,8 @@ export class SkillStore extends EventEmitter {
   }
 
   /** Cria ou atualiza. Conteúdo novo vira uma versão nova; as antigas continuam guardadas pelo hash. */
-  save(input: SkillInput): SkillInfo {
-    const saved = this.write(input)
+  save(input: SkillInput, createOnly = false): SkillInfo {
+    const saved = this.write(input, createOnly)
     this.emit('change')
     return saved
   }
@@ -212,7 +212,7 @@ export class SkillStore extends EventEmitter {
     return row ? String(row.content) : null
   }
 
-  private write(input: SkillInput): SkillInfo {
+  private write(input: SkillInput, createOnly = false): SkillInfo {
     const id = String(input.id ?? '').trim().toLowerCase()
     if (!ID_PATTERN.test(id)) {
       throw new Error('ID de skill inválido. Use de 2 a 40 caracteres (letras minúsculas, números, hífen ou sublinhado).')
@@ -225,6 +225,7 @@ export class SkillStore extends EventEmitter {
       throw new Error(`As instruções da skill passam de ${MAX_SKILL_LEN} caracteres (${content.length}). Reduza o texto.`)
     }
     const before = this.get(id)
+    if (createOnly && before) throw new Error('Já existe uma skill com esse ID.')
     const mode: SkillMode = input.mode ?? before?.mode ?? 'context'
     if (mode !== 'context' && mode !== 'native') throw new Error(`Modo de aplicação inválido: "${String(mode)}".`)
     const description = redact((input.description ?? before?.description ?? '').trim()).slice(0, 300)

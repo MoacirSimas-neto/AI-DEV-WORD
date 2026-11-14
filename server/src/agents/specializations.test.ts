@@ -1,8 +1,22 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import type { TaskInfo } from '../../../shared/protocol.ts'
 import { devPrompt, parseDetailedVerdict, parseVerdict, planPrompt, reviewPrompt } from '../team/prompts.ts'
 import { defaultSpecializations, sanitizeAgentMarkdown, selectRelevantSections } from './specializations.ts'
+
+test('manifesto desktop inclui os documentos usados pela especialização e as skills padrão', () => {
+  const root = new URL('../../../', import.meta.url)
+  const manifest = JSON.parse(readFileSync(new URL('src-tauri/tauri.conf.json', root), 'utf8'))
+  const resources: string[] = manifest.bundle.resources.filter((entry: string) => entry.startsWith('../knowledge/'))
+  const expected = ['skills/ponytail.md', 'skills/caveman-lite.md', 'skills/NOTICE.md']
+  for (const id of ['tech-lead', 'developer', 'qa-tester'] as const) {
+    expected.push(`agents/${id}.md`, ...['principios', 'dossie', 'referencias'].map((doc) => `${id}/${doc}.md`))
+  }
+  assert.deepEqual([...resources].sort(), expected.map((doc) => `../knowledge/${doc}`).sort())
+  for (const file of expected) assert.ok(readFileSync(new URL(`knowledge/${file}`, root), 'utf8').trim(), file)
+  assert.equal(defaultSpecializations.resolveForTask('none').promptBlock, '')
+})
 
 test('SpecializationRegistry lista as 4 especializações e confirma documentos migrados em knowledge/', () => {
   const list = defaultSpecializations.list()

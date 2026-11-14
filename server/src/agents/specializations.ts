@@ -21,6 +21,16 @@ interface SpecializationCatalogEntry {
 }
 
 const CATALOG: Record<SpecializationId, SpecializationCatalogEntry> = {
+  none: {
+    id: 'none',
+    name: 'Sem especialização',
+    codename: '',
+    roleCategory: 'developing',
+    description: 'Usa apenas o papel da etapa, sem documentos de especialização.',
+    defaultAgentId: '',
+    agentFile: null,
+    knowledgeDir: null,
+  },
   'tech-lead': {
     id: 'tech-lead',
     name: 'Tech Lead',
@@ -64,6 +74,7 @@ const CATALOG: Record<SpecializationId, SpecializationCatalogEntry> = {
 }
 
 const AGENT_TO_SPECIALIZATION: Record<string, SpecializationId> = {
+  none: 'none',
   architect: 'tech-lead',
   'tech-lead': 'tech-lead',
   dev: 'developer',
@@ -101,6 +112,7 @@ export function extractMarkdownExcerpt(markdown: string, maxChars: number): stri
 
 // O que cada função mais precisa: desempata seções quando a tarefa não cita o tema.
 const ROLE_FOCUS: Record<SpecializationId, string> = {
+  none: '',
   'tech-lead': 'arquitetura alternativas decisao riscos planejamento requisitos delegacao',
   developer: 'implementar codigo verificar testes erros seguranca requisitos entrega',
   'qa-tester': 'testes evidencias defeitos investigacao classificacao riscos cobertura regressao',
@@ -199,7 +211,7 @@ export class SpecializationRegistry {
 
   /** Lista todas as especializações disponíveis e verifica quais documentos existem no disco. */
   list(): SpecializationInfo[] {
-    return (Object.keys(CATALOG) as SpecializationId[]).map((id) => this.getInfo(id))
+    return (Object.keys(CATALOG) as SpecializationId[]).filter((id) => id !== 'none').map((id) => this.getInfo(id))
   }
 
   getInfo(id: SpecializationId): SpecializationInfo {

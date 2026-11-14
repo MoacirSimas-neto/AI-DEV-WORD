@@ -19,6 +19,16 @@ import { composeSkills, DEFAULT_SKILLS_DIR, hashSkill, MAX_SKILL_LEN, SkillStore
 const PONYTAIL_MARK = 'You are a lazy senior developer'
 const CAVEMAN_MARK = '# Caveman Lite'
 
+test('importação mantém skill desativada e preserva o registro numa colisão normalizada', () => {
+  const db = new DatabaseSync(':memory:')
+  const store = new SkillStore(db)
+  const saved = store.save({ id: 'local-import', name: 'Importada', content: 'Texto da skill' }, true)
+  assert.equal(saved.enabled, false)
+  assert.throws(() => store.save({ id: ' LOCAL-IMPORT ', name: 'Colisão', content: 'Outro texto' }, true), /Já existe/)
+  assert.deepEqual(new SkillStore(db).get(saved.id), saved)
+  db.close()
+})
+
 test('SkillStore registra Ponytail e Caveman Lite com origem, versão e hash, ativadas globalmente', () => {
   const store = new SkillStore(new DatabaseSync(':memory:'))
   const [ponytail, caveman] = store.list()
