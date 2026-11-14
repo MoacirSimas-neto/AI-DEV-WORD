@@ -12,12 +12,11 @@ import { loadCloseBehavior, saveCloseBehavior } from './ui/closeBehavior.ts'
 import { StudioTopBar, type StudioTab } from './ui/StudioTopBar.tsx'
 import { StudioOfficeView } from './ui/StudioOfficeView.tsx'
 import { TerminalDock } from './ui/TerminalDock.tsx'
+import { TeamCenter } from './ui/TeamCenter.tsx'
 import {
-  LazyAgentCenter,
   LazyChatView,
   LazyHistoryPanel,
   LazyHomeView,
-  LazyMemoryCenter,
   LazyObservabilityCenter,
   LazyPrototypeShowcase,
   LazyTaskPanel,
@@ -450,44 +449,26 @@ function App() {
           </div>
         )}
 
-        {/* 5. Central de Agentes */}
-        {activeTab === 'agents' && (
+        {/* 5 & 6. Central Unificada da Equipe (Agentes, Skills e Memória) */}
+        {(activeTab === 'agents' || activeTab === 'memory') && (
           <div className="studio-page-view">
-            <ErrorBoundary fallbackTitle="Falha na Central de Agentes">
-              <Suspense fallback={pageFallback}>
-                <LazyAgentCenter
-                  loadStatus={agentLoadStatus}
-                  agents={agents}
-                  configs={configs}
-                  allConfigs={allConfigs}
-                  specializations={specializations}
-                  skills={skills}
-                  skillOverrides={skillOverrides}
-                  online={online}
-                  send={send}
-                  subscribe={subscribe}
-                  onClose={() => setActiveTab('office')}
-                />
-              </Suspense>
-            </ErrorBoundary>
-          </div>
-        )}
-
-        {/* 6. Central de Memória */}
-        {activeTab === 'memory' && (
-          <div className="studio-page-view">
-            <ErrorBoundary fallbackTitle="Falha na Central de Memória">
-              <Suspense fallback={pageFallback}>
-                <LazyMemoryCenter
-                  projectId={workspace.activeProjectId}
-                  projectName={activeProject?.name}
-                  agents={agents}
-                  online={online}
-                  send={send}
-                  subscribe={subscribe}
-                  onClose={() => setActiveTab('office')}
-                />
-              </Suspense>
+            <ErrorBoundary fallbackTitle="Falha na Central da Equipe">
+              <TeamCenter
+                initialSection={activeTab === 'memory' ? 'memory' : 'agents'}
+                loadStatus={agentLoadStatus}
+                agents={agents}
+                configs={configs}
+                allConfigs={allConfigs}
+                specializations={specializations}
+                skills={skills}
+                skillOverrides={skillOverrides}
+                projectId={workspace.activeProjectId}
+                projectName={activeProject?.name}
+                online={online}
+                send={send}
+                subscribe={subscribe}
+                onClose={() => setActiveTab('office')}
+              />
             </ErrorBoundary>
           </div>
         )}

@@ -28,6 +28,7 @@ interface Props {
   skills?: SkillInfo[]
   skillOverrides?: SkillAgentOverride[]
   online: boolean
+  hideSkillsPanel?: boolean
   loadStatus: AgentLoadStatus
   send: Send
   subscribe?: Subscribe
@@ -141,6 +142,7 @@ export function AgentCenter({
   skills = [],
   skillOverrides = [],
   online,
+  hideSkillsPanel = false,
   loadStatus,
   send,
   subscribe,
@@ -383,7 +385,7 @@ export function AgentCenter({
         </p>
       ) : (
       <>
-      <SkillsPanel skills={skills} overrides={skillOverrides} agents={mergedConfigs} online={online} send={send} />
+      {!hideSkillsPanel && <SkillsPanel skills={skills} overrides={skillOverrides} agents={mergedConfigs} online={online} send={send} />}
       {mergedConfigs.length === 0 && <p role="status">Nenhum agente cadastrado.</p>}
       {mergedConfigs.length > 0 && filteredConfigs.length === 0 && <p role="status">Nenhum agente corresponde aos filtros.</p>}
 

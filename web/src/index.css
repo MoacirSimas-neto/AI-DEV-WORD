@@ -4232,3 +4232,212 @@ input:focus-visible {
   height: auto;
   padding: 4px 8px;
 }
+
+/* Central Unificada da Equipe */
+.team-center-window {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--night);
+  color: var(--parchment);
+}
+
+.team-center-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.team-center-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.team-center-tab {
+  padding: 7px 14px;
+  background: var(--night-2);
+  color: var(--stone);
+  border: 1px solid var(--night-3);
+  font: 700 13px/1.2 var(--body);
+  cursor: pointer;
+}
+
+.team-center-tab:hover {
+  color: var(--parchment);
+  border-color: var(--sky);
+}
+
+.team-center-tab.active {
+  background: var(--night-3);
+  color: var(--parchment);
+  border-color: var(--sky);
+  box-shadow: 0 0 0 1px var(--sky);
+}
+
+.team-center-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.team-center-body .agent-center-window,
+.team-center-body .memory-center-window {
+  box-shadow: none;
+  border: 1px solid var(--night-3);
+}
+
+.skills-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: var(--night-2);
+  color: var(--parchment);
+  border: 1px solid var(--night-3);
+}
+
+.skills-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skills-helper-text {
+  font-size: 12px;
+  color: var(--stone);
+  margin: 0;
+}
+
+/* Contraste unificado dentro da Central da Equipe */
+.team-center-window .agent-role,
+.team-center-window .agent-creator-panel label,
+.team-center-window .agent-creator-panel h3,
+.team-center-window .agent-creator-panel h4,
+.team-center-window .skills-panel-section summary,
+.team-center-window .skills-panel-section label,
+.team-center-window .skills-panel-section p {
+  color: var(--parchment);
+}
+
+.team-center-window .skills-panel-section small,
+.team-center-window .agent-creator-panel p {
+  color: var(--stone);
+}
+
+.team-center-window .memory-center-window {
+  background: var(--night);
+  color: var(--parchment);
+}
+
+.team-center-window .memory-card {
+  background: var(--night-2);
+  color: var(--parchment);
+  border: 1px solid var(--night-3);
+}
+
+.team-center-window .memory-card p,
+.team-center-window .memory-card span {
+  color: var(--parchment);
+}
+
+/* Skills Library & Form Hierarchy */
+.skill-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-library-item {
+  background: var(--night);
+  border: 1px solid var(--night-3);
+  padding: 10px 12px;
+}
+
+.skill-library-item:hover {
+  border-color: var(--sky);
+}
+
+.skill-library-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.skill-library-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 700 14px/1.3 var(--body);
+  color: var(--parchment);
+  cursor: pointer;
+}
+
+.skill-library-meta {
+  font: 12px/1.3 var(--mono);
+  color: var(--stone);
+}
+
+.skill-library-body {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--night-3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skill-form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font: 700 13px/1.3 var(--body);
+  color: var(--parchment);
+}
+
+.skills-panel-section input[type="file"] {
+  color: var(--stone);
+  font-size: 12px;
+}
+
+/* Correção pontual de cor de texto nas abas Skills e Memória */
+.team-center-window .team-center-tab.active,
+.team-center-window .skill-library-name,
+.team-center-window .skill-library-name span,
+.team-center-window .skill-library-body,
+.team-center-window .skill-library-body p,
+.team-center-window .skill-library-body label,
+.team-center-window .skill-library-body summary,
+.team-center-window .skill-library-body pre,
+.team-center-window .memory-center-window h2,
+.team-center-window .memory-center-window h3,
+.team-center-window .memory-center-window label,
+.team-center-window .memory-center-window .agent-config-field label,
+.team-center-window .agent-creator-panel h3,
+.team-center-window .agent-creator-panel label {
+  color: #f6ebd4 !important;
+}
+
+.team-center-window .agent-role,
+.team-center-window .skill-library-meta,
+.team-center-window .memory-center-window .window-message {
+  color: #cbd5e1 !important;
+}
+
+.team-center-window select,
+.team-center-window input,
+.team-center-window textarea {
+  color: #f6ebd4 !important;
+}
+
+.team-center-window select option {
+  background: #0b1320 !important;
+  color: #f6ebd4 !important;
+}

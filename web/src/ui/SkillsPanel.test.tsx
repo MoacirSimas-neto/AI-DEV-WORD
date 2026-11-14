@@ -5,7 +5,7 @@ import { SkillsPanel } from './SkillsPanel.tsx'
 test('importa texto desativado e não apaga o rascunho ao rejeitar outro arquivo', async () => {
   const send = vi.fn()
   render(<SkillsPanel skills={[]} overrides={[]} agents={[]} online send={send} />)
-  fireEvent.click(screen.getByText('Criar ou importar skill'))
+  fireEvent.click(screen.getByRole('button', { name: '+ Adicionar Skill' }))
   fireEvent.change(screen.getByLabelText('ID'), { target: { value: 'local-test' } })
   fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Skill de teste' } })
   const input = screen.getByLabelText('Importar Markdown')
