@@ -11,3 +11,10 @@ src-tauri/target/
 
 # Tauri sidecar binaries
 src-tauri/binaries/*.exe
+
+# Segredos e bancos locais
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
