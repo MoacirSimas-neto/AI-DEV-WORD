@@ -98,6 +98,24 @@ export const CODEX_ARGS = ['exec', '--sandbox', 'workspace-write', '-']
 const TEAM = ['architect', 'dev', 'qa']
 const VALID_PROVIDERS = new Set<ProviderId>(['antigravity', 'codex', 'gemini'])
 const DEFAULT_STEP_TIMEOUT_MS = 20 * 60_000
+const WINDOWS_APPS_RE = /(?:^|[\\/])windowsapps(?:[\\/]|$)/i
+
+/** Remove aliases MSIX de WindowsApps do PATH só para o filho Codex no Windows. */
+export function codexChildEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv | undefined {
+  if (platform !== 'win32') return undefined
+  const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'Path'
+  const rawPath = env[pathKey] ?? ''
+  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows'
+  const psDir = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0')
+  const parts = rawPath.split(';').map((p) => p.trim()).filter(Boolean)
+  const filtered = parts.filter((p) => !WINDOWS_APPS_RE.test(p.replace(/^"+|"+$/g, '')))
+  const hasPsDir = filtered.some((p) => p.replace(/^"+|"+$/g, '').toLowerCase() === psDir.toLowerCase())
+  const nextPath = (hasPsDir ? filtered : [psDir, ...filtered]).join(';')
+  return { ...env, [pathKey]: nextPath }
+}
 const MAX_TEXT = 100_000
 const MAX_DIFF = 60_000
 /** Rodadas Dev -> QA por missão: impede retrabalho infinito. */
@@ -993,6 +1011,7 @@ export class TeamRunner extends EventEmitter {
       const stepInput = passPromptAsArg ? undefined : fullPrompt
       run.proc = this.launch(cli, stepArgs, {
         cwd,
+        env: cli === 'codex' ? codexChildEnv() : undefined,
         label: `missão #${missionId} · ${agentId} · ${cli}`,
         input: stepInput,
         timeoutMs: this.stepTimeoutMs,
@@ -1583,8 +1602,8 @@ export class TeamRunner extends EventEmitter {
         if (run.cancelled) return false
         this.forward(mission, trace, 'system', agentId, 'git-diff', 'git-diff', diff)
       } else {
-        const source = ctx.steps.find((s) => s.key === ref.key && s.revision === (ref.revision ?? step.revision) && s.status === 'completed')
-        if (source?.status !== 'completed') {
+        const source = ctx.steps.find((s) => s.key === ref.key && s.revision === (ref.revision ?? step.revision) && (s.status === 'completed' || s.status === 'blocked'))
+        if (!source) {
           this.block(mission.id, `Passo "${step.key}": o resultado de "${ref.key}" não está disponível.`, 'dependency_failed', agentId, trace)
           return false
         }
@@ -1651,6 +1670,17 @@ export class TeamRunner extends EventEmitter {
         data: { executedBySystem: false },
       })
     }
+    const signal = parseStepSignals(text)
+    if (step.mode !== 'verify' && signal.blocked) {
+      plans.finishStep(step.id, 'blocked', { result: text, error: signal.blocked })
+      // O texto do agente é resultado declarado: nada nele aprova, convoca ou muda regras.
+      this.declared(mission, trace, agentId, `step-${step.id}-result`, `mission_steps[${step.id}].result`, text)
+      this.registry.setMissionState(agentId, 'error', `Bloqueio declarado no passo "${step.key}"`)
+      this.log(mission, 'agent', `${name} declarou bloqueio no passo "${step.key}" (${step.mode}) da missão #${mission.id}: ${signal.blocked}`, agentId)
+      this.escalate(mission.id, { kind: 'step_blocked', step: plans.getStep(step.id)! }, { evidence: 'declared', source: 'agent' }, agentId, trace)
+      return false
+    }
+
     plans.finishStep(step.id, 'completed', { result: text })
     // O texto do agente é resultado declarado: nada nele aprova, convoca ou muda regras.
     this.declared(mission, trace, agentId, `step-${step.id}-result`, `mission_steps[${step.id}].result`, text)
@@ -1662,12 +1692,18 @@ export class TeamRunner extends EventEmitter {
       const verdict = parseVerdict(text)
       const reviewed = this.tasks.updateMission(mission.id, { review: text, verdict, verdictDetail })
       this.memory?.proposeFromMission(reviewed)
-      const label = verdictDetail ?? 'sem veredito claro'
-      this.track(reviewed, 'verdict.declared', 'declared', `Veredito declarado por ${agentId} no passo "${step.key}": ${label}.`, {
+      this.track(reviewed, 'tests.executed', 'unavailable', 'O sistema não executou comandos de teste na verificação: revisão baseada apenas na saída do agente (inspeção estática).', {
         agentId,
         trace,
         key: '',
-        data: { stepId: step.id, verdict, verdictDetail, ref: `mission_steps[${step.id}].result` },
+        data: { stepId: step.id, executedBySystem: false, staticReviewOnly: true },
+      })
+      const label = verdictDetail ?? 'sem veredito claro'
+      this.track(reviewed, 'verdict.declared', 'declared', `Veredito declarado por ${agentId} no passo "${step.key}": ${label} (inspeção estática; testes não executados pelo sistema).`, {
+        agentId,
+        trace,
+        key: '',
+        data: { stepId: step.id, verdict, verdictDetail, testsExecutedBySystem: false, staticReviewOnly: true, ref: `mission_steps[${step.id}].result` },
       })
       if (verdict !== 'approved') {
         // O veredito é declarado pelo agente: o retrabalho é proposto pelo Tech Lead e aprovado pelo usuário.
@@ -1676,9 +1712,8 @@ export class TeamRunner extends EventEmitter {
       }
       return true
     }
-    // Só a linha marcada (BLOQUEIO:/RISCO:) conta como pedido de replanejamento.
-    const signal = parseStepSignals(text)
-    const kind = signal.blocked ? 'step_blocked' : signal.risk ? 'risk_flagged' : null
+    // Só a linha marcada (RISCO:) conta como pedido de replanejamento quando não houve BLOQUEIO:.
+    const kind = signal.risk ? 'risk_flagged' : null
     if (kind) {
       this.escalate(mission.id, { kind, step: plans.getStep(step.id)! }, { evidence: 'declared', source: 'agent' }, agentId, trace)
       return false

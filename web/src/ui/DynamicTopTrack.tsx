@@ -13,7 +13,7 @@ interface Props {
 }
 
 const MAX_SHOWN = 5
-const ICON: Record<string, string> = { completed: '✓', running: '⚡', failed: '✕', interrupted: '⏸', cancelled: '–', approved: '•' }
+const ICON: Record<string, string> = { completed: '✓', running: '⚡', blocked: '!', failed: '✕', interrupted: '⏸', cancelled: '–', approved: '•' }
 
 /** Esteira da barra superior para missão dinâmica: os passos reais aprovados, não uma sequência fixa. */
 export function DynamicTopTrack({ mission, title, online, send, subscribe, onSelectAgent }: Props) {

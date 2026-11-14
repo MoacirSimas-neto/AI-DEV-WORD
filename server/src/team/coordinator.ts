@@ -160,8 +160,9 @@ export function recoveredPhase(phase: MissionPhase): MissionPhase {
 
 const STEP_TRANSITIONS: Record<StepStatus, readonly StepStatus[]> = {
   approved: ['running', 'cancelled', 'superseded'],
-  running: ['completed', 'failed', 'interrupted', 'cancelled'],
+  running: ['completed', 'blocked', 'failed', 'interrupted', 'cancelled'],
   completed: [],
+  blocked: [],
   failed: [],
   interrupted: [],
   cancelled: [],
@@ -335,7 +336,9 @@ function inputProblems(ref: ArtifactRef, step: PlannedStepInput, existing: Plann
     return step.dependsOn.includes(ref.key) ? [] : [`usa o resultado de "${ref.key}" sem depender dele.`]
   }
   // Um passo pode ter mais de uma tentativa: vale a que concluiu.
-  return existing.some((s) => s.revision === ref.revision && s.key === ref.key && s.status === 'completed') ? [] : [`usa o resultado de "${ref.key}" (revisão ${ref.revision}), que não existe ou não foi concluído.`]
+  return existing.some((s) => s.revision === ref.revision && s.key === ref.key && (s.status === 'completed' || s.status === 'blocked'))
+    ? []
+    : [`usa o resultado de "${ref.key}" (revisão ${ref.revision}), que não existe ou não foi concluído.`]
 }
 
 /** Problemas de uma proposta do Tech Lead; vazio = pode ir para a aprovação humana. */

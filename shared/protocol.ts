@@ -387,7 +387,7 @@ export interface PlannedStepInput {
   inputs: ArtifactRef[]
 }
 
-export type StepStatus = 'approved' | 'running' | 'completed' | 'failed' | 'interrupted' | 'cancelled' | 'superseded'
+export type StepStatus = 'approved' | 'running' | 'completed' | 'blocked' | 'failed' | 'interrupted' | 'cancelled' | 'superseded'
 
 /** Um passo de um plano aprovado. Só existe depois da aprovação humana da proposta que o trouxe. */
 export interface PlannedStep extends PlannedStepInput {

@@ -946,7 +946,7 @@ test('Dev bloqueado: só a linha BLOQUEIO conta; o Tech Lead reconvoca Dados e p
   const steps = w.plans.listSteps(w.q(mission.id))
   assert.deepEqual(
     steps.map((s) => [s.revision, s.key, s.status]),
-    [[1, 'modelo', 'completed'], [1, 'impl', 'completed'], [1, 'teste', 'superseded'], [2, 'modelo2', 'completed'], [2, 'impl2', 'completed'], [2, 'teste2', 'completed']],
+    [[1, 'modelo', 'completed'], [1, 'impl', 'blocked'], [1, 'teste', 'superseded'], [2, 'modelo2', 'completed'], [2, 'impl2', 'completed'], [2, 'teste2', 'completed']],
   )
   // A equipe não mudou: reconsultar um participante não é convocação.
   assert.equal(trailOf(w, mission.id).filter((e) => e.type === 'team.joined' && e.data.revision === 2).length, 0)
@@ -1365,4 +1365,33 @@ test('interface ↔ backend: recuperação mostra o que o backend permite e só 
   } finally {
     close()
   }
+})
+
+test('Etapa 16: passo com BLOQUEIO: fica blocked (nunca completed) e QA estático registra tests.executed unavailable', async () => {
+  const w = await world()
+  const mission = await w.startPending()
+
+  w.steps.impl = () => ({ stdout: 'Tentei rodar os testes.\nBLOQUEIO: CreateProcessAsUserW failed: 5 (Acesso negado)' })
+  w.runner.decideProposal({ missionId: mission.id, proposalId: w.pending(mission.id).id, revision: 1, decision: 'approve' })
+  await until(() => w.phase(mission.id) === 'awaiting_decision', 'escalonamento por bloqueio')
+
+  const implStep = w.plans.listSteps(w.q(mission.id)).find((s) => s.key === 'impl')!
+  assert.equal(implStep.status, 'blocked')
+  assert.match(implStep.error ?? '', /CreateProcessAsUserW failed: 5/)
+
+  // Novo mundo para validar QA estático sem execução de testes pelo sistema
+  const w2 = await world()
+  const m2 = await w2.startPending()
+  w2.lead.push(CLOSURE)
+  w2.runner.decideProposal({ missionId: m2.id, proposalId: w2.pending(m2.id).id, revision: 1, decision: 'approve' })
+  await waitProposals(w2, m2.id, 2, 'fechamento após QA estático')
+
+  const trail = trailOf(w2, m2.id)
+  const qaTests = trail.filter((e) => e.type === 'tests.executed' && e.agentId === 'qa')
+  assert.equal(qaTests.length, 1)
+  assert.equal(qaTests[0].evidence, 'unavailable')
+  assert.equal(qaTests[0].data.staticReviewOnly, true)
+  const verdict = trail.find((e) => e.type === 'verdict.declared')!
+  assert.equal(verdict.data.testsExecutedBySystem, false)
+  assert.equal(verdict.data.staticReviewOnly, true)
 })

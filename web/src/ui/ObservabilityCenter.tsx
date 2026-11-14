@@ -584,7 +584,8 @@ export function ObservabilityCenter({
                 const cfg = configs.find((c) => c.agentId === selectedAgentId)
                 const liveAgent = agents.find((a) => a.id === selectedAgentId)
                 const agentEvents = events.filter((e) => e.agentId === selectedAgentId)
-                const testsExecuted = agentEvents.find((e) => e.type === 'tests.executed')
+                const testsExecutedObserved = agentEvents.find((e) => e.type === 'tests.executed' && e.evidence === 'observed')
+                const testsExecutedUnavailable = agentEvents.find((e) => e.type === 'tests.executed' && e.evidence === 'unavailable')
                 const testsDeclared = agentEvents.find((e) => e.type === 'tests.declared')
                 const cliFinished = agentEvents.find((e) => e.type === 'cli.finished')
 
@@ -641,14 +642,14 @@ export function ObservabilityCenter({
                       {/* Evidências de Testes */}
                       <section className="obs-section-box">
                         <h5>Evidência de Testes</h5>
-                        {testsExecuted ? (
+                        {testsExecutedObserved ? (
                           <div className="obs-ev-box ev-box-observed">
                             <span className="obs-badge-icon">●</span>
                             <div>
                               <strong>Testes observados pelo sistema</strong>
-                              <p>{testsExecuted.summary}</p>
-                              {Boolean(testsExecuted.data?.command) && (
-                                <small>Comando: <code>{String(testsExecuted.data?.command)}</code></small>
+                              <p>{testsExecutedObserved.summary}</p>
+                              {Boolean(testsExecutedObserved.data?.command) && (
+                                <small>Comando: <code>{String(testsExecutedObserved.data?.command)}</code></small>
                               )}
                             </div>
                           </div>
@@ -658,6 +659,14 @@ export function ObservabilityCenter({
                             <div>
                               <strong>Testes declarados pelo agente — execução não verificada</strong>
                               <p>{testsDeclared.summary}</p>
+                            </div>
+                          </div>
+                        ) : testsExecutedUnavailable ? (
+                          <div className="obs-ev-box ev-box-unavailable">
+                            <span className="obs-badge-icon">○</span>
+                            <div>
+                              <strong>Inspeção estática — testes não executados pelo sistema</strong>
+                              <p>{testsExecutedUnavailable.summary}</p>
                             </div>
                           </div>
                         ) : (

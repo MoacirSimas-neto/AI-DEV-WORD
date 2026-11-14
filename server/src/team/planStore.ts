@@ -292,7 +292,9 @@ export class PlanStore extends EventEmitter {
       const live = siblings.find((s) => s.status === 'approved' || s.status === 'running' || s.status === 'completed')
       if (live) return { step: live, applied: false }
       if (mission.phase !== 'awaiting_decision') throw new Error('A missão não está aguardando a sua decisão.')
-      if (step.status !== 'interrupted' && step.status !== 'failed') throw new Error('Só um passo interrompido ou que falhou pode ser executado de novo.')
+      if (step.status !== 'interrupted' && step.status !== 'failed' && step.status !== 'blocked') {
+        throw new Error('Só um passo bloqueado, interrompido ou que falhou pode ser executado de novo.')
+      }
       const attempt = Math.max(...siblings.map((s) => s.attempt ?? 1)) + 1
       const inserted = this.db
         .prepare(
@@ -315,7 +317,7 @@ export class PlanStore extends EventEmitter {
     return this.changed(step.missionId, step)
   }
 
-  finishStep(stepId: number, status: 'completed' | 'failed' | 'interrupted' | 'cancelled', outcome: { result?: string; error?: string } = {}): PlannedStep {
+  finishStep(stepId: number, status: 'completed' | 'blocked' | 'failed' | 'interrupted' | 'cancelled', outcome: { result?: string; error?: string } = {}): PlannedStep {
     const step = this.getStep(stepId)
     if (!step || step.status !== 'running' || !canStepTransition(step.status, status)) throw new Error('Este passo não está em execução.')
     this.db

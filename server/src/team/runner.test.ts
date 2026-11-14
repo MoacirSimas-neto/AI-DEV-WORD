@@ -13,7 +13,7 @@ import { HistoryStore } from '../history/store.ts'
 import { HUMAN, MemoryStore } from '../memory/store.ts'
 import { ProjectStore } from '../projects/store.ts'
 import { TaskStore } from '../tasks/store.ts'
-import { MAX_ATTEMPTS, TeamRunner, getStepCliAndArgs } from './runner.ts'
+import { MAX_ATTEMPTS, TeamRunner, codexChildEnv, getStepCliAndArgs } from './runner.ts'
 
 test('TeamRunner fluxo completo: planejar -> aprovar -> desenvolver -> revisar', async () => {
   const tmp = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'aidw-team-test-')))
@@ -1304,4 +1304,17 @@ test('cancelar a missão com CLI ativo encerra o processo real (guardado) e regi
     setSupervisor(null)
     await supervisor.close()
   }
+})
+
+test('codexChildEnv remove WindowsApps do PATH e prioriza WindowsPowerShell apenas no Windows', () => {
+  const input: NodeJS.ProcessEnv = {
+    SystemRoot: 'C:\\Windows',
+    Path: 'C:\\Users\\netos\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\netos\\AppData\\Local\\Microsoft\\WindowsApps\\Microsoft.PowerShell_8wekyb3d8bbwe;C:\\Program Files\\nodejs',
+  }
+  const winEnv = codexChildEnv(input, 'win32')
+  assert.ok(winEnv)
+  assert.equal(winEnv.Path, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0;C:\\Program Files\\nodejs')
+  assert.equal('PATH' in winEnv, false)
+  assert.match(input.Path!, /WindowsApps/) // não muta o objeto original
+  assert.equal(codexChildEnv(input, 'linux'), undefined)
 })

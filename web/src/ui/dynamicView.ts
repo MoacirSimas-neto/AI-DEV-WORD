@@ -30,6 +30,7 @@ export const STEP_STATUS_LABEL: Record<StepStatus, string> = {
   approved: 'Aprovado',
   running: 'Em execução',
   completed: 'Concluído',
+  blocked: 'Bloqueado',
   failed: 'Falhou',
   interrupted: 'Interrompido',
   cancelled: 'Cancelado',
@@ -207,7 +208,7 @@ export function groupSteps(steps: PlannedStep[]): StepGroups {
     else {
       const deps = s.dependsOn.map((d) => statusOf(s.revision, d))
       if (deps.every((d) => d === 'completed')) groups.ready.push(s)
-      else if (deps.some((d) => d === 'failed' || d === 'interrupted' || d === 'cancelled')) groups.blocked.push(s)
+      else if (deps.some((d) => d === 'blocked' || d === 'failed' || d === 'interrupted' || d === 'cancelled')) groups.blocked.push(s)
       else groups.waiting.push(s)
     }
   }
