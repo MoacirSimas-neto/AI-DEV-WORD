@@ -22,14 +22,26 @@ Agentes padrão: **Arquiteto** (Tech Lead / planejamento), **Dev** (implementaç
 
 ## Funcionalidades
 
-- **Escritório 2D (Phaser):** agentes com estado ao vivo (planejando, executando, revisando, aguardando aprovação), dock de agentes e objetos clicáveis que levam às telas.
-- **Terminais:** sessão PTY real do CLI de cada agente, sempre na pasta do projeto ativo.
-- **Projetos e tarefas:** pastas autorizadas por você, com tarefas por projeto.
-- **Missões em dois modos** (veja abaixo): clássico e dinâmico.
-- **Skills e memória:** skills (instruções reutilizáveis) por agente e memória do projeto/equipe. O que entra em cada prompt fica registrado na missão.
+- **Escritório 2D (Phaser):** agentes com estado ao vivo (planejando, executando, revisando, aguardando aprovação), dock de agentes, terminal inferior integrado (`Ctrl+J`) e objetos clicáveis que levam às telas.
+- **Central Unificada da Equipe:** gestão integrada de **Agentes** (padrão e personalizados com especializações e avatares), **Skills** (biblioteca com importação Markdown desativada por padrão) e **Memória** (escopo por projeto ou equipe).
+- **Terminais:** sessão PTY real do CLI de cada agente e abas de shell pessoal no dock inferior, sempre na pasta do projeto ativo.
+- **Projetos e tarefas:** pastas autorizadas por você, com tarefas por projeto e assistente de primeira execução (First-Run Wizard).
 - **Observabilidade:** trilha de eventos por missão (início/fim de CLI, delegação, propostas, decisões, arquivos alterados), com a natureza de cada evidência: observado pelo sistema, declarado pelo agente ou incluído no contexto.
 - **Git Control:** estado do repositório, diff, commit e push com pré-visualização.
 - **Recuperação de missões** após fechamento ou queda do app.
+- **Aplicativo Desktop (Tauri 2):** sidecar Node.js empacotado, token Bearer local e suporte a build Windows (NSIS).
+
+## Arquitetura do Sistema
+
+```mermaid
+flowchart LR
+  UI["React + Vite + Phaser (WebView2)"] <-->|"WebSocket + HTTP (Bearer + Origin)"| BE["Node.js Backend (127.0.0.1:4517)"]
+  Tauri["Tauri 2 / Rust Shell"] -->|"Spawna sidecar + token"| BE
+  BE --> SQLite["SQLite (WAL)"]
+  BE --> PTY["node-pty / Guardião"]
+  PTY --> CLIs["CLIs Oficiais (codex / gemini / agy)"]
+  BE --> Git["Git Service (workspace ativo)"]
+```
 
 ## Chat com o Tech Lead (entrada principal)
 
@@ -148,4 +160,9 @@ No Windows, o `agy.cmd` ou `agy.bat` simulado recebe as opções até `-p` na li
 - Backends de versões anteriores à trava de instância não a respeitam. Não rode versões antigas e novas na mesma pasta de dados.
 - O escritório Phaser é **desmontado ao trocar de aba** e remontado em cerca de 0,1 s ao voltar. Isso foi decidido na Etapa 11.2 depois de comparar com a opção de mantê-lo montado, oculto e com o loop suspenso. Medidas no Chromium: CPU oculto ~0% nas duas; troca de aba 94 ms contra 31 ms; memória do navegador fora do escritório 371–416 MB contra 441 MB. Mantê-lo montado também manteria vivos o painel lateral e o terminal. A memória em repouso pesou mais que os 60 ms de troca.
 - Os CLIs não informam custo nem tokens. Os limites contam chamadas e passos.
-- Sem empacotamento desktop ainda.
+- Empacotamento desktop Windows via Tauri 2 (`npm run tauri:build`) com sidecar Node.js; distribuição pública continua condicionada a assinatura de código e validação externa em máquinas limpas.
+
+## Documentação e Portfólio
+
+- Arquitetura e segurança: [docs/architecture/TAURI-DESKTOP-ARCHITECTURE.md](docs/architecture/TAURI-DESKTOP-ARCHITECTURE.md), [docs/architecture/DESKTOP-SECURITY-MODEL.md](docs/architecture/DESKTOP-SECURITY-MODEL.md)
+- Roteiro de demonstração e textos de portfólio: [docs/PORTFOLIO-SHOWCASE.md](docs/PORTFOLIO-SHOWCASE.md)
