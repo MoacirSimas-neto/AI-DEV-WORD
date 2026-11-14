@@ -1,16 +1,28 @@
-# AI Dev World (v1.0.0) — Showcase & Portfólio
+# AI Dev World · Projeto de portfólio
 
-## O projeto
+O **AI Dev World** é um aplicativo desktop para coordenar agentes de IA durante o desenvolvimento de software. O problema que motivou o projeto foi acompanhar o que cada agente faz no mesmo repositório e decidir, antes da execução, quais alterações podem ocorrer.
 
-**AI Dev World** é um aplicativo desktop **local-first** para desenvolvimento supervisionado por agentes de IA. Em vez de substituir o desenvolvedor ou depender de APIs proprietárias extras, ele transforma um escritório 2D interativo em uma estação de trabalho onde uma equipe de especialistas colabora via **CLIs oficiais já instalados e autenticados pelo usuário** (`codex`, `gemini` e `agy`), sempre sob **aprovações humanas verificáveis**.
+[Versão 1.0.0 para Windows](https://github.com/MoacirSimas-neto/AI-DEV-WORD/releases/tag/v1.0.0) · [README e instruções de execução](../README.md) · [Arquitetura desktop](architecture/TAURI-DESKTOP-ARCHITECTURE.md) · [Modelo de segurança](architecture/DESKTOP-SECURITY-MODEL.md)
 
-- **Escritório interativo (Phaser 3):** acompanhamento visual do estado de cada agente (planejando, executando, revisando, aguardando decisão), dock de atalhos e objetos clicáveis.
-- **Equipe de especialistas:** **Arquiteto** (Tech Lead), **Dev** (Developer), **QA** (revisão de código e evidências) e **Tutor**, além de agentes personalizados com especializações em Markdown.
-- **Delegação e orquestração dinâmica:** o Tech Lead propõe equipe, passos e dependências em formato estruturado (`<<<PROPOSTA ... PROPOSTA>>>`) validado estritamente pelo backend antes de ir para decisão humana.
-- **Aprovações humanas nativas:** decisões de missão (`proposal-decide`, `mission-close`) e aprovações de memória (`memory-approve`) exigem confirmação em diálogo nativo do Tauri com nonce criptográfico de uso único vinculado à operação.
-- **Integração com CLIs reais:** execução headless supervisionada e terminais PTY reais (`node-pty`) no diretório do repositório ativo. O uso dos modelos depende das contas, cotas e condições de cada provedor.
+![Escritório 2D com os agentes Arquiteto, Dev, QA e Tutor](screenshots/02-escritorio-2d.png)
 
----
+## Uma missão na prática
+
+1. **Planejar.** No chat, o usuário discute uma tarefa com o Tech Lead. Ao preparar uma missão, o agente propõe etapas, responsáveis e dependências. O backend valida a proposta.
+2. **Decidir.** O usuário aprova, ajusta ou rejeita a proposta. Decisões protegidas exigem confirmação em um diálogo nativo do aplicativo.
+3. **Executar.** Os agentes trabalham no repositório ativo via Codex CLI, Gemini CLI ou Antigravity CLI. O escritório mostra o estado de cada agente e o terminal integrado acompanha a execução.
+4. **Revisar.** O QA inspeciona o código e as evidências. O usuário pode abrir o diff no painel Git e consultar a trilha de eventos para ver o que o sistema observou e o que o agente relatou.
+
+## Decisões de engenharia
+
+| Decisão | O que resolve |
+| --- | --- |
+| **Backend local e SQLite** | Mantém a execução e o histórico na máquina. As CLIs usam as sessões e cotas dos respectivos provedores. |
+| **Aprovação nativa no Tauri** | Vincula a confirmação do usuário à operação protegida, com um identificador de uso único. |
+| **Verificação de alterações com SHA-256** | Detecta mudanças nos arquivos monitorados durante etapas que deveriam ser somente leitura e interrompe a missão quando isso ocorre. |
+| **Trilha de eventos por missão** | Distingue evidências observadas pelo sistema, relatos dos agentes e informações indisponíveis. |
+
+A versão 1.0.0 tem instalador Windows x64 sem assinatura digital. O QA faz revisão estática. A execução autônoma de testes reais pelo QA ainda não foi comprovada nessa versão.
 
 ## Recursos principais
 
